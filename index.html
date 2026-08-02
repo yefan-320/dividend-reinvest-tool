@@ -135,13 +135,21 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 <div class="foot">
   <b>数据来源：</b>东方财富（分红派息）、腾讯行情（日K不复权）。<br>
   <b>模型假设：</b>① 买入日按收盘价一次性建仓，A股整手规则（100股整数倍，不足一手的零钱存入现金池）；② 分红先入现金池，够一手（100股）时按除息日收盘价买入，零钱继续留存；③ 持有超 1 年免红利税，忽略税费；④ 分红率(相对投入) = 当年分红 ÷ (初始本金+截至当年累计复投金额)；⑤ 分红率(相对本金) = 当年分红 ÷ 初始本金。<br>
-  <b>风险提示：</b>历史数据回测不代表未来收益，本工具仅供学习研究，不构成投资建议。
+  <b>风险提示：</b>历史数据回测不代表未来收益，本工具仅供学习研究，不构成投资建议。<br>
+  <span id="appVer" style="color:#d9a441"></span>
 </div>
 </div>
 
 <script src="demo-data.js"></script>
 <script>
 /* ================= 工具函数 ================= */
+const APP_VERSION = 'v1.4.0';
+/* 全局错误捕获：出问题时直接显示在状态栏，方便排查 */
+window.onerror = (msg, src, line, col, err)=>{
+  const el = $('status');
+  if(el){ el.textContent = '❌ 页面错误: ' + msg + '（行 ' + line + '）'; el.className = 'status err'; }
+  return false;
+};
 const fmt = (n, d=2) => (n==null?'—':Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}));
 const fmtPct = (n, d=2) => (n==null?'—':(n*100).toFixed(d)+'%');
 const $ = id => document.getElementById(id);
@@ -695,6 +703,10 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
     if(/^\d{6}$/.test(code) && code !== '600036') return run('live');
     return run('demo');
   };
+  // 版本号
+  const ver = $('appVer');
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-03 · 若页面异常请强制刷新（下拉或清除缓存）';
+
   // URL 带 code → 自动联网回测该股票；否则离线演示
   if(params.get('code')) run('live'); else run('demo');
 })();
