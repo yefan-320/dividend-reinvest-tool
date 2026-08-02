@@ -10,9 +10,10 @@
 - `kline.json` / `dividends.json` — 东财原始数据缓存
 
 ## 使用
-1. 本地：`python3 -m http.server 8321` → 打开 `http://localhost:8321`（局域网 `http://<本机IP>:8321`）
-2. 公网隧道：`cloudflared tunnel --url http://localhost:8321` → 日志里的 trycloudflare.com URL，手机 4G/5G 可访问（Mac 需开机）
-3. 输入 6 位股票代码 → 点「回测（联网拉最新数据）」；或点「用招行演示数据」离线演示
+- **永久地址（Mac 关机也可访问）：** https://yefan-320.github.io/dividend-reinvest-tool/ （GitHub Pages，2026-08-03 部署）
+- 本地调试：`python3 -m http.server 8321` → 打开 `http://localhost:8321`（局域网 `http://<本机IP>:8321`）
+- 输入 6 位股票代码 → 点「回测（联网拉最新数据）」；或点「用招行演示数据」离线演示
+- **更新部署：** 修改文件后 `git add -A && git commit -m 'update' && git push`，GitHub Pages 自动重新构建（约 1 分钟）
 
 ## 模型口径
 - **默认参数：初始本金 100 万、买入日期 10 年前、红利复投开**，打开页面即自动演示招行完整结果
