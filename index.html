@@ -33,6 +33,15 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .field input:focus{border-color:var(--gold)}
 .hint{font-size:11px;color:var(--sub);margin-top:4px;min-height:14px}
 .hint.ok{color:var(--green)} .hint.err{color:var(--red)}
+.quick{display:flex;gap:6px;margin-top:6px}
+.quick button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--sub);border-radius:6px;padding:5px 0;font-size:11px;cursor:pointer}
+.quick button:active{background:var(--line);color:var(--txt)}
+.gauge-row{display:flex;gap:10px}
+.gauge-box{flex:1;text-align:center}
+.chart.gauge{height:170px}
+.gauge-label{font-size:11px;color:var(--sub);margin-top:2px}
+.gauge-note{font-size:11px;color:var(--sub);text-align:center;margin-top:8px;line-height:1.6}
+.btn[disabled]{opacity:.6}
 .btn{background:linear-gradient(135deg,#d9a441,#c0862e);color:#201703;border:none;border-radius:10px;padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer;width:100%}
 .btn:active{opacity:.85}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--sub);font-weight:500}
@@ -64,7 +73,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 <div class="wrap">
 <header>
   <h1>💰 红利复投<span class="g">回测</span>工具</h1>
-  <span class="sub">A股 · 价值投资 · 无手续费简化模型</span>
+  <span class="sub" id="headerInfo">A股 · 价值投资 · 整手模型</span>
 </header>
 
 <div class="card">
@@ -72,7 +81,9 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
   <div class="row">
     <div class="field"><label>股票代码</label><input id="code" value="600036" inputmode="numeric" placeholder="如 600036 / 000001"><div class="hint" id="codeHint"></div></div>
     <div class="field"><label>初始本金（元）</label><input id="principal" value="1000000" inputmode="decimal"></div>
-    <div class="field"><label>买入日期</label><input id="buyDate" type="date"></div>
+    <div class="field"><label>买入日期</label><input id="buyDate" type="date">
+      <div class="quick"><button type="button" data-y="1">1年前</button><button type="button" data-y="3">3年前</button><button type="button" data-y="5">5年前</button><button type="button" data-y="10">10年前</button></div>
+    </div>
   </div>
   <div class="switch"><input type="checkbox" id="reinvest" checked><label for="reinvest">红利再投资（分红按除息日收盘价买入，碎股模型）</label></div>
   <div class="btnrow">
@@ -80,6 +91,15 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
     <button class="btn ghost" id="btnDemo">用招行演示数据</button>
   </div>
   <div class="status" id="status">页面加载中…</div>
+</div>
+
+<div class="card" id="cardGauge" style="display:none">
+  <h2>最新分红率（最近年度分红 ÷ 基数）</h2>
+  <div class="gauge-row">
+    <div class="gauge-box"><div class="chart gauge" id="chartGauge1"></div><div class="gauge-label">相对投入（本金+累计复投）</div></div>
+    <div class="gauge-box"><div class="chart gauge" id="chartGauge2"></div><div class="gauge-label">相对本金（初始本金）</div></div>
+  </div>
+  <div class="gauge-note" id="gaugeNote"></div>
 </div>
 
 <div class="card" id="cardSummary" style="display:none">
@@ -430,7 +450,7 @@ function renderAllFull(res, name, res2){
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
-  ['cardSummary','cardAsset','cardDiv','cardRate','cardShares','cardTable'].forEach(id=>$(id).style.display='block');
+  ['cardSummary','cardGauge','cardAsset','cardDiv','cardRate','cardShares','cardTable'].forEach(id=>$(id).style.display='block');
 
   // 1. 资产走势（日K可能点多，抽样到最多 ~1500 点）
   const daily = res.daily;
@@ -439,7 +459,15 @@ function renderAllFull(res, name, res2){
   const sd2 = res2 ? res2.daily.filter((_,i)=> i%step===0) : null;
   const ch1 = ensureChart('chartAsset');
   ch1.setOption({
-    backgroundColor:'transparent', tooltip:TOOLTIP, legend:{textStyle:{color:'#8fa69c',fontSize:11}, top:0},
+    backgroundColor:'transparent',
+    tooltip:Object.assign({}, TOOLTIP, { formatter: params => {
+      const x = sd[params[0].dataIndex];
+      let s = '<b>'+x.date+'</b><br/>';
+      params.forEach(p=>{ s += p.marker + p.seriesName + '：<b>'+fmt(p.value,0)+'</b> 元<br/>'; });
+      s += '<span style="color:#8fa69c">持股 '+fmt(x.shares,0)+' 股 · 现金池 '+fmt(x.cashPool,0)+' 元 · 累计投入 '+fmt(x.invested,0)+' 元</span>';
+      return s;
+    }}),
+    legend:{textStyle:{color:'#8fa69c',fontSize:11}, top:0},
     grid:{left:50,right:14,top:30,bottom:24},
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
     yAxis:Object.assign({type:'value', scale:true, axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}, AXIS),
@@ -488,14 +516,40 @@ function renderAllFull(res, name, res2){
     series:[{name:'持股数', type:'line', showSymbol:false, data:sd.map(x=>+x.shares.toFixed(2)), lineStyle:{width:2,color:'#5aa9e6'}, areaStyle:{color:'rgba(90,169,230,.12)'}}]
   });
 
+  // 4.5 最新分红率仪表盘（最近年度）
+  const lastY = yrs.length ? yrs[yrs.length-1] : null;
+  if(lastY && lastY.rate != null){
+    $('cardGauge').style.display = 'block';
+    const v1 = +(lastY.rate*100).toFixed(2), v2 = +(lastY.rate0*100).toFixed(2);
+    const max = Math.max(20, Math.ceil(Math.max(v1,v2)/5)*5);
+    const mkGauge = (elId, v, color) => ensureChart(elId).setOption({
+      backgroundColor:'transparent',
+      series:[{ type:'gauge', min:0, max, startAngle:210, endAngle:-30, radius:'100%',
+        progress:{show:true, width:13, itemStyle:{color}},
+        axisLine:{lineStyle:{width:13, color:[[1,'#22322c']]}},
+        axisTick:{show:false}, splitLine:{show:false}, axisLabel:{show:false}, pointer:{show:false},
+        detail:{valueAnimation:true, formatter: x=> x.toFixed(2)+'%', fontSize:21, fontWeight:700, color, offsetCenter:[0,'-8%']},
+        data:[{value:v}]
+      }]
+    });
+    mkGauge('chartGauge1', v1, '#d9a441');
+    mkGauge('chartGauge2', v2, '#3fbf7f');
+    $('gaugeNote').textContent = '最新年度（'+lastY.year+'）分红 ' + fmt(lastY.divTotal,0) + ' 元 ｜ 相对投入基数 ' + fmt(lastY.investedEnd,0) + ' 元 ｜ 相对本金基数 ' + fmt(res.principal,0) + ' 元';
+  } else {
+    $('cardGauge').style.display = 'none';
+  }
+
+  // 顶部摘要
+  $('headerInfo').textContent = name + ' · ' + fmt(res.principal,0) + '元 · ' + res.buyDateReal + '买入' + ($('reinvest').checked ? ' · 复投' : ' · 不复投');
+
   // 5. 明细表
   const rows = yrs.map(y => `
     <tr>
       <td>${y.year}</td>
       <td>${fmt(y.divTotal,0)}</td>
       <td>${y.dps!=null?fmt(y.dps,3):'—'}</td>
-      <td>${fmtPct(y.rate)}</td>
-      <td>${fmtPct(y.rate0)}</td>
+      <td style="color:#d9a441">${fmtPct(y.rate)}</td>
+      <td style="color:#3fbf7f">${fmtPct(y.rate0)}</td>
       <td>${y.sharesStart!=null?fmt(y.sharesStart,0):'—'}</td>
       <td>${y.sharesEnd!=null?fmt(y.sharesEnd,0):'—'}</td>
       <td>${y.valueEnd!=null?fmt(y.valueEnd,0):'—'}</td>
@@ -518,26 +572,29 @@ async function run(sim, note){
   if(!(principal>0)) return setStatus('请输入正确的初始本金', true);
   if(!buyDate) return setStatus('请选择买入日期', true);
 
-  if(sim==='demo'){
-    setStatus('使用内置招行演示数据…');
-    const d = window.DEMO_DATA;
-    const closes = {}; d.closes.forEach(x=>closes[x[0]]=x[1]);
-    const res = simulate(principal, buyDate, reinvest, closes, d.dividends);
-    const res2 = simulate(principal, buyDate, false, closes, d.dividends);   // 不复投对比
-    renderAll(res, d.name, res2);
-    setStatus((note||'✅ ') + '演示数据（截至 '+res.final.lastDate+'，收盘 '+fmt(res.final.lastClose,2)+' 元）');
-    return;
-  }
+  const btn = $('btnRun');
+  btn.disabled = true; btn.textContent = '⏳ 回测中…';
+  try{
+    if(sim==='demo'){
+      setStatus('使用内置招行演示数据…');
+      const d = window.DEMO_DATA;
+      const closes = {}; d.closes.forEach(x=>closes[x[0]]=x[1]);
+      const res = simulate(principal, buyDate, reinvest, closes, d.dividends);
+      const res2 = simulate(principal, buyDate, false, closes, d.dividends);   // 不复投对比
+      renderAll(res, d.name, res2);
+      setStatus((note||'✅ ') + '演示数据（截至 '+res.final.lastDate+'，收盘 '+fmt(res.final.lastClose,2)+' 元）');
+      return;
+    }
 
-  setStatus('正在获取 '+code+' 数据…');
-  let name = code, divs = [], divErr = null;
-  try{
-    [name, divs] = await Promise.all([fetchName(code), fetchDividends(code)]);
-  }catch(e){ divErr = e; }
-  setStatus(name+'：分红数据 '+divs.length+' 条 ✓，拉取行情…');
-  try{
-    const g = guessSec(code);
-    const closes = await fetchKline(g.tx, buyDate, todayStr());
+    setStatus('正在获取 '+code+' 数据…');
+    let name = code, divs = [], divErr = null;
+    try{
+      [name, divs] = await Promise.all([fetchName(code), fetchDividends(code)]);
+    }catch(e){ divErr = e; }
+    setStatus(name+'：分红数据 '+divs.length+' 条 ✓，拉取行情…');
+    try{
+      const g = guessSec(code);
+      const closes = await fetchKline(g.tx, buyDate, todayStr());
     const cnt = Object.keys(closes).length;
     if(!cnt){
       setStatus('⚠️ 实时行情获取失败（腾讯/新浪接口均不可用），已自动回退招行演示数据，可稍后重试', true);
@@ -553,6 +610,9 @@ async function run(sim, note){
   }catch(e){
     setStatus('⚠️ 回测出错：'+e.message+'，已自动回退招行演示数据', true);
     return run('demo', '⚠️ 回测出错已回退：');
+  }
+  }finally{
+    btn.disabled = false; btn.textContent = '▶ 回测（联网拉最新数据）';
   }
 }
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -592,11 +652,42 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   input.dispatchEvent(new Event('input'));   // 初始化时也查一次（默认600036）
 })();
 
-/* 初始化：默认买入日期 = 10 年前今天 */
+/* 初始化：URL 参数优先 → localStorage 兜底 → 默认 10 年前 */
 (function(){
-  const d = new Date();
-  d.setFullYear(d.getFullYear()-10);
-  $('buyDate').value = d.toISOString().slice(0,10);
+  const params = new URLSearchParams(location.search);
+  let code = params.get('code'), p = params.get('p'), d = params.get('d'), r = params.get('r');
+  try{
+    const s = JSON.parse(localStorage.getItem('divtool_params')||'{}');
+    if(!code) code = s.code||'';
+    if(!p) p = s.p||'';
+    if(!d) d = s.d||'';
+    if(r==null && s.reinvest!=null) r = s.reinvest;
+  }catch(e){}
+  if(/^\d{6}$/.test(code||'')) $('code').value = code;
+  if(parseFloat(p)>0) $('principal').value = p;
+  const today = new Date();
+  if(d && /^\d{4}-\d{2}-\d{2}$/.test(d)) $('buyDate').value = d;
+  else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = today.toISOString().slice(0,10); }
+  if(r!=null) $('reinvest').checked = (r !== '0');
+
+  // 记住参数（刷新/重开不丢）
+  const saveParams = ()=>{ try{ localStorage.setItem('divtool_params', JSON.stringify({ code:$('code').value.trim(), p:$('principal').value, d:$('buyDate').value, reinvest:$('reinvest').checked?'1':'0' })); }catch(e){} };
+  ['code','principal','buyDate'].forEach(id=>$(id).addEventListener('change', saveParams));
+  $('reinvest').addEventListener('change', saveParams);
+
+  // 横竖屏/窗口变化时图表自适应
+  window.addEventListener('resize', ()=>{ Object.keys(charts).forEach(k=>{ try{ charts[k].resize(); }catch(e){} }); });
+
+  // 买入日期快捷按钮
+  document.querySelectorAll('.quick button').forEach(b=>{
+    b.onclick = ()=>{
+      const t = new Date();
+      t.setFullYear(t.getFullYear() - parseInt(b.dataset.y,10));
+      $('buyDate').value = t.toISOString().slice(0,10);
+      saveParams();
+    };
+  });
+
   $('btnRun').onclick = ()=> run('live');
   $('btnDemo').onclick = ()=>{
     // 输入其他代码时，演示按钮 = 联网查询；招行则用内置离线数据
@@ -604,7 +695,8 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
     if(/^\d{6}$/.test(code) && code !== '600036') return run('live');
     return run('demo');
   };
-  run('demo');
+  // URL 带 code → 自动联网回测该股票；否则离线演示
+  if(params.get('code')) run('live'); else run('demo');
 })();
 </script>
 </body>
