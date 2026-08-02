@@ -9,7 +9,11 @@
 - `test.js` — Node 单元测试（验证回测核心逻辑）
 - `kline.json` / `dividends.json` — 东财原始数据缓存
 
-## 使用
+## 功能
+- **最新分红率仪表盘**：最近年度分红率的双环形图（相对投入/相对本金）
+- **URL 分享**：`?code=600036&p=1000000&d=2016-08-03&r=1`，打开即自动回测对应股票
+- **参数记忆**：localStorage 记住代码/本金/日期/复投开关，刷新不丢（URL 参数优先）
+- 图表横竖屏自适应；买入日期快捷按钮（1/3/5/10 年前）；回测 loading 状态；资产图 tooltip 显示持股/现金池
 - **永久地址（Mac 关机也可访问）：** https://yefan-320.github.io/dividend-reinvest-tool/ （GitHub Pages，2026-08-03 部署）
 - 本地调试：`python3 -m http.server 8321` → 打开 `http://localhost:8321`（局域网 `http://<本机IP>:8321`）
 - 输入 6 位股票代码 → 点「回测（联网拉最新数据）」；或点「用招行演示数据」离线演示
@@ -37,10 +41,9 @@
 - 演示按钮动态化：输入 600036 显示「离线演示」；其他代码显示「查询 xxx（联网）」并直接联网回测
 - iOS Safari 对非 JS MIME 的 script 有拦截策略，JSONP 在个别浏览器可能失败，已用多源+回退覆盖
 
-## 重启命令（Mac 重启后）
+## 本地调试命令
 ```bash
 cd ~/Documents/招商银行红利复投工具
 python3 -m http.server 8321 &
-cloudflared tunnel --url http://localhost:8321 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
-grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /tmp/cloudflared.log | head -1
 ```
+（公网访问走 GitHub Pages 永久地址，无需隧道）
