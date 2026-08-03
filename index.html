@@ -96,8 +96,8 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 <div class="card" id="cardGauge" style="display:none">
   <h2 id="gaugeTitle">最新分红率（最近年度分红 ÷ 基数）</h2>
   <div class="gauge-row">
-    <div class="gauge-box"><div class="chart gauge" id="chartGauge1"></div><div class="gauge-label">相对投入（本金+累计复投）</div></div>
-    <div class="gauge-box"><div class="chart gauge" id="chartGauge2"></div><div class="gauge-label">相对本金（初始本金）</div></div>
+    <div class="gauge-box"><div class="chart gauge" id="chartGauge1"></div><div class="gauge-label" id="gaugeLabel1">相对投入（本金+累计复投）</div></div>
+    <div class="gauge-box"><div class="chart gauge" id="chartGauge2"></div><div class="gauge-label" id="gaugeLabel2">相对本金（初始本金）</div></div>
   </div>
   <div class="gauge-note" id="gaugeNote"></div>
 </div>
@@ -315,13 +315,14 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
   dividends.filter(x => x.ex >= buyDateReal).forEach(x => { (divByDate[x.ex] = divByDate[x.ex] || []).push(x); });
 
   const daily = [], years = {}, divEvents = [];
-  let divYearTotal = null, rateDenom = null, curYear = null;
+  let divYearTotal = null, rateDenom = null, curYear = null, divCountYear = 0;
 
   const finalizeYear = () => {
     if(curYear != null && divYearTotal != null){
       years[curYear] = Object.assign(years[curYear] || {}, {
         divTotal: divYearTotal,
         rate: rateDenom>0 ? divYearTotal/rateDenom : 0,
+        divCount: divCountYear,
       });
     }
   };
@@ -331,14 +332,14 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
     const ev = divByDate[d];
     if(ev && ev.length){
       const y = d.slice(0,4);
-      if(y !== curYear){ finalizeYear(); curYear = y; divYearTotal = 0; rateDenom = principal + reinvested; }
+      if(y !== curYear){ finalizeYear(); curYear = y; divYearTotal = 0; divCountYear = 0; rateDenom = principal + reinvested; }
       let cash = 0;
       ev.forEach(x => {
         cash += shares * x.dps;
         const bonus = x.song + x.zhuan;                 // 送转股（除权日复权，直接加股数，可产生零股）
         if(bonus > 0) shares += shares * bonus;
       });
-      divYearTotal += cash;
+      divYearTotal += cash; divCountYear++;
       divEvents.push({date:d, cash, year:y, sharesBefore:shares, rateAtDiv: rateDenom>0? cash/rateDenom : 0});
       cashPool += cash;                                  // 分红先入现金池
       if(reinvest && cash > 0){
@@ -363,7 +364,7 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
     const first = daily.filter(x => x.date.startsWith(y))[0];
     const sharesStart = first ? first.shares : null;
     return {
-      year:y, divTotal:rec.divTotal, rate:rec.rate,
+      year:y, divTotal:rec.divTotal, rate:rec.rate, divCount:rec.divCount || 0,
       rate0: principal>0 ? rec.divTotal/principal : 0,   // 初始分红率：当年分红 ÷ 初始本金
       sharesStart, sharesEnd: last? last.shares : null,
       valueEnd: last? last.value : null, investedEnd: last? last.invested : null,
@@ -416,23 +417,29 @@ const AXIS = { axisLine:{lineStyle:{color:'#3a4f46'}}, axisLabel:{color:'#8fa69c
 const TOOLTIP = { trigger:'axis', backgroundColor:'#1b2a25', borderColor:'#2a3d36', textStyle:{color:'#e8efe9', fontSize:12}, axisPointer:{lineStyle:{color:'#d9a441'}} };
 
 function renderAll(res, name, res2){
-  // 展示年度选择：最新年度分红率低于上一年时（分红频率/到账节奏影响），展示上一年数据
+  // 展示年度选择（双口径）：
+  // ① 相对投入：最新年度分红率低于上一年时（分红频率/到账节奏影响），展示上一年
+  // ② 相对本金：最新年度仅一次分红到账（可能还有一笔未到，数字不完整），展示上一年完整数据
   const yrs = res.years;
   const lastY = yrs.length ? yrs[yrs.length-1] : null;
   const prevY = yrs.length >= 2 ? yrs[yrs.length-2] : null;
-  let showY = lastY, rateNote = '';
+  let showY = lastY, showY0 = lastY, rateNote1 = '', rateNote2 = '';
   if(lastY && prevY && lastY.rate < prevY.rate){
     showY = prevY;
-    rateNote = '⚠️ 最新年度('+lastY.year+')分红率 '+(lastY.rate*100).toFixed(2)+'% 低于上一年('+prevY.year+') '+(prevY.rate*100).toFixed(2)+'%（受分红频率/到账节奏影响），已展示上一年数据';
+    rateNote1 = '⚠️ 相对投入：最新年度('+lastY.year+') '+(lastY.rate*100).toFixed(2)+'% 低于上一年('+prevY.year+') '+(prevY.rate*100).toFixed(2)+'%（分红频率/到账节奏影响），已展示上一年';
+  }
+  if(lastY && prevY && lastY.divCount <= 1){
+    showY0 = prevY;
+    rateNote2 = '⚠️ 相对本金：最新年度('+lastY.year+')仅 '+lastY.divCount+' 次分红到账（可能未完），已展示上一年('+prevY.year+')完整数据';
   }
   if(typeof echarts === 'undefined'){
     setStatus('⚠️ 图表库(ECharts)加载失败，仅显示文字数据。请检查网络后刷新', true);
-    renderStatsOnly(res, name, showY, rateNote);
+    renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2);
     return;
   }
-  renderAllFull(res, name, res2, showY, rateNote);
+  renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2);
 }
-function renderStatsOnly(res, name, showY, rateNote){
+function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const f = res.final;
   const stats = [
@@ -443,7 +450,8 @@ function renderStatsOnly(res, name, showY, rateNote){
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
     ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
-    ['最新分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
+    ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
+    ['分红率(相对本金)'+(showY0?' · '+showY0.year:''), fmtPct(showY0? showY0.rate0 : null), 'green'],
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
@@ -451,7 +459,7 @@ function renderStatsOnly(res, name, showY, rateNote){
   ['cardAsset','cardDiv','cardRate','cardShares','cardTable'].forEach(id=>$(id).style.display='none');
   window.scrollTo({top:0});
 }
-function renderAllFull(res, name, res2, showY, rateNote){
+function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   const f = res.final;
   // 概览卡
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
@@ -463,7 +471,8 @@ function renderAllFull(res, name, res2, showY, rateNote){
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
     ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
-    ['最新分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
+    ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
+    ['分红率(相对本金)'+(showY0?' · '+showY0.year:''), fmtPct(showY0? showY0.rate0 : null), 'green'],
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
@@ -533,11 +542,13 @@ function renderAllFull(res, name, res2, showY, rateNote){
     series:[{name:'持股数', type:'line', showSymbol:false, data:sd.map(x=>+x.shares.toFixed(2)), lineStyle:{width:2,color:'#5aa9e6'}, areaStyle:{color:'rgba(90,169,230,.12)'}}]
   });
 
-  // 4.5 最新分红率仪表盘（展示年度：最新 vs 上一年取较高者）
-  if(showY && showY.rate != null){
+  // 4.5 最新分红率仪表盘（双口径各自选择展示年度）
+  if(showY && showY.rate != null && showY0 && showY0.rate0 != null){
     $('cardGauge').style.display = 'block';
-    $('gaugeTitle').textContent = '最新分红率（'+showY.year+'年度 ÷ 基数）';
-    const v1 = +(showY.rate*100).toFixed(2), v2 = +(showY.rate0*100).toFixed(2);
+    $('gaugeTitle').textContent = '最新分红率（分红 ÷ 基数）';
+    $('gaugeLabel1').textContent = '相对投入（' + showY.year + '年度）';
+    $('gaugeLabel2').textContent = '相对本金（' + showY0.year + '年度）';
+    const v1 = +(showY.rate*100).toFixed(2), v2 = +(showY0.rate0*100).toFixed(2);
     const max = Math.max(20, Math.ceil(Math.max(v1,v2)/5)*5);
     const mkGauge = (elId, v, color) => ensureChart(elId).setOption({
       backgroundColor:'transparent',
@@ -551,7 +562,7 @@ function renderAllFull(res, name, res2, showY, rateNote){
     });
     mkGauge('chartGauge1', v1, '#d9a441');
     mkGauge('chartGauge2', v2, '#3fbf7f');
-    $('gaugeNote').textContent = (rateNote ? rateNote + ' ｜ ' : '') + showY.year + '年度分红 ' + fmt(showY.divTotal,0) + ' 元 ｜ 相对投入基数 ' + fmt(showY.investedEnd,0) + ' 元 ｜ 相对本金基数 ' + fmt(res.principal,0) + ' 元';
+    $('gaugeNote').textContent = (rateNote1 ? rateNote1 + ' ｜ ' : '') + (rateNote2 ? rateNote2 + ' ｜ ' : '') + showY.year + '分红 ' + fmt(showY.divTotal,0) + ' 元（基数 ' + fmt(showY.investedEnd,0) + '）· ' + showY0.year + '分红 ' + fmt(showY0.divTotal,0) + ' 元（基数 ' + fmt(res.principal,0) + '）';
   } else {
     $('cardGauge').style.display = 'none';
   }
