@@ -16,7 +16,7 @@ VER="$1"
 TODAY=$(date +%Y-%m-%d)
 echo "==> 发布版本: $VER ($TODAY)"
 
-# 2. 同步 APP_VERSION + 日期（防漏：主人两次抓页面版本号旧）
+# 2. 同步 APP_VERSION + 日期 + JS 版本参数（防漏：主人两次抓页面版本号旧 + 浏览器缓存旧 JS 导致修复不生效）
 python3 - "$VER" "$TODAY" <<'PY'
 import re, sys
 ver, today = sys.argv[1], sys.argv[2]
@@ -24,10 +24,12 @@ p = 'index.html'
 s = open(p).read()
 s2 = re.sub(r"const APP_VERSION = '[^']*';", f"const APP_VERSION = '{ver}';", s)
 s2 = re.sub(r"APP_VERSION \+ ' · [0-9-]+ ·", f"APP_VERSION + ' · {today} ·", s2)
+# cache-busting：三个本地 JS 加 ?v=版本（强制浏览器拉新，否则旧 JS 缓存让修复不生效）
+s2 = re.sub(r"(src=\"(?:demo-data|data-layer|views)\.js)(\?v=[^\"]*)?\"", lambda m: m.group(1) + f"?v={ver}\"", s2)
 if s2 == s:
     print('!! 版本号未找到匹配（检查 index.html APP_VERSION 格式）'); sys.exit(1)
 open(p, 'w').write(s2)
-print(f'==> index.html 版本号已更新: {ver} · {today}')
+print(f'==> index.html 版本号+JS版本参数已更新: {ver} · {today}')
 PY
 
 # 3. 语法检查
