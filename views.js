@@ -124,15 +124,13 @@
     el.innerHTML = '<div class="hint">除息日历加载中…</div>';
     const today = DL.todayStr();
     const future = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-    const items = [];
-    for (const it of wl) {
+    const items = (await Promise.all(wl.map(async it => {
       try {
         const divs = await DL.fetchDividendsOne(it.code);
-        divs.filter(d => d.ex && d.ex >= today && d.ex <= future && !d.pending).forEach(d => {
-          items.push({ ex: d.ex, name: it.name, profile: d.profile || `派${(d.dps * 10).toFixed(2)}元` });
-        });
-      } catch (e) { }
-    }
+        return divs.filter(d => d.ex && d.ex >= today && d.ex <= future && !d.pending)
+          .map(d => ({ ex: d.ex, name: it.name, profile: d.profile || `派${(d.dps * 10).toFixed(2)}元` }));
+      } catch (e) { return []; }
+    }))).flat();
     items.sort((a, b) => a.ex < b.ex ? -1 : 1);
     el.innerHTML = items.length
       ? items.slice(0, 10).map(i => `<div class="cal-item"><span class="cal-date">${i.ex}</span> ${i.name} · ${i.profile}</div>`).join('')
@@ -235,10 +233,12 @@
   }
 
   /* 股息率带状图：每年每股分红 ÷ 当年均价 → 分位带（简化：最近分红 ÷ 历史价格序列 = 滚动股息率带） */
+  let _yieldChart = null;
   function renderYieldBand(divs, kline) {
     const el = $('#diagYieldChart');
     if (!el || typeof echarts === 'undefined') return;
-    const chart = echarts.init(el);
+    if (_yieldChart) { _yieldChart.dispose(); _yieldChart = null; }   // 防重复 init（多次诊断同一只）
+    const chart = _yieldChart = echarts.init(el);
     const dates = Object.keys(kline).sort();
     if (!dates.length || !divs.length) { chart.dispose(); el.innerHTML = '<div class="hint">数据不足</div>'; return; }
     // 用最新年度每股分红（避免多年期送转复杂化，第一版用最近完整年度 dps）

@@ -584,7 +584,7 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   const f = res.final;
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金'+ (monthly>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
@@ -605,7 +605,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金'+ (monthly>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
@@ -745,6 +745,7 @@ async function run(sim, note){
   const buyDate = $('buyDate').value;
   const reinvest = $('reinvest').checked;
   const monthly = parseFloat($('monthly').value) || 0;
+  window.CURRENT_MONTHLY = monthly;
   if(!/^\d{6}$/.test(code)) return setStatus('请输入 6 位股票代码', true);
   if(!(principal>0)) return setStatus('请输入正确的初始本金', true);
   if(!buyDate) return setStatus('请选择买入日期', true);
@@ -833,12 +834,14 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
 (function(){
   const params = new URLSearchParams(location.search);
   let code = params.get('code'), p = params.get('p'), d = params.get('d'), r = params.get('r');
+  let savedM = null;
   try{
     const s = JSON.parse(localStorage.getItem('divtool_params')||'{}');
     if(!code) code = s.code||'';
     if(!p) p = s.p||'';
     if(!d) d = s.d||'';
     if(r==null && s.reinvest!=null) r = s.reinvest;
+    savedM = s.m;
   }catch(e){}
   if(/^\d{6}$/.test(code||'')) $('code').value = code;
   if(parseFloat(p)>0) $('principal').value = p;
@@ -846,7 +849,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   if(d && /^\d{4}-\d{2}-\d{2}$/.test(d)) $('buyDate').value = d;
   else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = today.toISOString().slice(0,10); }
   if(r!=null) $('reinvest').checked = (r !== '0');
-  const m = params.get('m') || s.m;
+  const m = params.get('m') || savedM;
   if(m && parseFloat(m)>=0) $('monthly').value = m;
 
   // 记住参数（刷新/重开不丢）；P2-27: 带版本号，旧版本参数提示重算

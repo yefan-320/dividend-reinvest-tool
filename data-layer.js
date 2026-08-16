@@ -379,31 +379,32 @@ async function getIndexKline(code, start, end) {
   return map;
 }
 
-/* ---------- watchlist（P1-22 写路径统一） ---------- */
-const WL_KEY = 'divtool:watchlist';
+/* ---------- watchlist（P1-22 写路径统一）
+ * v1.7.1 修复：改用 localStorage（自选清单=小型结构化数据；IndexedDB 写入失败会静默失效，headless 实测暴露）；
+ * IndexedDB 只保留给大缓存（K线/快照/分红） ---------- */
+const WL_KEY = 'divtool_watchlist_v1';
 const Watchlist = {
-  async list() {
-    const s = await cacheGet(WL_KEY);
-    return (s && s.data) || [];
+  list() {
+    try { return JSON.parse(localStorage.getItem(WL_KEY) || '[]'); }
+    catch (e) { return []; }
   },
-  async add(code, name, snapshot) {
-    const list = await this.list();
+  add(code, name, snapshot) {
+    const list = this.list();
     if (!list.find(x => x.code === code)) {
       list.push({ code, name: name || code, addedAt: Date.now(), snapshot: snapshot || null });
-      await cacheSet(WL_KEY, { ts: Date.now(), data: list });
+      try { localStorage.setItem(WL_KEY, JSON.stringify(list)); } catch (e) { }
     }
     return list;
   },
-  async remove(code) {
-    const list = await this.list();
-    const next = list.filter(x => x.code !== code);
-    await cacheSet(WL_KEY, { ts: Date.now(), data: next });
+  remove(code) {
+    const next = this.list().filter(x => x.code !== code);
+    try { localStorage.setItem(WL_KEY, JSON.stringify(next)); } catch (e) { }
     return next;
   },
-  async updateSnapshot(code, snapshot) {
-    const list = await this.list();
+  updateSnapshot(code, snapshot) {
+    const list = this.list();
     const it = list.find(x => x.code === code);
-    if (it) { it.snapshot = snapshot; await cacheSet(WL_KEY, { ts: Date.now(), data: list }); }
+    if (it) { it.snapshot = snapshot; try { localStorage.setItem(WL_KEY, JSON.stringify(list)); } catch (e) { } }
     return list;
   },
 };
