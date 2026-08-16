@@ -820,8 +820,18 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = today.toISOString().slice(0,10); }
   if(r!=null) $('reinvest').checked = (r !== '0');
 
-  // 记住参数（刷新/重开不丢）
-  const saveParams = ()=>{ try{ localStorage.setItem('divtool_params', JSON.stringify({ code:$('code').value.trim(), p:$('principal').value, d:$('buyDate').value, reinvest:$('reinvest').checked?'1':'0' })); }catch(e){} };
+  // 记住参数（刷新/重开不丢）；P2-27: 带版本号，旧版本参数提示重算
+  const saveParams = ()=>{ try{ localStorage.setItem('divtool_params', JSON.stringify({ code:$('code').value.trim(), p:$('principal').value, d:$('buyDate').value, reinvest:$('reinvest').checked?'1':'0', v:APP_VERSION })); }catch(e){} };
+  try{
+    const saved = JSON.parse(localStorage.getItem('divtool_params')||'{}');
+    if(saved.v && saved.v !== APP_VERSION){
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#5aa9e6;color:#0d1526;font-size:12px;padding:8px 12px;text-align:center;cursor:pointer';
+      bar.textContent = '🔁 参数来自 '+saved.v+'（送转口径已修正），已按新口径重算';
+      bar.onclick = ()=>bar.remove();
+      document.body.appendChild(bar);
+    }
+  }catch(e){}
   ['code','principal','buyDate'].forEach(id=>$(id).addEventListener('change', saveParams));
   $('reinvest').addEventListener('change', saveParams);
 

@@ -82,8 +82,16 @@
     if (!el) return;
     const wl = homeState.watchlist;
     if (!wl.length) {
-      el.innerHTML = `<div class="hint">还没有自选。搜索代码添加，或试试热门红利标的：<br>` +
-        ETF_PRESETS().filter(x => x.type === 'etf').slice(0, 4).map(x => `<button class="chip" data-code="${x.code}">${x.name}</button>`).join(' ') +
+      // P2-28: 优先用扫描器最近结果（动态），无缓存回落硬编码预设
+      const snapHit = await DL.cacheGet('snap:all');
+      let recs = null;
+      try {
+        const divs = await DL.cacheGet('scan:last');
+        if (divs && divs.data && divs.data.length) recs = divs.data.slice(0, 4);
+      } catch (e) { }
+      if (!recs) recs = ETF_PRESETS().filter(x => x.type === 'etf').slice(0, 4).map(x => ({ code: x.code, name: x.name }));
+      el.innerHTML = `<div class="hint">还没有自选。搜索代码添加，或试试：<br>` +
+        recs.map(x => `<button class="chip" data-code="${x.code}">${x.name}</button>`).join(' ') +
         `</div>`;
       el.querySelectorAll('.chip').forEach(b => b.onclick = () => addToWatchlist(b.dataset.code));
       return;
@@ -153,6 +161,7 @@
         rows.push({ code: d.code, name: d.name || s.name, price: s.price, yieldPct, marketCap: s.marketCap, pe: s.pe, pb: s.pb, industry: s.industry, div: d });
       }
       rows.sort((a, b) => b.yieldPct - a.yieldPct);
+      await DL.cacheSet('scan:last', { ts: Date.now(), data: rows.slice(0, 20).map(r => ({ code: r.code, name: r.name })) });
       el.innerHTML = `<div class="hint">✅ 筛选出 ${rows.length} 只（股息率≥${DL.CALIB.THRESHOLDS.divYield}%、市值≥50亿、排除ST；⚠️=亏损仍分红，可持续性风险请自行判断）</div>` +
         rows.slice(0, 50).map(r => `<div class="scan-row" data-code="${r.code}">
           <b>${r.name}</b> <span class="wl-code">${r.code}</span>

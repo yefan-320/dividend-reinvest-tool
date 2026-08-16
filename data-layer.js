@@ -217,7 +217,9 @@ async function fetchDividendsOne(code) {
   const d = await emQueue.push(() => jsonp(
     `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=${DIV_COLS}&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1&filter=${encodeURIComponent(filter)}`, 'callback'));
   const rows = (d && d.result && d.result.data) || [];
-  return dedupDividends(parseDivs(rows));
+  const out = dedupDividends(parseDivs(rows));
+  cacheSet('dv:' + code, { ts: Date.now(), data: out });   // P2-30: 供除权日缓存失效检查
+  return out;
 }
 
 /* ---------- K线（腾讯主源分段 / 新浪备源；缓存走 IndexedDB） ---------- */
@@ -253,6 +255,14 @@ async function fetchKlineSina(txPrefix) {
 async function getKline(code, start, end) {
   // 缓存键：code+start（端日期不参与键，避免同段多次拉）
   const key = 'kl:' + code + ':' + start;
+  // P2-30: 今日有除权（除息日=今天）→ 该代码 K 线缓存强制失效（qfq 序列当天重算）
+  try {
+    const today = todayStr();
+    const divHit = await cacheGet('dv:' + code);
+    if (divHit && divHit.data && divHit.data.some(d => d.ex === today)) {
+      await cacheSet(key, null);   // 置空触发重拉
+    }
+  } catch (e) { }
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.kline);
   if (hit) return hit.data;
   const g = guessSec(code);
