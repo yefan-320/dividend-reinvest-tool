@@ -179,6 +179,10 @@ body{padding-bottom:64px}
     <div class="field"><label>买入日期</label><input id="buyDate" type="date">
       <div class="quick"><button type="button" data-y="1">1年前</button><button type="button" data-y="3">3年前</button><button type="button" data-y="5">5年前</button><button type="button" data-y="10">10年前</button></div>
     </div>
+    <div class="field"><label>每月追加（元，0=不追加）</label><input id="monthly" value="0" inputmode="decimal">
+      <div class="quick"><button type="button" data-m="0">不追加</button><button type="button" data-m="5000">5千/月</button><button type="button" data-m="10000">1万/月</button><button type="button" data-m="20000">2万/月</button></div>
+      <div class="hint">每月首个交易日投入，不足一手自动累计下月；首月不追加</div>
+    </div>
   </div>
   <div class="switch"><input type="checkbox" id="reinvest" checked><label for="reinvest">红利再投资（分红按除息日收盘价买入，碎股模型）</label></div>
   <div class="btnrow">
@@ -239,12 +243,12 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.7.0';
+const APP_VERSION = 'v1.7.1';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
     const last = localStorage.getItem('divtool_ver_seen');
-    if(last && last !== APP_VERSION){
+    if(last && (last.startsWith('v1.6') || last === 'v1.5')){
       const bar = document.createElement('div');
       bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#c0862e;color:#201703;font-size:12px;padding:8px 12px;text-align:center;cursor:pointer';
       bar.textContent = '🛠 v1.7.0：送转股持股/收益口径已修正（旧结果可能与新计算有差异），刷新后自动重算';
@@ -256,6 +260,8 @@ const APP_VERSION = 'v1.7.0';
 })();
 /* 全局错误捕获：出问题时直接显示在状态栏，方便排查 */
 window.onerror = (msg, src, line, col, err)=>{
+  // v1.7.1：跨域脚本错误（Script error.）浏览器安全机制隐藏细节，无法定位且多为无害，仅 console 记录不打扰用户
+  if(msg === 'Script error.'){ console.warn('跨域脚本错误（已忽略）:', src); return false; }
   const el = $('status');
   if(el){ el.textContent = '❌ 页面错误: ' + msg + '（行 ' + line + '）'; el.className = 'status err'; }
   return false;
@@ -414,7 +420,7 @@ async function fetchKline(txPrefix, start, end){
    输入: principal 本金, buyDate, reinvest 是否复投, closes {date:close}, dividends [{ex,dps,song,zhuan}]
    输出: {daily:[{date,value,valueNo,invested,shares}], years:[...], divs:[...], final:{...}}
    分红率口径: 当年分红 ÷ (初始本金 + 截至当年首笔分红前累计复投金额) */
-function simulate(principal, buyDate, reinvest, closes, dividends){
+function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
   const dates = Object.keys(closes).sort();
   if(!dates.length) throw new Error('无行情数据');
   // 买入日：>= buyDate 的首个交易日
@@ -425,6 +431,8 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
   let shares = Math.floor(principal / buyPrice / 100) * 100;
   let cashPool = principal - shares * buyPrice;
   let reinvested = 0;                            // 累计实际用于复投买入的金额
+  let monthlyTotal = 0, lastMonth = null;        // v1.7.1: 每月追加（现金口径累计）
+  const monthlyFlows = [];                        // XIRR 现金流：每月追加日 -monthly
   const divByDate = {};
   dividends.filter(x => x.ex >= buyDateReal).forEach(x => { (divByDate[x.ex] = divByDate[x.ex] || []).push(x); });
 
@@ -467,7 +475,25 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
         }
       }
     }
-    daily.push({ date:d, value: shares*c + cashPool, invested: principal+reinvested, shares, cashPool });
+    // v1.7.1 每月追加：每月首个交易日（固定节奏不漂移 P1-24），首月不追加；先分红复投后追加（撞车顺序写死）
+    if(monthly > 0){
+      const ym = d.slice(0,7);
+      if(ym !== lastMonth){
+        lastMonth = ym;
+        if(ym !== buyDateReal.slice(0,7)){
+          cashPool += monthly;
+          monthlyTotal += monthly;
+          monthlyFlows.push({d, v:-monthly});
+          // 攒一手：检查现金池（含上月留存）≥一手就买，买不起留存下月（P1-25）
+          const buyShares = Math.floor(cashPool / c / 100) * 100;
+          if(buyShares >= 100){
+            cashPool -= buyShares * c;
+            shares += buyShares;
+          }
+        }
+      }
+    }
+    daily.push({ date:d, value: shares*c + cashPool, invested: principal+monthlyTotal+reinvested, shares, cashPool });
   }
   finalizeYear();
 
@@ -489,8 +515,8 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
 
   const lastDaily = daily[daily.length-1];
   const finalValue = lastDaily.value, finalInvested = lastDaily.invested;
-  // XIRR：现金流 -principal@buyDate，+finalValue@最后交易日
-  const xirr = calcXirr([{d:buyDateReal, v:-principal}, {d:lastDaily.date, v:finalValue}]);
+  // XIRR：现金流 = 期初-本金 + 每月追加日-monthly + 期末+finalValue（P1-23：期末必须用含追加的新模拟结果）
+  const xirr = calcXirr([{d:buyDateReal, v:-principal}].concat(monthlyFlows, [{d:lastDaily.date, v:finalValue}]));
 
   return {
     principal, buyDateReal, buyPrice, buyIdx,
@@ -558,7 +584,7 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   const f = res.final;
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['累计投入(本金'+ (monthly>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
@@ -579,7 +605,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['累计投入(本金'+ (monthly>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
@@ -718,6 +744,7 @@ async function run(sim, note){
   const principal = parseFloat($('principal').value);
   const buyDate = $('buyDate').value;
   const reinvest = $('reinvest').checked;
+  const monthly = parseFloat($('monthly').value) || 0;
   if(!/^\d{6}$/.test(code)) return setStatus('请输入 6 位股票代码', true);
   if(!(principal>0)) return setStatus('请输入正确的初始本金', true);
   if(!buyDate) return setStatus('请选择买入日期', true);
@@ -729,8 +756,8 @@ async function run(sim, note){
       setStatus('使用内置招行演示数据…');
       const d = window.DEMO_DATA;
       const closes = {}; d.closes.forEach(x=>closes[x[0]]=x[1]);
-      const res = simulate(principal, buyDate, reinvest, closes, d.dividends);
-      const res2 = simulate(principal, buyDate, false, closes, d.dividends);   // 不复投对比
+      const res = simulate(principal, buyDate, reinvest, closes, d.dividends, monthly);
+      const res2 = simulate(principal, buyDate, false, closes, d.dividends, monthly);   // 不复投对比
       renderAll(res, d.name, res2);
       setStatus((note||'✅ ') + '演示数据（截至 '+res.final.lastDate+'，收盘 '+fmt(res.final.lastClose,2)+' 元）');
       return;
@@ -753,8 +780,8 @@ async function run(sim, note){
     if(divErr && !divs.length){
       setStatus('⚠️ 分红数据获取失败，本次仅展示股价收益（分红图表为空）', true);
     }
-    const res = simulate(principal, buyDate, reinvest, closes, divs);
-    const res2 = simulate(principal, buyDate, false, closes, divs);
+    const res = simulate(principal, buyDate, reinvest, closes, divs, monthly);
+    const res2 = simulate(principal, buyDate, false, closes, divs, monthly);
     renderAll(res, name, res2);
     setStatus('✅ 完成：'+name+' ｜ K线 '+cnt+' 条 ｜ 分红 '+divs.filter(x=>x.ex>=buyDate).length+' 次 ｜ 数据截至 '+res.final.lastDate);
   }catch(e){
@@ -819,9 +846,11 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   if(d && /^\d{4}-\d{2}-\d{2}$/.test(d)) $('buyDate').value = d;
   else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = today.toISOString().slice(0,10); }
   if(r!=null) $('reinvest').checked = (r !== '0');
+  const m = params.get('m') || s.m;
+  if(m && parseFloat(m)>=0) $('monthly').value = m;
 
   // 记住参数（刷新/重开不丢）；P2-27: 带版本号，旧版本参数提示重算
-  const saveParams = ()=>{ try{ localStorage.setItem('divtool_params', JSON.stringify({ code:$('code').value.trim(), p:$('principal').value, d:$('buyDate').value, reinvest:$('reinvest').checked?'1':'0', v:APP_VERSION })); }catch(e){} };
+  const saveParams = ()=>{ try{ localStorage.setItem('divtool_params', JSON.stringify({ code:$('code').value.trim(), p:$('principal').value, d:$('buyDate').value, reinvest:$('reinvest').checked?'1':'0', m:$('monthly').value||'0', v:APP_VERSION })); }catch(e){} };
   try{
     const saved = JSON.parse(localStorage.getItem('divtool_params')||'{}');
     if(saved.v && saved.v !== APP_VERSION){
@@ -832,7 +861,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
       document.body.appendChild(bar);
     }
   }catch(e){}
-  ['code','principal','buyDate'].forEach(id=>$(id).addEventListener('change', saveParams));
+  ['code','principal','buyDate','monthly'].forEach(id=>$(id).addEventListener('change', saveParams));
   $('reinvest').addEventListener('change', saveParams);
 
   // 横竖屏/窗口变化时图表自适应
@@ -841,9 +870,14 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   // 买入日期快捷按钮
   document.querySelectorAll('.quick button').forEach(b=>{
     b.onclick = ()=>{
-      const t = new Date();
-      t.setFullYear(t.getFullYear() - parseInt(b.dataset.y,10));
-      $('buyDate').value = t.toISOString().slice(0,10);
+      if(b.dataset.y){
+        const t = new Date();
+        t.setFullYear(t.getFullYear() - parseInt(b.dataset.y,10));
+        $('buyDate').value = t.toISOString().slice(0,10);
+      }
+      if(b.dataset.m !== undefined){
+        $('monthly').value = b.dataset.m;
+      }
       saveParams();
     };
   });

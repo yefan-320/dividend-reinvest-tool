@@ -277,38 +277,34 @@ async function getKline(code, start, end) {
 
 /* ---------- 行情快照（腾讯 qt 批量实时行情，JSONP 免 CORS；TTL 15分钟） ---------- */
 /* 字段：1名称 2代码 3现价 39PE 44流通市值(亿) 45总市值(亿) 46PB */
-function loadQtQuotes(codes, timeout = 15000) {
+async function loadQtQuotes(codes, timeout = 15000) {
+  // v1.7.1：fetch + TextDecoder('gbk')，替代 script 标签（消除跨域 Script error + 名称乱码）
+  // qt.gtimg.cn CORS 实测支持 *（2026-08-16）
   const txList = codes.map(c => guessSec(c).tx).join(',');
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.charset = 'GBK';   // 腾讯接口 GBK 编码，必须指定否则名称乱码
-    const t = setTimeout(() => { cleanup(); reject(new Error('行情请求超时')); }, timeout);
-    function cleanup() { clearTimeout(t); script.remove(); }
-    const olds = {};
-    codes.forEach(c => { const v = 'v_' + guessSec(c).tx; olds[v] = window[v]; });
-    script.onload = () => {
-      cleanup();
-      const out = {};
-      codes.forEach(c => {
-        const v = 'v_' + guessSec(c).tx;
-        const raw = window[v] || ''; window[v] = olds[v];
-        const p = String(raw).split('~');
-        if (p.length > 46 && p[3] && p[3] !== '') {
-          out[c] = {
-            name: p[1] || '', price: parseFloat(p[3]),
-            pe: parseFloat(p[39]) || null,
-            floatCap: parseFloat(p[44]) ? parseFloat(p[44]) * 1e8 : null,
-            marketCap: parseFloat(p[45]) ? parseFloat(p[45]) * 1e8 : null,
-            pb: parseFloat(p[46]) || null,
-          };
-        }
-      });
-      resolve(out);
-    };
-    script.onerror = () => { cleanup(); codes.forEach(c => { window['v_' + guessSec(c).tx] = olds['v_' + guessSec(c).tx]; }); reject(new Error('行情网络错误')); };
-    script.src = 'https://qt.gtimg.cn/q=' + txList;
-    document.head.appendChild(script);
-  });
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const resp = await fetch('https://qt.gtimg.cn/q=' + txList, { signal: ctrl.signal });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = await resp.arrayBuffer();
+    const text = new TextDecoder('gbk').decode(buf);
+    const out = {};
+    codes.forEach(c => {
+      const m = text.match(new RegExp('v_' + guessSec(c).tx + '="([^"]*)"'));
+      if (!m) return;
+      const p = m[1].split('~');
+      if (p.length > 46 && p[3] && p[3] !== '') {
+        out[c] = {
+          name: p[1] || '', price: parseFloat(p[3]),
+          pe: parseFloat(p[39]) || null,
+          floatCap: parseFloat(p[44]) ? parseFloat(p[44]) * 1e8 : null,
+          marketCap: parseFloat(p[45]) ? parseFloat(p[45]) * 1e8 : null,
+          pb: parseFloat(p[46]) || null,
+        };
+      }
+    });
+    return out;
+  } finally { clearTimeout(t); }
 }
 async function getStockQuotes(codes) {
   // 批量行情（≤60只/次），缓存 15 分钟；空/全失败返回 {}
