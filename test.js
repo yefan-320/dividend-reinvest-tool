@@ -59,4 +59,23 @@ console.log('\n不复投对比: 期末总资产 =', res2.final.finalValue.toFixe
 const y2026 = res.years.find(y=>y.year==='2026');
 assert(y2026 && Math.abs(y2026.divTotal - (res.final.shares*0) ) > 0, '2026 年有分红记录');
 console.log('\n2026年分红合计:', y2026 ? y2026.divTotal.toFixed(0) : '无');
+
+// v1.7.6 M8 (T11)：送转口径回归——纯转增 10转4.5 → bonus=0.45（旧版 bug 会算成 0.9 翻倍）
+// 样本：南华期货 0.9→0.45 修复回归（parseDivs BONUS_IT_RATIO/10）
+{
+  const rows = [
+    { SECURITY_CODE:'603093', REPORT_DATE:'2025-06-30', EX_DIVIDEND_DATE:'2025-08-12', PRETAX_BONUS_RMB:'0', BONUS_IT_RATIO:'4.5', IT_RATIO:'4.5', ASSIGN_PROGRESS:'实施分配', IMPL_PLAN_PROFILE:'10转4.5' },
+    { SECURITY_CODE:'603093', REPORT_DATE:'2024-12-31', EX_DIVIDEND_DATE:'2025-06-10', PRETAX_BONUS_RMB:'30', BONUS_IT_RATIO:'0', IT_RATIO:null, ASSIGN_PROGRESS:'实施分配', IMPL_PLAN_PROFILE:'10派3' },
+  ];
+  const parsed = sandbox.parseDivs ? sandbox.parseDivs(rows) : null;
+  if (parsed) {
+    const zhuan = parsed.find(x => x.bonus > 0);
+    assert(zhuan && Math.abs(zhuan.bonus - 0.45) < 1e-9, '纯转增 10转4.5 → bonus=0.45（非 0.9，送转口径修复回归）');
+    assert(zhuan && Math.abs(zhuan.zhuanOnly - 0.45) < 1e-9, 'zhuanOnly=转增部分 0.45');
+    const pai = parsed.find(x => x.dps > 0);
+    assert(pai && Math.abs(pai.dps - 3.0) < 1e-9, '10派3 → dps=3.0（PRETAX/10）');
+  } else {
+    console.log('ℹ️ parseDivs 不在核心段——送转回归由 test-divs.js 覆盖（M8/T11）');
+  }
+}
 console.log('测试完成');

@@ -173,6 +173,7 @@ body{padding-bottom:64px}
       </div>
       <div class="chart tall" id="diagYieldChart"></div>
       <div class="hint" id="diagYieldNote"></div>
+      <div class="hint err" id="diagEtfNote" style="display:none"></div>
     </div>
     <div class="card">
       <h2>🔑 关键数据</h2>
@@ -270,6 +271,7 @@ body{padding-bottom:64px}
 
 <div class="card" id="cardSummary" style="display:none">
   <h2>收益概览 <span id="stockName" style="color:var(--txt);font-weight:700"></span></h2>
+  <div class="hint err" id="btEtfNote" style="display:none"></div>
   <div class="stats" id="stats"></div>
 </div>
 
@@ -310,7 +312,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.7.5';
+const APP_VERSION = 'v1.7.6';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -338,153 +340,19 @@ const fmtPct = (n, d=2) => (n==null?'—':(n*100).toFixed(d)+'%');
 const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼容 # 前缀
 
 /* JSONP 加载器：paramName 区分接口（东财 callback= / 腾讯 jsonp=） */
-function jsonp(url, paramName, timeout=15000){
-  return new Promise((resolve, reject)=>{
-    const script = document.createElement('script');
-    const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
-    const timer = setTimeout(()=>{ cleanup(); reject(new Error('请求超时：'+url.slice(0,80))); }, timeout);
-    function cleanup(){ clearTimeout(timer); script.remove(); try{ delete window[cb]; }catch(e){ window[cb]=undefined; } }
-    window[cb] = data => { cleanup(); resolve(data); };
-    script.src = url + '&' + paramName + '=' + cb;
-    script.onerror = ()=>{ cleanup(); reject(new Error('网络错误：'+url.slice(0,80))); };
-    document.head.appendChild(script);
-  });
-}
 
 /* fetch + 超时（用于 CORS 直连接口，如腾讯行情） */
-function fetchJson(url, timeout=15000){
-  const ctrl = new AbortController();
-  const t = setTimeout(()=>ctrl.abort(), timeout);
-  return fetch(url, {signal:ctrl.signal})
-    .then(r => { if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .finally(()=>clearTimeout(t));
-}
 
 /* 新浪 K线 JSONP（v1.7.4 修复：动态回调名，原固定名 var _sina_kline_ 返回无等号=语法错误） */
-function loadSinaKline(url, timeout=15000){
-  return new Promise((resolve, reject)=>{
-    const cbName = 'sina_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
-    if(!/^[a-zA-Z_]\w*$/.test(cbName)) return reject(new Error('非法回调名'));
-    const script = document.createElement('script');
-    const t = setTimeout(()=>{ cleanup(); reject(new Error('请求超时')); }, timeout);
-    let done = false;
-    function cleanup(){ clearTimeout(t); script.remove(); try{ delete window[cbName]; }catch(e){ window[cbName]=undefined; } }
-    window[cbName] = data => { if(done) return; done = true; cleanup(); resolve(Array.isArray(data) ? data : []); };
-    script.onload = ()=>{ if(done) return; done = true; cleanup(); resolve([]); };
-    script.onerror = ()=>{ if(done) return; done = true; cleanup(); reject(new Error('网络错误')); };
-    script.src = url.replace('var%20_sina_kline_', encodeURIComponent(cbName));
-    document.head.appendChild(script);
-  });
-}
 
 /* ================= 数据拉取 ================= */
-function guessSec(code){
-  // 东财 secid: 沪 1.xxx / 深 0.xxx / 北 0.xxx(83/87/92开头)；腾讯: sh/sz/bj
-  if(/^6/.test(code)) return {em:'1.'+code, tx:'sh'+code};
-  if(/^(0|3)/.test(code)) return {em:'0.'+code, tx:'sz'+code};
-  return {em:'0.'+code, tx:'bj'+code};
-}
-async function fetchName(code){
-  try{
-    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input='+code+'&type=14&count=3', 'cb');
-    const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
-    const hit = list.find(x => x.Code === code) || list[0];
-    if(hit && hit.Name) return hit.Name;
-  }catch(e){ /* 换备源 */ }
-  // 备源：腾讯 smartbox（返回 v_hint="sh~代码~名称~..."; 的 JS 赋值，\u 转义无乱码）
-  try{
-    const name = await loadSmartbox(code);
-    if(name) return name;
-  }catch(e){}
-  return code;
-}
-function loadSmartbox(code, timeout=10000){
-  return new Promise((resolve, reject)=>{
-    const script = document.createElement('script');
-    const t = setTimeout(()=>{ cleanup(); reject(new Error('请求超时')); }, timeout);
-    function cleanup(){ clearTimeout(t); script.remove(); }
-    const old = window.v_hint;
-    script.onload = ()=>{
-      cleanup();
-      const raw = window.v_hint || ''; window.v_hint = old;
-      const parts = String(raw).split('~');
-      resolve(parts.length >= 3 && parts[1] === code ? parts[2] : null);
-    };
-    script.onerror = ()=>{ cleanup(); window.v_hint = old; reject(new Error('网络错误')); };
-    script.src = 'https://smartbox.gtimg.cn/s3/?v=2&q='+code+'&t=all';
-    document.head.appendChild(script);
-  });
-}
-async function fetchDividends(code){
-  // 主源：datacenter-web（JSONP，text/plain 在部分浏览器可能被拦）
-  try{
-    const d = await jsonp('https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=ALL&filter=(SECURITY_CODE%3D%22'+code+'%22)&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1', 'callback');
-    const rows = d && d.result && d.result.data || [];
-    if(rows.length) return parseDivs(rows);
-  }catch(e){ /* 换备源 */ }
-  // 备源：datacenter（securities 域名，同样 JSONP）
-  const d2 = await jsonp('https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=ALL&filter=(SECURITY_CODE%3D%22'+code+'%22)&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1', 'callback');
-  const rows2 = d2 && d2.result && d2.result.data || [];
-  return parseDivs(rows2);
-}
-function parseDivs(rows){
-  // ⚠️ v1.7.0 送转口径修复（2026-08-16 实测）：BONUS_IT_RATIO=送转合计(每10股)，IT_RATIO=转增部分
-  // 旧版 song+zhuan 对纯转增翻倍（10转4.5→0.9 应 0.45），导致持股虚增、收益虚高
-  return rows.map(r => ({
-    report:(r.REPORT_DATE||'').slice(0,10),
-    ex:(r.EX_DIVIDEND_DATE||'').slice(0,10),
-    record:(r.EQUITY_RECORD_DATE||'').slice(0,10),
-    dps:(parseFloat(r.PRETAX_BONUS_RMB)||0)/10,      // 元/股
-    bonus:(parseFloat(r.BONUS_IT_RATIO)||0)/10,      // 每股送转合计（修复后口径）
-    zhuanOnly:(parseFloat(r.IT_RATIO)||0)/10,        // 仅展示：每股转增部分
-    progress:r.ASSIGN_PROGRESS||'',
-    profile:r.IMPL_PLAN_PROFILE||'',
-  })).filter(x => x.ex && (x.dps>0 || x.bonus>0));
-}
 /* K线：腾讯 CORS 直连（主源，已验证支持 CORS）。
    注意：腾讯按“区间内末尾 count 条”返回，区间超过上限会丢开头，
    因此必须分段：每段 ≤2.5 年（约 600 交易日 < 800 上限），逐段推进保证全量。 */
-async function fetchKlineTx(txPrefix, start, end){
-  const map = {}; let cur = start; let guard = 0;
-  while(cur < end && guard++ < 12){
-    const d0 = new Date(cur);
-    // 段终点 = cur + 2.5 年（约 600 交易日 < 800 上限）；用 UTC 构造避免时区偏移
-    const segEnd = new Date(Date.UTC(d0.getUTCFullYear()+2, d0.getUTCMonth()+6, d0.getUTCDate()));
-    const endStr = segEnd > new Date(end) ? end : segEnd.toISOString().slice(0,10);
-    const url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param='+txPrefix+',day,'+cur+','+endStr+',800,';
-    let rows = [];
-    try{
-      const d = await fetchJson(url);
-      const node = d && d.data && d.data[txPrefix];
-      rows = (node && node.day) || [];
-    }catch(e){ /* 网络错误，尝试下一段 */ }
-    if(!rows.length) break;
-    rows.forEach(r => { map[r[0]] = parseFloat(r[2]); });   // r: 日期,开,收,高,低
-    const last = rows[rows.length-1][0];
-    if(last >= end) break;
-    const nd = new Date(last); nd.setDate(nd.getDate()+1);
-    cur = nd.toISOString().slice(0,10);
-  }
-  return map;
-}
 
 /* K线：新浪 JSONP（备源，仅最近 1023 条） */
-async function fetchKlineSina(txPrefix){
-  const map = {};
-  const url = 'https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_sina_kline_/CN_MarketDataService.getKLineData?symbol='+txPrefix+'&scale=240&ma=no&datalen=1023';
-  const d = await loadSinaKline(url);
-  (Array.isArray(d) ? d : []).forEach(r => { map[r.day] = parseFloat(r.close); });
-  return map;
-}
 
 /* K线总入口：腾讯 → 新浪 → 失败返回空（上层自动回退演示数据） */
-async function fetchKline(txPrefix, start, end){
-  let m = {};
-  try{ m = await fetchKlineTx(txPrefix, start, end); }catch(e){}
-  if(Object.keys(m).length) return m;
-  try{ m = await fetchKlineSina(txPrefix); }catch(e){}
-  return m;
-}
 
 /* ================= 回测核心 =================
    输入: principal 本金, buyDate, reinvest 是否复投, closes {date:close}, dividends [{ex,dps,song,zhuan}]
@@ -633,6 +501,13 @@ const axY = (extra = {}) => Object.assign({ type:'value' }, AXIS, { axisLabel: O
 const TOOLTIP = { trigger:'axis', backgroundColor:'#1b2a25', borderColor:'#2a3d36', textStyle:{color:'#e8efe9', fontSize:12}, axisPointer:{lineStyle:{color:'#d9a441'}} };
 
 function renderAll(res, name, res2){
+  // v1.7.6 M9/大师条件：回测页 ETF 分红数据源限制标注（防止用户把“累计分红 0”误读为基金不分红）
+  const btNote = $('btEtfNote');
+  if (btNote) {
+    const isEtf = /ETF|指数/.test(name || '');
+    btNote.style.display = isEtf ? 'block' : 'none';
+    btNote.textContent = isEtf ? '⚠️ ETF/指数：分红数据源限制（基金分红接口未接入），累计分红可能显示 0——非该基金不分红，请以年化股息率看分红能力' : '';
+  }
   // 展示年度选择（双口径）：
   // ① 相对投入：最新年度分红率低于上一年时（分红频率/到账节奏影响），展示上一年
   // ② 相对本金：最新年度仅一次分红到账（可能还有一笔未到，数字不完整），展示上一年完整数据
@@ -849,11 +724,11 @@ async function run(sim, note){
     setStatus('正在获取 '+code+' 数据…');
     let name = code, divs = [], divErr = null;
     try{
-      [name, divs] = await Promise.all([fetchName(code), fetchDividends(code)]);
+      // v1.7.6 M1：统一走 DL 新版数据层（限流+去重+缓存+全字段）——旧版全局 fetchDividends/fetchName 已删除
+      [name, divs] = await Promise.all([DL.fetchName(code), DL.fetchDividendsOne(code)]);
     }catch(e){ divErr = e; }
     setStatus(name+'：分红数据 '+divs.length+' 条 ✓，拉取行情…');
     try{
-      const g = guessSec(code);
       const closes = await DL.getKline(code, buyDate, DL.todayStr());   // v1.7.0：走缓存层（IndexedDB + qfq + 新浪备源）
     const cnt = Object.keys(closes).length;
     if(!cnt){
@@ -894,7 +769,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
     hint.textContent = '查询中…';
     hint.className = 'hint';
     timer = setTimeout(async ()=>{
-      const name = await fetchName(code);
+      const name = await DL.fetchName(code);   // v1.7.6 M2：统一 DL 版（旧全局 fetchName 已删除）
       if(input.value.trim() !== code) return;   // 输入已变，丢弃过期结果
       if(name && name !== code){
         hint.textContent = '✅ ' + code + ' → ' + name;

@@ -12,6 +12,9 @@ function makeEl(id){
   return {
     id, value:'', textContent:'', innerHTML:'', className:'', style:{}, checked:false, disabled:false,
     dataset:{}, onclick:null,
+    querySelectorAll: () => [],   // v1.7.6 M7: 页面有 bdq.querySelectorAll('button')，mock 缺失会报错
+    closest: () => null,          // v1.7.6 M7: 页面有 $('monthly').closest('.field')
+    remove(){}, classList: { toggle(){}, add(){}, remove(){} },
     addEventListener(){}, dispatchEvent(){},
     setOption(){}, dispose(){}, resize(){},
   };

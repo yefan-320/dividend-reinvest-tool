@@ -6,15 +6,29 @@ const fs = require('fs');
 const vm = require('vm');
 
 const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
-const start = html.indexOf('/* ================= 数据拉取');
+// v1.7.6 M4：旧版全局 parseDivs 已删（死代码清理）——回测核心段只含 simulate/calcXirr；
+// parseDivs 现从 data-layer.js 提取（DL.parseDivs，与线上一致）
+const start = html.indexOf('/* ================= 回测核心');
 const end = html.indexOf('/* ================= 渲染');
 if (start < 0 || end < 0) { console.error('找不到核心函数'); process.exit(1); }
 const core = html.slice(start, end);
 
+// 从 data-layer.js 提取 parseDivs（IIFE 内，括号匹配）
+const dlSrc = fs.readFileSync(__dirname + '/data-layer.js', 'utf8');
+const pm = dlSrc.match(/function parseDivs\(rows\) \{/);
+if (!pm) { console.error('找不到 parseDivs'); process.exit(1); }
+let depth = 0, bi = dlSrc.indexOf('{', pm.index), be = bi;
+while (bi < dlSrc.length) {
+  if (dlSrc[bi] === '{') depth++;
+  else if (dlSrc[bi] === '}') { depth--; if (depth === 0) { be = bi + 1; break; } }
+  bi++;
+}
+
 const sandbox = {};
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(core + '\nthis.simulate = simulate; this.calcXirr = calcXirr; this.parseDivs = parseDivs;', sandbox);
+vm.runInContext(core + '\nthis.simulate = simulate; this.calcXirr = calcXirr;', sandbox);
+vm.runInContext(dlSrc.slice(pm.index, be) + '\nthis.parseDivs = parseDivs;', sandbox);
 vm.runInContext(fs.readFileSync(__dirname + '/demo-data.js', 'utf8'), sandbox);
 
 const assert = (cond, msg) => { if (!cond) { console.error('❌ 断言失败:', msg); process.exitCode = 1; } else console.log('✅', msg); };

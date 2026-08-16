@@ -96,9 +96,57 @@ async function loadIndex(src, timeoutMs) {
     if (wl && (wl.textContent.includes('还没有自选') || wl.textContent.includes('添加自选'))) ok('场景4 自选损坏恢复为空态');
     else fail('场景4 自选状态异常: ' + (wl ? wl.textContent.slice(0, 60) : '无元素'));
 
+    // 场景5（v1.7.6 M11 移动端回归）：390px 视口下对比页三栏不溢出 + 周期按钮可点（防手机布局回退）
+    const cmpBtn = iframeDoc().querySelector('.tabbar button[data-tab="compare"]');
+    if (cmpBtn) cmpBtn.click();
+    await wait(1500);
+    const cmpFields = iframeDoc().querySelectorAll('#cmpControls .field, #cmpControls input, #cmpControls select');
+    const overflow = Array.from(cmpFields).some(el => el.getBoundingClientRect().right > 390 || el.getBoundingClientRect().left < 0);
+    if (overflow) fail('场景5 对比页元素超出 390px 视口');
+    else ok('场景5 对比页 390px 布局无溢出');
+    const yBtn = iframeDoc().querySelector('#cmpYears button');
+    if (yBtn) { yBtn.click(); ok('场景5 周期按钮可点'); } else fail('场景5 周期按钮缺失');
+    if (errors.length) fail('场景5 JS错误: ' + errors.join('; ')); else ok('场景5 无JS错误');
+
+    // 场景6（v1.7.6 大师发版条件）：ETF 数据源限制标注真实触发（搜索 512890 进诊断 + 回测 tab 跑 ETF）
+    // 6a：诊断页——搜索框输入 512890 回车 → openDiagnose 渲染后 diagEtfNote 应显示
+    const search = iframeDoc().getElementById('homeSearch');
+    if (search) {
+      search.value = '512890';
+      search.dispatchEvent(new iframe.contentWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    }
+    const t6a = Date.now();
+    while (Date.now() - t6a < 30000) {
+      await wait(800);
+      const dEtf = iframeDoc().getElementById('diagEtfNote');
+      if (dEtf && dEtf.textContent.includes('数据源限制')) break;
+    }
+    const dEtf = iframeDoc().getElementById('diagEtfNote');
+    if (dEtf && dEtf.textContent.includes('数据源限制')) ok('场景6 诊断页ETF标注含“数据源限制”');
+    else fail('场景6 诊断页ETF标注未出现: ' + (dEtf ? dEtf.textContent.slice(0, 50) : '无元素'));
+    // 6b：回测页——code 输入 512890 点回测 → renderAll 后 btEtfNote 应显示
+    const codeInp = iframeDoc().getElementById('code');
+    const runBtn = iframeDoc().getElementById('btnRun');
+    if (codeInp && runBtn) {
+      codeInp.value = '512890';
+      runBtn.click();
+    }
+    const t6b = Date.now();
+    while (Date.now() - t6b < 45000) {
+      await wait(1000);
+      const bEtf = iframeDoc().getElementById('btEtfNote');
+      if (bEtf && bEtf.textContent.includes('数据源限制')) break;
+      const st = statusText();
+      if (st && (st.includes('回退') || st.includes('出错'))) break;
+    }
+    const bEtf = iframeDoc().getElementById('btEtfNote');
+    if (bEtf && bEtf.textContent.includes('数据源限制')) ok('场景6 回测页ETF标注含“数据源限制”');
+    else fail('场景6 回测页ETF标注未出现: ' + (bEtf ? bEtf.textContent.slice(0, 50) : '无元素') + ' | 状态:' + statusText().slice(0, 60));
+    if (errors.length) fail('场景6 JS错误: ' + errors.join('; ')); else ok('场景6 无JS错误');
+
     // 结论
     const hasFail = log.some(l => l.startsWith('❌'));
-    logEl.textContent = (hasFail ? 'SMOKE FAIL' : 'SMOKE PASS') + ' v1.7.5 ' + location.origin + '\n' + log.join('\n');
+    logEl.textContent = (hasFail ? 'SMOKE FAIL' : 'SMOKE PASS') + ' v1.7.6 ' + location.origin + '\n' + log.join('\n');
   } catch (e) {
     logEl.textContent = 'SMOKE ERROR: ' + e.message + '\n' + log.join('\n');
   }
