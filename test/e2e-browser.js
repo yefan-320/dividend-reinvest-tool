@@ -90,13 +90,13 @@ async function main() {
   // 等页面加载完成
   await new Promise(r => setTimeout(r, 5000));
 
-  // R1 版本号
-  const pageVer = await evalIn(cdp, `(${JSON.stringify(gitVer)}).slice(0,1)==='v' ? 'pending' : 'pending'`).catch(() => null);
+  // R1 版本号（大师 P0-③：不一致=失败，不许警告放行——发布版本与页面版本必须一致）
   const verStr = await evalIn(cdp, 'typeof APP_VERSION !== "undefined" ? APP_VERSION : null');
   if (!verStr) die('R1: 页面无 APP_VERSION（脚本未加载？）');
-  console.log(`   页面版本=${verStr} git版本=${gitVer}`);
-  if (verStr !== gitVer && gitVer.startsWith('v')) { console.log('   ⚠️ R1 提示：页面版本与 git 版本不一致（release.sh 会强制同步，仅警告不失败）'); }
-  else ok('R1 版本号一致');
+  const expectVer = process.env.EXPECT_VER || gitVer;
+  console.log(`   页面版本=${verStr} 期望版本=${expectVer}`);
+  if (verStr !== expectVer) die(`R1: 页面版本(${verStr}) ≠ 期望版本(${expectVer})——release.sh 未同步版本号或代码未更新`);
+  ok('R1 版本号一致');
 
   // 触发回测（515080 预填在 URL）
   const runRes = await evalIn(cdp, `(async () => {
@@ -151,12 +151,16 @@ async function main() {
       } catch (e) { /* 跳过 */ }
     }
     if (got.length >= 2) {
-      const jsonTop = list.slice(0, got.length).map(x => ({ ex: x.ex, dps: x.dps }));
+      const jsonTop = oldList.slice(0, got.length).map(x => ({ ex: x.ex, dps: x.dps }));
       const mism = got.filter((g, i) => jsonTop[i] && (jsonTop[i].ex !== g.ex || Math.abs(jsonTop[i].dps - g.dps) > 0.001));
       if (mism.length) die(`R2: JSON 前 ${got.length} 条与东财 API 不一致（如 ${mism[0].ex} ${mism[0].dps} vs JSON ${jsonTop[mism[0] ? got.indexOf(mism[0]) : 0].ex}）——静态数据损坏/过期`);
       apiOk = got.length;
     }
-  } catch (e) { console.log('   ⚠️ 东财 API 抽样失败（网络/WAF），跳过三方比对，用现有 JSON 校验页面'); }
+  } catch (e) {
+    // 大师 P0-①：区分网络失败（跳过+明示）与代码错误（直接 die，不许静默吞）
+    if (e instanceof ReferenceError || e instanceof TypeError || e instanceof SyntaxError) die('R2: 三方比对代码错误: ' + e.message);
+    console.log('   ⚠️ 东财 API 抽样失败（网络/WAF）: ' + e.message + '——跳过三方比对，用现有 JSON 校验页面');
+  }
   if (apiOk != null) ok(`R2-① 东财 API 抽样 ${apiOk} 条与静态 JSON 一致（三方第一环）`);
 
   // R3 每年分红体现
@@ -180,12 +184,13 @@ async function main() {
       if (!ch) return null;
       const opt = ch.getOption();
       const gridTop = opt.grid && opt.grid[0] ? opt.grid[0].top : null;
-      // legend 高度近似：legend 组件位置
+      // 与 fitLegendTop 同源测法（大师 P0-②：_componentsViews → legend 视图 → group.getBoundingRect）
       let legendH = null;
       try {
-        const lc = ch.getModel().getComponent('legend');
-        if (lc) { const r = lc.getLayoutRect(); if (r) legendH = r.height; }
-      } catch(e) {}
+        const views = ch._componentsViews || [];
+        const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
+        if (lgView && lgView.group) legendH = lgView.group.getBoundingRect().height;
+      } catch (e) { legendH = null; }
       return { gridTop, legendH };
     })()`);
     if (!probe) continue;
@@ -194,8 +199,10 @@ async function main() {
     prevTop = gridTop;
   }
   if (gridTop == null) die('R4: chartAsset gridTop 取不到（图例挤压修复失效）');
-  if (legendH != null && gridTop < legendH) die(`R4: gridTop(${gridTop}) < legendH(${legendH})，图例压轴`);
-  if (legendH == null && gridTop < 30) die(`R4: gridTop(${gridTop}) 过小，疑似图例挤压`);
+  // 大师 P0-②：legendH 取不到 → 直接失败（不许降级兜底——v1.8.5 修前 bug 值 36 ≥ 30 曾漏过）
+  if (legendH == null) die('R4: legend 高度取不到（zrender 组件不可读）——测试失败，不许降级');
+  if (gridTop < legendH + 8) die(`R4: gridTop(${gridTop}) < legendH(${legendH})+8，图例压轴`);
+  if (gridTop < 60) die(`R4: gridTop(${gridTop}) < 60（64.8+8 量级硬基线），疑似图例挤压`);
   console.log(`   gridTop=${gridTop} legendH=${legendH}`);
   ok('R4 图例不压轴');
 

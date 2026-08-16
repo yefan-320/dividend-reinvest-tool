@@ -7,17 +7,12 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# 1. 版本号（参数优先，否则 git 推断）
-if [ -n "$1" ]; then
-  VER="$1"
-else
-  TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-  if [ -n "$TAG" ]; then
-    VER="$TAG"
-  else
-    VER="v$(git log -1 --format=%h)"
-  fi
+# 1. 版本号（大师 P0-③：必传参数，禁止 git 推断——git describe 返回旧 tag 会把版本回退）
+if [ -z "$1" ]; then
+  echo "!! 必须传版本号：./scripts/release.sh v1.8.x"
+  exit 1
 fi
+VER="$1"
 TODAY=$(date +%Y-%m-%d)
 echo "==> 发布版本: $VER ($TODAY)"
 
@@ -40,14 +35,15 @@ node --check data-layer.js
 node --check views.js
 echo "==> 语法 OK"
 
-# 4. e2e 浏览器实测（大师 P0-3：发布前必过；失败即中止）
+# 4. e2e 浏览器实测（大师 P0-3：发布前必过；失败即中止；EXPECT_VER=本次版本号强制比对）
 if command -v node >/dev/null && [ -f test/e2e-browser.js ]; then
-  echo "==> e2e 浏览器实测…"
-  node test/e2e-browser.js || { echo "!! e2e 失败，中止发布"; exit 1; }
+  echo "==> e2e 浏览器实测（期望版本 $VER）…"
+  EXPECT_VER="$VER" node test/e2e-browser.js || { echo "!! e2e 失败，中止发布"; exit 1; }
 fi
 
-# 5. 提交 + 推送
+# 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 git add index.html data-layer.js views.js
 git commit -m "$VER: 发布（版本号由 scripts/release.sh 自动同步）" 2>/dev/null || echo "(无变更可提交)"
-git push origin main
-echo "==> 已推送 $VER"
+git tag "$VER" 2>/dev/null || echo "(tag 已存在)"
+git push origin main --tags
+echo "==> 已推送 $VER（含 tag）"
