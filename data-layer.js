@@ -61,7 +61,7 @@ function jsonp(url, paramName, timeout = 15000) {
     const timer = setTimeout(() => { cleanup(); reject(new Error('请求超时')); }, timeout);
     function cleanup() { clearTimeout(timer); script.remove(); try { delete window[cb]; } catch (e) { window[cb] = undefined; } }
     window[cb] = data => { cleanup(); resolve(data); };
-    script.src = url + '&' + paramName + '=' + cb;
+    script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + paramName + '=' + cb;   // 2026-08-17：URL 无 query 时用 ?（曾写死 &，无 query 的 URL 会拼出裸 & 被拒）
     script.onerror = () => { cleanup(); reject(new Error('网络错误')); };
     document.head.appendChild(script);
   });
@@ -250,7 +250,7 @@ async function fetchDividendsOne(code) {
 }
 
 /* ---------- ETF/基金分红（东财基金公告源，2026-08-17 C1 接入） ----------
- * 链路：FHGG 公告列表（JSONP 免 CORS）→ np-cnotice 公告正文（CORS:*）→ 解析每10份金额+除息日
+ * 链路：FHGG 公告列表（JSONP 免 CORS）→ 公告正文（2026-08-17 实测：np-cnotice-stock/fund 在浏览器均被 CORS 拦→用 allorigins 代理兜底，直连保留给 Node/直连可用环境）→ 解析每10份金额+除息日
  * 缓存：dv:code 复用（TTL 1 天，符合大师"1请求/标的+缓存1天"限流策略）
  * 降级：任一步失败 → 返回 []（调用方显示"数据源暂缺"，不显示 0） */
 function parseEtfAnnList(data) {
@@ -284,22 +284,52 @@ function parseEtfAnnouncement(title, content) {
     eps: null, totalShares: null, name: '', pending: false,
   };
 }
+async function fetchEtfAnnouncement(artCode) {
+  // 2026-08-17：np-cnotice 在浏览器被 CORS 拦 → 直连失败走 allorigins 代理（实测：顺序/低并发+重试 成功率 5/6+，并发 4+ 触发限流）
+  const direct = 'https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + artCode + '&client_source=web&page_index=1';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // ① 直连
+    try {
+      const d = await fetchJson(direct);
+      if (d && d.data) return d;
+    } catch (e) { /* 直连失败 → 代理 */ }
+    // ② allorigins 代理
+    try {
+      const proxied = await fetchJson('https://api.allorigins.win/get?url=' + encodeURIComponent(direct));
+      if (proxied && proxied.contents) {
+        try { return JSON.parse(proxied.contents); } catch (e) { /* 解析失败重试 */ }
+      }
+    } catch (e) { /* 代理失败重试 */ }
+    if (attempt === 0) await new Promise(r => setTimeout(r, 500));
+  }
+  return null;
+}
 async function fetchEtfDividends(code) {
   const cacheKey = 'dv:' + code;
   try {
     const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
     if (hit && hit.data && hit.data.length) return hit.data;
   } catch (e) { }
+  // 2026-08-17：优先读静态数据（GitHub Actions 每日生成，同源零 CORS；浏览器直连东财公告被 WAF 567 拦）
+  try {
+    const stat = await fetchJson('data/etf-dividends.json');
+    const list = stat && stat.data && stat.data[code];
+    if (list && list.length) {
+      const out = list.map(x => Object.assign({ code, pending: false, progress: '实施分配', planNotice: '', notice: '', bonus: 0, zhuanOnly: 0, eps: null, totalShares: null, name: '', report: x.ex.slice(0, 4) + '-12-31' }, x));
+      try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }
+      return out;
+    }
+  } catch (e) { /* 静态文件缺失（首次部署前）→ 走实时 */ }
   const anns = parseEtfAnnList(await jsonp(
-    'https://api.fund.eastmoney.com/f10/FHGG?callback=?&fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));
-  // 2026-08-17 性能修复：公告正文并行拉取（并发 4，原来串行 17 条=秒级卡顿）
+    'https://api.fund.eastmoney.com/f10/FHGG?fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));   // 2026-08-17：URL 去掉 callback=?（jsonp 自动追加 &callback=cb_xxx；写死 ?= 会返回 ?(...) 无法解析→超时）
+  // 2026-08-17 性能+稳定：并发 2 + 每条重试（并发 4 触发 allorigins 限流，实测 5/6 成功率需低并发）
   const out = [];
-  const CONC = 4;
+  const CONC = 2;
   for (let i = 0; i < anns.length; i += CONC) {
     const batch = anns.slice(i, i + CONC);
     const parsed = await Promise.all(batch.map(async a => {
       try {
-        const d = await fetchJson('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.id + '&client_source=web&page_index=1');
+        const d = await fetchEtfAnnouncement(a.id);   // 2026-08-17：直连+allorigins 代理双层（np-cnotice 在浏览器被 CORS 拦）
         const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
         if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; return rec; }
       } catch (e) { /* 单条失败跳过，保整体 */ }
