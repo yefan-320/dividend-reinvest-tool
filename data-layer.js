@@ -120,10 +120,12 @@ async function cacheGetFresh(key, ttl) {
 
 /* ---------- 代码/市场映射 ---------- */
 function guessSec(code) {
-  // 东财 secid: 沪 1.xxx / 深 0.xxx / 北 0.xxx(83/87/92开头)；腾讯: sh/sz/bj
+  // 东财 secid: 沪 1.xxx / 深 0.xxx / 北 0.xxx(4/8/92开头)；腾讯: sh/sz/bj
+  // 2026-08-16 修复：5开头=沪ETF(510/512/515/588)、1开头=深ETF(159xxx)、4/8/92=北交所
   if (/^6/.test(code)) return { em: '1.' + code, tx: 'sh' + code };
-  if (/^(0|3)/.test(code)) return { em: '0.' + code, tx: 'sz' + code };
-  return { em: '0.' + code, tx: 'bj' + code };
+  if (/^5/.test(code)) return { em: '1.' + code, tx: 'sh' + code };   // 沪 ETF（512890 红利低波等）
+  if (/^(0|3|1)/.test(code)) return { em: '0.' + code, tx: 'sz' + code };  // 深市 + 深ETF(159xxx)
+  return { em: '0.' + code, tx: 'bj' + code };   // 北交所 4/8/92 开头
 }
 const emSecidOf = code => guessSec(code).em;
 const txCodeOf = code => guessSec(code).tx;
@@ -273,7 +275,54 @@ async function getKline(code, start, end) {
   return m;
 }
 
-/* ---------- 行情快照（push2 clist：现价/市值/行业/PE/PB；TTL 15分钟） ---------- */
+/* ---------- 行情快照（腾讯 qt 批量实时行情，JSONP 免 CORS；TTL 15分钟） ---------- */
+/* 字段：1名称 2代码 3现价 39PE 44流通市值(亿) 45总市值(亿) 46PB */
+function loadQtQuotes(codes, timeout = 15000) {
+  const txList = codes.map(c => guessSec(c).tx).join(',');
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.charset = 'GBK';   // 腾讯接口 GBK 编码，必须指定否则名称乱码
+    const t = setTimeout(() => { cleanup(); reject(new Error('行情请求超时')); }, timeout);
+    function cleanup() { clearTimeout(t); script.remove(); }
+    const olds = {};
+    codes.forEach(c => { const v = 'v_' + guessSec(c).tx; olds[v] = window[v]; });
+    script.onload = () => {
+      cleanup();
+      const out = {};
+      codes.forEach(c => {
+        const v = 'v_' + guessSec(c).tx;
+        const raw = window[v] || ''; window[v] = olds[v];
+        const p = String(raw).split('~');
+        if (p.length > 46 && p[3] && p[3] !== '') {
+          out[c] = {
+            name: p[1] || '', price: parseFloat(p[3]),
+            pe: parseFloat(p[39]) || null,
+            floatCap: parseFloat(p[44]) ? parseFloat(p[44]) * 1e8 : null,
+            marketCap: parseFloat(p[45]) ? parseFloat(p[45]) * 1e8 : null,
+            pb: parseFloat(p[46]) || null,
+          };
+        }
+      });
+      resolve(out);
+    };
+    script.onerror = () => { cleanup(); codes.forEach(c => { window['v_' + guessSec(c).tx] = olds['v_' + guessSec(c).tx]; }); reject(new Error('行情网络错误')); };
+    script.src = 'https://qt.gtimg.cn/q=' + txList;
+    document.head.appendChild(script);
+  });
+}
+async function getStockQuotes(codes) {
+  // 批量行情（≤60只/次），缓存 15 分钟；空/全失败返回 {}
+  if (!codes.length) return {};
+  const key = 'qt:' + codes.join(',');
+  const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.snapshot);
+  if (hit) return hit.data;
+  let out = {};
+  try { out = await txQueue.push(() => loadQtQuotes(codes)); } catch (e) { }
+  if (Object.keys(out).length) await cacheSet(key, { ts: Date.now(), data: out });
+  return out;
+}
+
+/* ---------- 全市场快照（仅扫描器用；push2delay CORS 实测可用；TTL 15分钟；防重入单例） ---------- */
 const SNAP_FIELDS = 'f2,f3,f9,f12,f14,f20,f21,f23,f100';
 async function fetchSnapshotPage(pn) {
   // 排除北交所 fs；pageSize=100；push2delay 实测支持 CORS（2026-08-16）
@@ -281,27 +330,32 @@ async function fetchSnapshotPage(pn) {
   const url = `https://push2delay.eastmoney.com/api/qt/clist/get?pn=${pn}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${fs}&fields=${SNAP_FIELDS}`;
   return emQueue.push(() => fetchJson(url));
 }
+let _snapPromise = null;
 async function getMarketSnapshot() {
-  // 全市场快照（缓存 15 分钟），返回 { code: {name,price,marketCap,pe,pb,industry} }
+  // 全市场快照（缓存 15 分钟），返回 { code: {name,price,marketCap,pe,pb,industry} }；防重入：并发调用共享同一任务
   const key = 'snap:all';
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.snapshot);
   if (hit) return hit.data;
-  const out = {};
-  let pn = 1, total = Infinity;
-  while ((pn - 1) * 100 < total && pn <= 70) {
-    const d = await fetchSnapshotPage(pn);
-    const diff = d && d.data && d.data.diff || [];
-    total = (d && d.data && d.data.total) || total;
-    diff.forEach(x => {
-      out[x.f12] = {
-        name: x.f14, price: x.f2, pct: x.f3, marketCap: x.f20, floatCap: x.f21,
-        pe: x.f9, pb: x.f23, industry: x.f100,
-      };
-    });
-    pn++;
-  }
-  await cacheSet(key, { ts: Date.now(), data: out });
-  return out;
+  if (_snapPromise) return _snapPromise;
+  _snapPromise = (async () => {
+    const out = {};
+    let pn = 1, total = Infinity;
+    while ((pn - 1) * 100 < total && pn <= 70) {
+      const d = await fetchSnapshotPage(pn);
+      const diff = d && d.data && d.data.diff || [];
+      total = (d && d.data && d.data.total) || total;
+      diff.forEach(x => {
+        out[x.f12] = {
+          name: x.f14, price: x.f2, pct: x.f3, marketCap: x.f20, floatCap: x.f21,
+          pe: x.f9, pb: x.f23, industry: x.f100,
+        };
+      });
+      pn++;
+    }
+    await cacheSet(key, { ts: Date.now(), data: out });
+    return out;
+  })();
+  try { return await _snapPromise; } finally { _snapPromise = null; }
 }
 
 /* ---------- 指数/ETF K线（对比卡用；腾讯 qfq，指数/ETF 也走分段） ---------- */
@@ -360,10 +414,10 @@ const Watchlist = {
 
 /* ---------- 对外导出 ---------- */
 window.DL = {
-  CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline,
+  CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends,
-  getKline, getMarketSnapshot, getIndexKline, ETF_PRESETS,
+  getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
 }
-})();;
+})();

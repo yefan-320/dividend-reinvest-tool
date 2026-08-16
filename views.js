@@ -59,7 +59,7 @@
     const wl = homeState.watchlist;
     if (!wl.length) { el.innerHTML = '<div class="hint">暂无自选股。添加自选后，这里会显示股息率/估值的变化提醒。</div>'; return; }
     el.innerHTML = '<div class="hint">加载中…</div>';
-    const snap = await DL.getMarketSnapshot();
+    const snap = await DL.getStockQuotes(wl.map(x => x.code));
     homeState.snap = snap;
     const alerts = [];
     for (const it of wl) {
@@ -96,7 +96,7 @@
       el.querySelectorAll('.chip').forEach(b => b.onclick = () => addToWatchlist(b.dataset.code));
       return;
     }
-    const snap = homeState.snap || await DL.getMarketSnapshot();
+    const snap = homeState.snap || await DL.getStockQuotes(wl.map(x => x.code));
     homeState.snap = snap;
     el.innerHTML = wl.map(it => {
       const s = snap[it.code];
@@ -191,7 +191,7 @@
         DL.fetchDividendsOne(code),
         DL.getKline(code, new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
       ]);
-      const snap = homeState.snap || await DL.getMarketSnapshot();
+      const snap = homeState.snap || await DL.getStockQuotes([code]);
       homeState.snap = snap;
       const s = snap[code] || {};
       const lastPrice = s.price || (kline && Object.values(kline).pop());
@@ -291,7 +291,7 @@
   async function addToWatchlist(code) {
     try {
       const name = await DL.fetchName(code);
-      const snap = homeState.snap || await DL.getMarketSnapshot();
+      const snap = homeState.snap || await DL.getStockQuotes([code]);
       homeState.snap = snap;
       const s = snap[code];
       let divYield = null, price = s ? s.price : null;
