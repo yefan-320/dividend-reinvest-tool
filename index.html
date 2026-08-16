@@ -51,7 +51,8 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .switch input{width:18px;height:18px;accent-color:var(--gold)}
 .status{font-size:12px;color:var(--sub);margin-top:8px;min-height:16px}
 .status.err{color:var(--red)}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}.stat .v{font-size:clamp(12px,3.5vw,14px)}}
 .stat{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .stat .k{font-size:11px;color:var(--sub)}
 .stat .v{font-size:18px;font-weight:700;margin-top:3px}
@@ -144,7 +145,13 @@ body{padding-bottom:64px}
   <div id="diagContent" style="display:none">
     <div class="card"><h2 id="diagTitle">诊断</h2></div>
     <div class="card">
-      <h2>📊 股息率历史分位（近5年）</h2>
+      <h2>📊 股息率历史分位（<span id="diagYieldYears">5</span>年）</h2>
+      <div class="quick" id="diagYieldQuick">
+        <button type="button" data-y="1">1年</button><button type="button" data-y="3">3年</button>
+        <button type="button" data-y="5" class="on">5年</button><button type="button" data-y="10">10年</button>
+        <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
+        <input id="diagYieldCustom" type="number" min="1" max="30" placeholder="自定义年" style="width:76px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
+      </div>
       <div class="chart tall" id="diagYieldChart"></div>
       <div class="hint" id="diagYieldNote"></div>
     </div>
@@ -163,8 +170,38 @@ body{padding-bottom:64px}
 <!-- ===== 对比 tab（第二批占位） ===== -->
 <section id="tab-compare" class="tab-panel" style="display:none">
   <div class="card">
-    <h2>📈 对比</h2>
-    <div id="compareBody"><div class="hint">加载中…</div></div>
+    <h2>📈 对比（同本金100万 · 红利复投 · 零月供）</h2>
+    <div class="row">
+      <div class="field" style="flex:1">
+        <label>添加标的（股票代码 / ETF / 名称搜索）</label>
+        <input id="cmpInput" placeholder="如 600036 / 512890 / 招商银行" inputmode="text">
+        <div class="quick" id="cmpEtfChips"></div>
+      </div>
+      <div class="field" style="flex:1">
+        <label>对比周期</label>
+        <div class="quick" id="cmpYears">
+          <button type="button" data-y="1">1年</button><button type="button" data-y="3">3年</button>
+          <button type="button" data-y="5" class="on">5年</button><button type="button" data-y="10">10年</button>
+          <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
+          <input id="cmpCustom" type="number" min="1" max="30" placeholder="自定义年" style="width:76px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
+        </div>
+        <div class="hint">对比统一零月供（保证口径一致）；若标的存在时间短于所选周期会提示</div>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="btnCmpAdd">＋ 添加</button>
+      <button class="btn" id="btnCmpRun">▶ 开始对比</button>
+    </div>
+    <div id="cmpList"></div>
+  </div>
+  <div class="card" id="cmpResult" style="display:none">
+    <h2>总资产走势（100万 同起点买入 · 复投）</h2>
+    <div class="chart" id="cmpChartAsset"></div>
+    <h2>股息率对比（近12月分红 ÷ 现价）</h2>
+    <div class="chart" id="cmpChartYield"></div>
+    <h2>对比表格</h2>
+    <div class="scroll"><table class="tbl" id="cmpTbl"></table></div>
+    <div class="hint" id="cmpNote"></div>
   </div>
 </section>
 
@@ -177,7 +214,10 @@ body{padding-bottom:64px}
     <div class="field"><label>股票代码</label><input id="code" value="600036" inputmode="numeric" placeholder="如 600036 / 000001"><div class="hint" id="codeHint"></div></div>
     <div class="field"><label>初始本金（元）</label><input id="principal" value="1000000" inputmode="decimal"></div>
     <div class="field"><label>买入日期</label><input id="buyDate" type="date">
-      <div class="quick"><button type="button" data-y="1">1年前</button><button type="button" data-y="3">3年前</button><button type="button" data-y="5">5年前</button><button type="button" data-y="10">10年前</button></div>
+      <div class="quick" id="buyDateQuick">
+        <button type="button" data-y="1">1年前</button><button type="button" data-y="3">3年前</button><button type="button" data-y="5">5年前</button><button type="button" data-y="10">10年前</button>
+        <button type="button" data-anchor="yStart">今年初</button><button type="button" data-anchor="yPrev">去年初</button><button type="button" data-anchor="ipo">上市日</button>
+      </div>
     </div>
     <div class="field"><label>每月追加（元，0=不追加）</label><input id="monthly" value="0" inputmode="decimal">
       <div class="quick"><button type="button" data-m="0">不追加</button><button type="button" data-m="5000">5千/月</button><button type="button" data-m="10000">1万/月</button><button type="button" data-m="20000">2万/月</button></div>
@@ -437,12 +477,13 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
   dividends.filter(x => x.ex >= buyDateReal).forEach(x => { (divByDate[x.ex] = divByDate[x.ex] || []).push(x); });
 
   const daily = [], years = {}, divEvents = [];
-  let divYearTotal = null, rateDenom = null, curYear = null, divCountYear = 0;
+  let divYearTotal = null, rateDenom = null, curYear = null, divCountYear = 0, divYearDps = 0;   // v1.7.2: 年度名义每股分红合计（当年各笔 dps 之和）
 
   const finalizeYear = () => {
     if(curYear != null && divYearTotal != null){
       years[curYear] = Object.assign(years[curYear] || {}, {
         divTotal: divYearTotal,
+        dps: divYearDps,                               // 名义每股分红：当年各笔 dps 之和（修复"总额/年初持股"在一年两派时虚高）
         rate: rateDenom>0 ? divYearTotal/rateDenom : 0,
         divCount: divCountYear,
       });
@@ -454,10 +495,11 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
     const ev = divByDate[d];
     if(ev && ev.length){
       const y = d.slice(0,4);
-      if(y !== curYear){ finalizeYear(); curYear = y; divYearTotal = 0; divCountYear = 0; rateDenom = principal + reinvested; }
+      if(y !== curYear){ finalizeYear(); curYear = y; divYearTotal = 0; divCountYear = 0; divYearDps = 0; rateDenom = principal + reinvested; }
       let cash = 0;
       ev.forEach(x => {
         cash += shares * x.dps;
+        divYearDps += x.dps;                           // 名义每股分红累计（不含送转摊薄，纯现金派息口径）
         const bonus = x.bonus;                          // 送转股（v1.7.0 口径：送转合计，修复旧版翻倍 bug）
         if(bonus > 0) shares += shares * bonus;
       });
@@ -509,7 +551,7 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
       sharesStart, sharesEnd: last? last.shares : null,
       valueEnd: last? last.value : null, investedEnd: last? last.invested : null,
       cashEnd: last? last.cashPool : null,
-      dps: sharesStart>0 ? rec.divTotal/sharesStart : null,  // 当年每股分红(按年初持股)
+      dps: rec.dps != null ? rec.dps : null,                // v1.7.2: 名义每股分红（当年各笔 dps 之和）
     };
   });
 
@@ -554,6 +596,9 @@ function ensureChart(id){
   return charts[id];
 }
 const AXIS = { axisLine:{lineStyle:{color:'#3a4f46'}}, axisLabel:{color:'#8fa69c', fontSize:10}, splitLine:{lineStyle:{color:'#22322c'}} };
+// v1.7.2: Object.assign({...}, AXIS) 会用 AXIS.axisLabel 覆盖前面自定义的 formatter → y轴长数字挤在一起。
+// 修法：各图 yAxis 用 axY(自定义formatter) 合并，不再直接 Object.assign。
+const axY = (extra = {}) => Object.assign({ type:'value' }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) }, { scale: extra.scale, axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) });
 const TOOLTIP = { trigger:'axis', backgroundColor:'#1b2a25', borderColor:'#2a3d36', textStyle:{color:'#e8efe9', fontSize:12}, axisPointer:{lineStyle:{color:'#d9a441'}} };
 
 function renderAll(res, name, res2){
@@ -643,7 +688,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     legend:{textStyle:{color:'#8fa69c',fontSize:11}, top:0},
     grid:{left:50,right:14,top:30,bottom:24},
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
-    yAxis:Object.assign({type:'value', scale:true, axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}, AXIS),
+    yAxis:axY({scale:true, axisLabel:{formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}),
     series:[
       {name:'总资产(红利复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.value)), lineStyle:{width:2,color:'#d9a441'}, areaStyle:{color:'rgba(217,164,65,.12)'},
         markPoint:{ data: markPts, symbol:'pin', symbolSize:26, itemStyle:{color:'rgba(63,191,127,.85)'}, label:{show:false, position:'top', color:'#3fbf7f', fontSize:9} }},
@@ -659,7 +704,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis'}),
     grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:yrs.map(y=>y.year)}, AXIS),
-    yAxis:Object.assign({type:'value', axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> (v/1e4).toFixed(1)+'万'}}, AXIS),
+    yAxis:axY({axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),
     series:[{name:'分红到账(元)', type:'bar', data:yrs.map(y=>Math.round(y.divTotal)), itemStyle:{color:'#3fbf7f',borderRadius:[4,4,0,0]}, barMaxWidth:34,
       label:{show:true, position:'top', color:'#3fbf7f', fontSize:10, formatter:p=> (p.value/1e4).toFixed(1)+'万'}}]
   });
@@ -671,7 +716,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     legend:{textStyle:{color:'#8fa69c',fontSize:10}, top:0},
     grid:{left:50,right:14,top:28,bottom:24},
     xAxis:Object.assign({type:'category', data:yrs.map(y=>y.year)}, AXIS),
-    yAxis:Object.assign({type:'value', axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> v+'%'}}, AXIS),
+    yAxis:axY({axisLabel:{formatter:v=> v+'%'}}),
     series:[
       {name:'分红率(相对投入)', type:'bar', data:yrs.map(y=>+(y.rate*100).toFixed(2)), itemStyle:{color:'#d9a441',borderRadius:[4,4,0,0]}, barMaxWidth:22,
         label:{show:true, position:'top', color:'#d9a441', fontSize:9, formatter:p=> p.value+'%'}},
@@ -686,7 +731,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     backgroundColor:'transparent', tooltip:TOOLTIP,
     grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
-    yAxis:Object.assign({type:'value', scale:true, axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> (v/1e4).toFixed(1)+'万'}}, AXIS),
+    yAxis:axY({scale:true, axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),
     series:[{name:'持股数', type:'line', showSymbol:false, data:sd.map(x=>+x.shares.toFixed(2)), lineStyle:{width:2,color:'#5aa9e6'}, areaStyle:{color:'rgba(90,169,230,.12)'}}]
   });
 
@@ -870,8 +915,9 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   // 横竖屏/窗口变化时图表自适应
   window.addEventListener('resize', ()=>{ Object.keys(charts).forEach(k=>{ try{ charts[k].resize(); }catch(e){} }); });
 
-  // 买入日期快捷按钮
-  document.querySelectorAll('.quick button').forEach(b=>{
+  // 买入日期快捷按钮（仅回测页 buyDateQuick；P2-33 增加 今年初/去年初/上市日 锚点）
+  const bdq = document.getElementById('buyDateQuick');
+  if (bdq) bdq.querySelectorAll('button').forEach(b=>{
     b.onclick = ()=>{
       if(b.dataset.y){
         const t = new Date();
@@ -881,8 +927,30 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
       if(b.dataset.m !== undefined){
         $('monthly').value = b.dataset.m;
       }
+      if(b.dataset.anchor){
+        const now = new Date();
+        if(b.dataset.anchor === 'yStart') $('buyDate').value = now.getFullYear() + '-01-01';
+        if(b.dataset.anchor === 'yPrev') $('buyDate').value = (now.getFullYear()-1) + '-01-01';
+        if(b.dataset.anchor === 'ipo'){  // 上市日=该股K线最早日期
+          const code = $('code').value.trim();
+          if(/^\d{6}$/.test(code)){
+            const t = new Date();
+            t.setFullYear(t.getFullYear() - 25);   // 拉 25 年找最早
+            DL.getKline(code, t.toISOString().slice(0,10), DL.todayStr()).then(k=>{
+              const ds = Object.keys(k).sort();
+              if(ds.length){ $('buyDate').value = ds[0]; saveParams(); }
+            });
+            return;
+          }
+        }
+      }
       saveParams();
     };
+  });
+  // 每月追加快捷按钮（仅回测页 monthly 那组）
+  const mq = $('monthly').closest('.field');
+  if (mq) mq.querySelectorAll('.quick button').forEach(b=>{
+    b.onclick = ()=>{ if(b.dataset.m !== undefined){ $('monthly').value = b.dataset.m; saveParams(); } };
   });
 
   $('btnRun').onclick = ()=> run('live');
