@@ -11,23 +11,38 @@
 /* ---------- 公共：图例高度自适应（v1.8.4 大师 M2/M4：全站唯一实现）---------- */
 /* 流程：rAF→容器可见守卫→resize→设 legend 数字宽度(触发横排)→嵌套 rAF→读 legend 实际高度→grid.top=h+8 */
 window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
-  requestAnimationFrame(() => {
+  const measure = () => {
     try {
-      if (!el || el.clientWidth <= 0) return;   // M4 守卫：容器隐藏/0 宽时跳过测量，等可见后再触发
+      const views = chart._componentsViews || [];
+      const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
+      // zrender Group 用 getBoundingRect()（getBoundingClientRect 是 DOM 方法，Group 没有→曾致修复无效被 catch 吞掉）
+      const h = lgView && lgView.group ? lgView.group.getBoundingRect().height : 0;
+      if (h > 0) chart.setOption({ grid: { top: h + 8 } });
+      else if (gridTop) chart.setOption({ grid: { top: gridTop } });   // 兜底：读不到时用预设值
+    } catch (e) { if (gridTop) { try { chart.setOption({ grid: { top: gridTop } }); } catch (e2) {} } }
+  };
+  let done = false;
+  const finish = (fn) => { if (done) return; done = true; try { chart.off('finished', fn); } catch (e) {} };
+  const onFinished = () => { finish(onFinished); measure(); };
+  // 先注册 finished：容器隐藏/0 宽时不能 return 掉注册（曾致永远不测量→图例压轴）
+  chart.on('finished', onFinished);
+  const tryMeasure = () => {
+    if (!el || el.clientWidth <= 0) return false;   // 容器不可见→返回 false，由重试机制等可见
+    try {
       chart.resize();
       const w = el.clientWidth - 20;
-      chart.setOption({ legend: { width: Math.max(280, w) } });
-      requestAnimationFrame(() => {
-        try {
-          const views = chart._componentsViews || [];
-          const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
-          const h = lgView && lgView.group ? lgView.group.getBoundingRect().height : 0;
-          if (h > 0) chart.setOption({ grid: { top: h + 8 } });
-          else if (gridTop) chart.setOption({ grid: { top: gridTop } });   // 兜底：读不到时用预设值
-        } catch (e) { /* 保底 */ }
-      });
-    } catch (e) { /* 保底 */ }
+      chart.setOption({ legend: { width: Math.max(280, w) } });   // 触发新渲染→finished→onFinished→measure
+      return true;
+    } catch (e) { return false; }
+  };
+  requestAnimationFrame(() => {
+    if (tryMeasure()) return;
+    // 容器隐藏/0 宽：轮询等可见后再测（不中断注册）
+    const iv = setInterval(() => { if (tryMeasure()) clearInterval(iv); }, 200);
+    setTimeout(() => clearInterval(iv), 4000);
   });
+  // 超时兜底：finished 没触发也直接测一次
+  setTimeout(() => { finish(onFinished); measure(); }, 1200);
 };
 
 (function () {
@@ -527,6 +542,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     settled.forEach(r => { if (r) results.push(r); });
     if (status) status.textContent = '';
     if (!results.length) { el.style.display = 'block'; $('#cmpTbl').innerHTML = '<div class="hint err">全部失败</div>'; $('#cmpNote').textContent = errors.join('；'); return; }
+    el.style.display = 'block';   // v1.8.4c：先显示容器再绘三图+fitLegendTop（曾致 clientWidth=0 守卫拦截测量）
     if (errors.length || skipped.length) {
       const note = $('#cmpNote'); if (note) note.textContent = '⚠️ ' + [...skipped, ...errors].join('；');
     }
@@ -618,7 +634,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     cmpResults = results;
     renderCmpTable();
     $('#cmpNote').textContent = '本金 ' + fmt(principal, 0) + ' 元 · ' + (reinvest ? '复投' : '不复投') + ' · ' + (monthly > 0 ? '月供 ' + fmt(monthly, 0) + ' 元/月（每月首交易日追加，首月不追）' : '零月供') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源）' : '') + '｜股息率口径：报告期归组÷年末价（逐年），2026 年数据截至 ' + results[0].res.final.lastDate;
-    el.style.display = 'block';
     // URL 记忆（B2/B1：本金进 p、复投进 r；v1.7.3 月供进 m；v1.7.4 严格同期进 s）
     const q = new URLSearchParams(location.search);
     q.set('cmp', cmpState.list.map(x => x.market ? x.code + '.' + x.market.toUpperCase() : x.code).join(','));   // C2: 指数带后缀进 URL
