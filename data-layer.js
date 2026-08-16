@@ -72,14 +72,21 @@ function fetchJson(url, timeout = 15000) {
   return fetch(url, { signal: ctrl.signal }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).finally(() => clearTimeout(t));
 }
 function loadSinaKline(url, timeout = 15000) {
+  // v1.7.4 修复：新浪 jsonp_v2.php 用 URL 中函数名做回调（如 var%20_sina_kline_ 或自定义名）
+  // 原实现固定 var _sina_kline_ 返回 `var _sina_kline_([...])`（无等号）→ 语法错误 Unexpected token '('，
+  // script.onerror 不触发（语法错误不触发 onerror）→ 静默失败。改用动态回调名 + 双保险（onerror + 超时）。
   return new Promise((resolve, reject) => {
+    // 回调名白名单校验（大师 P4-补①：防注入）
+    const cbName = 'sina_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    if (!/^[a-zA-Z_][\w]*$/.test(cbName)) return reject(new Error('非法回调名'));
     const script = document.createElement('script');
-    const t = setTimeout(() => { cleanup(); reject(new Error('请求超时')); }, timeout);
-    function cleanup() { clearTimeout(t); script.remove(); }
-    const old = window._sina_kline_;
-    script.onload = () => { cleanup(); const d = window._sina_kline_; window._sina_kline_ = old; resolve(d); };
-    script.onerror = () => { cleanup(); window._sina_kline_ = old; reject(new Error('网络错误')); };
-    script.src = url;
+    const timer = setTimeout(() => { cleanup(); reject(new Error('请求超时')); }, timeout);
+    let done = false;
+    function cleanup() { clearTimeout(timer); script.remove(); try { delete window[cbName]; } catch (e) { window[cbName] = undefined; } }
+    window[cbName] = data => { if (done) return; done = true; cleanup(); resolve(Array.isArray(data) ? data : []); };
+    script.onload = () => { if (done) return; done = true; cleanup(); resolve([]); };   // 已回调则上面已 resolve；未回调(空数据)给空数组
+    script.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error('网络错误')); };
+    script.src = url.replace('var%20_sina_kline_', encodeURIComponent(cbName));
     document.head.appendChild(script);
   });
 }
@@ -417,11 +424,32 @@ const Watchlist = {
   },
 };
 
+/* ---------- 股息率（v1.7.4 方案C：按报告期归组，最近2个报告年度平均，大师P7裁决） ---------- */
+/* 口径：分红按报告期年份分组求和 → 取最近2个已派息报告年度 → 算术平均 → 年化每股分红 ÷ 现价
+ * 解决 365天滚动窗口的硬伤（工行一年两派：2025-07 派息被窗口挤出 → 4.10% 低估；
+ * 年末派息后窗口只剩 1 笔 → 2.2% 腰斩）。同口径跨公司可比。 */
+function calcAnnualDivYield(divs, price) {
+  if (!price || price <= 0) return null;
+  const years = {};
+  divs.forEach(d => {
+    if (d.pending || !d.ex || !d.report) return;
+    const y = d.report.slice(0, 4);
+    if (!y) return;
+    years[y] = (years[y] || 0) + d.dps;
+  });
+  const yearList = Object.keys(years).filter(y => years[y] > 0).sort().reverse();
+  if (!yearList.length) return null;
+  const recent = yearList.slice(0, 2);
+  const sum = recent.reduce((s, y) => s + years[y], 0);
+  const annualDps = sum / recent.length;
+  return { annualDps, yieldPct: annualDps / price * 100, years: recent, count: recent.length };
+}
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain,
-  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends,
+  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
 }

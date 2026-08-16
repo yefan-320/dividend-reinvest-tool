@@ -69,6 +69,19 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .foot b{color:var(--txt)}
 @media (max-width:480px){ header .sub{display:none} .chart{height:260px} }
 
+/* ===== v1.7.4 手机端布局优化（大师P1/P5） ===== */
+@media (max-width:480px){
+  #tab-compare .row{flex-direction:column}
+  #tab-compare .field{min-width:0;width:100%}
+  #tab-compare .field[style*="width:170px"]{width:100%}
+  #cmpYears .quick{flex-wrap:wrap}
+  #cmpYears .quick button{flex:1 1 28%;min-width:70px}
+  #cmpCustom{width:100%!important;margin-top:6px}
+  .cmp-tbl td,.cmp-tbl th{padding:6px 4px;font-size:11px}
+  .cmp-tbl td:first-child,.cmp-tbl th:first-child{position:sticky;left:0;background:var(--card);z-index:1;box-shadow:2px 0 4px rgba(0,0,0,.25)}
+  .cmp-tbl th:first-child{background:var(--card2)}
+}
+
 /* ===== v1.7.0 UI 美化（大师清单：卡片层级/数字规范/线型辅助） ===== */
 #tab-home .card:nth-of-type(2),
 #tab-home .card:nth-of-type(3){border:1px solid rgba(212,160,23,.3)}
@@ -170,7 +183,7 @@ body{padding-bottom:64px}
 <!-- ===== 对比 tab（第二批占位） ===== -->
 <section id="tab-compare" class="tab-panel" style="display:none">
   <div class="card">
-    <h2>📈 对比（同本金100万 · 红利复投 · 月供可调）</h2>
+    <h2>📈 对比（同本金 ¥1,000,000 · 红利复投 · 月供可调）</h2>
     <div class="row">
       <div class="field" style="flex:1">
         <label>添加标的（股票代码 / ETF / 名称搜索）</label>
@@ -185,12 +198,15 @@ body{padding-bottom:64px}
           <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
           <input id="cmpCustom" type="number" min="1" max="30" placeholder="自定义年" style="width:76px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         </div>
-        <div class="hint">周期内标的需满成立年限；月供为 0 时即零月供对比，口径统一</div>
+        <div class="hint">周期内上市不足的标的按实际上市日起算（可开严格同期）</div>
       </div>
-      <div class="field" style="width:180px">
+      <div class="field" style="width:170px">
         <label>每月追加（元，0=不追加）</label>
         <input id="cmpMonthly" value="0" inputmode="decimal" placeholder="0" style="width:100%;padding:6px 8px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         <div class="hint">所有标的同月供；每月首个交易日追加（首月不追）</div>
+        <label style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">
+          <input type="checkbox" id="cmpStrict" style="width:15px;height:15px;accent-color:var(--gold)"> 严格同期对比（不足周期则跳过）
+        </label>
       </div>
     </div>
     <div class="btnrow">
@@ -288,7 +304,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.7.3';
+const APP_VERSION = 'v1.7.4';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -338,16 +354,19 @@ function fetchJson(url, timeout=15000){
     .finally(()=>clearTimeout(t));
 }
 
-/* 新浪 K线 JSONP：返回 var _sina_kline_=([...]); 形式，加载后读全局变量 */
+/* 新浪 K线 JSONP（v1.7.4 修复：动态回调名，原固定名 var _sina_kline_ 返回无等号=语法错误） */
 function loadSinaKline(url, timeout=15000){
   return new Promise((resolve, reject)=>{
+    const cbName = 'sina_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
+    if(!/^[a-zA-Z_]\w*$/.test(cbName)) return reject(new Error('非法回调名'));
     const script = document.createElement('script');
     const t = setTimeout(()=>{ cleanup(); reject(new Error('请求超时')); }, timeout);
-    function cleanup(){ clearTimeout(t); script.remove(); }
-    const old = window._sina_kline_;
-    script.onload = ()=>{ cleanup(); const d = window._sina_kline_; window._sina_kline_ = old; resolve(d); };
-    script.onerror = ()=>{ cleanup(); window._sina_kline_ = old; reject(new Error('网络错误')); };
-    script.src = url;
+    let done = false;
+    function cleanup(){ clearTimeout(t); script.remove(); try{ delete window[cbName]; }catch(e){ window[cbName]=undefined; } }
+    window[cbName] = data => { if(done) return; done = true; cleanup(); resolve(Array.isArray(data) ? data : []); };
+    script.onload = ()=>{ if(done) return; done = true; cleanup(); resolve([]); };
+    script.onerror = ()=>{ if(done) return; done = true; cleanup(); reject(new Error('网络错误')); };
+    script.src = url.replace('var%20_sina_kline_', encodeURIComponent(cbName));
     document.head.appendChild(script);
   });
 }

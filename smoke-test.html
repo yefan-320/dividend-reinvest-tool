@@ -98,7 +98,7 @@ async function loadIndex(src, timeoutMs) {
 
     // 结论
     const hasFail = log.some(l => l.startsWith('❌'));
-    logEl.textContent = (hasFail ? 'SMOKE FAIL' : 'SMOKE PASS') + ' v1.7.3 ' + location.origin + '\n' + log.join('\n');
+    logEl.textContent = (hasFail ? 'SMOKE FAIL' : 'SMOKE PASS') + ' v1.7.4 ' + location.origin + '\n' + log.join('\n');
   } catch (e) {
     logEl.textContent = 'SMOKE ERROR: ' + e.message + '\n' + log.join('\n');
   }
