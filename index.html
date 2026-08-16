@@ -635,23 +635,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       {name:'累计投入', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#3fbf7f'}},
     ]
   });
-  // 图例换行后 grid.top 跟随（v1.8.3: rAF 双嵌套异步读高度——同步读=组件未渲染 h=0，曾致图例三行压住图表）
-  (function(){ try {
-    const chart = ch1;
-    requestAnimationFrame(() => {
-      try {
-        chart.resize();
-        requestAnimationFrame(() => {
-          try {
-            const views = chart._componentsViews || [];
-            const lg = views.find(v => v.type && v.type.indexOf('legend') === 0);
-            const h = lg && lg.group ? lg.group.getBoundingClientRect().height : 0;
-            if (h > 0) chart.setOption({ grid: { top: h + 8 } });
-          } catch (e) { }
-        });
-      } catch (e) { }
-    });
-  } catch(e){} })();
+  window.fitLegendTop(ch1, $('#chartAsset'), 36);   // v1.8.4 大师 M2/M4：统一全局实现（旧内联 rAF 已删）
 
   // 2+3. 分红图/率/表 口径切换（A1/A2：radio 到账年/报告期，默认到账年·主人拍板；动态标题+跨年注释+时点标注）
   const divModeEls = document.querySelectorAll('input[name=divMode]');
@@ -687,22 +671,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
           label:{show:true, position:'top', color:'#3fbf7f', fontSize:9, formatter:p=> p.value+'%'}},
       ]
     });
-    (function(){ try {
-      const chart = ch3;
-      requestAnimationFrame(() => {
-        try {
-          chart.resize();
-          requestAnimationFrame(() => {
-            try {
-              const views = chart._componentsViews || [];
-              const lg = views.find(v => v.type && v.type.indexOf('legend') === 0);
-              const h = lg && lg.group ? lg.group.getBoundingClientRect().height : 0;
-              if (h > 0) chart.setOption({ grid: { top: h + 8 } });
-            } catch (e) { }
-          });
-        } catch (e) { }
-      });
-    } catch(e){} })();
+    window.fitLegendTop(ch3, $('#chartRate'), 36);   // v1.8.4 大师 M2/M4：统一全局实现（旧内联 rAF 已删）
     // 表格跟随
     renderYearTable(mode === 'report' ? (res.reportYears || []) : res.years, mode);
     // 跨年注释 + 时点标注

@@ -7,6 +7,29 @@
  * 数据全部走 window.DL（data-layer.js）
  * ============================================================ */
 'use strict';
+
+/* ---------- 公共：图例高度自适应（v1.8.4 大师 M2/M4：全站唯一实现）---------- */
+/* 流程：rAF→容器可见守卫→resize→设 legend 数字宽度(触发横排)→嵌套 rAF→读 legend 实际高度→grid.top=h+8 */
+window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
+  requestAnimationFrame(() => {
+    try {
+      if (!el || el.clientWidth <= 0) return;   // M4 守卫：容器隐藏/0 宽时跳过测量，等可见后再触发
+      chart.resize();
+      const w = el.clientWidth - 20;
+      chart.setOption({ legend: { width: Math.max(280, w) } });
+      requestAnimationFrame(() => {
+        try {
+          const views = chart._componentsViews || [];
+          const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
+          const h = lgView && lgView.group ? lgView.group.getBoundingRect().height : 0;
+          if (h > 0) chart.setOption({ grid: { top: h + 8 } });
+          else if (gridTop) chart.setOption({ grid: { top: gridTop } });   // 兜底：读不到时用预设值
+        } catch (e) { /* 保底 */ }
+      });
+    } catch (e) { /* 保底 */ }
+  });
+};
+
 (function () {
   const DL = window.DL;
   const $ = DL.$;
@@ -514,26 +537,7 @@
       if (st) { st.textContent = 'ℹ️ ' + shortOnes.map(r => `${r.it.name} 自 ${r.actualStart} 起算（实际存续约 ${r.liveYears} 年）`).join('；') + '（所选 ' + y + ' 年，上市不足）'; st.className = 'status'; }
     }
     // 总资产走势图（P1-26：对比图只画总资产+股息率；累计分红只进表格；v1.7.4 P2：5色提亮+线型双通道+图例12px+点标记）
-    // 图例自适应：容器显示后 rAF 设数字宽度（ECharts 5.5.0 百分比解析 bug + 隐藏容器 clientWidth=0 兜底害事）
-    // → 先设宽度触发横排布局，再读实际高度调 grid.top（防 y 轴被压）
-    function fitLegendTop(chart, el, gridTop) {
-      requestAnimationFrame(() => {
-        try {
-          // 先 resize：图表在容器隐藏时 init，canvas 只有默认 100px，显示后必须 resize 恢复真实尺寸
-          chart.resize();
-          const w = el.clientWidth - 20;
-          chart.setOption({ legend: { width: Math.max(280, w) } });
-          requestAnimationFrame(() => {
-            try {
-              const views = chart._componentsViews || [];
-              const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
-              const h = lgView && lgView.group ? lgView.group.getBoundingRect().height : 0;
-              if (h > 0) chart.setOption({ grid: { top: h + 8 } });
-            } catch (e) { /* 保底 */ }
-          });
-        } catch (e) { /* 保底 */ }
-      });
-    }
+    // 图例自适应：v1.8.4 全局 window.fitLegendTop（大师 M2：全站唯一实现，此局部定义已删）
     const ch1 = cmpEnsureChart('cmpChartAsset');
     // x 轴防挤：日线数据抽样（最多 ~400 点），图例名称截断防分页（全名留在 tooltip）
     // 主轴 = 最早/最长数据标的（v1.8.2: 原来只取 results[0]→若第一个标的上市晚，选 10 年也只显示它的存续期）
@@ -592,7 +596,7 @@
         };
       }),
     });
-    (function(){ try { const v = (chDiv._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) chDiv.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
+    window.fitLegendTop(chDiv, $('#cmpChartDiv'), 34);   // v1.8.4 大师 M2：统一全局实现（旧同步读内联已删，同步读=0 无效）
     // B3：股息率逐年折线（报告期归组 ÷ 年末价，替代单值柱状；多标的多线）
     const ch2 = cmpEnsureChart('cmpChartYield');
     const yieldYearsAll = [...new Set(results.flatMap(r => (r.yieldSeries || []).map(p => p.y)))].sort();
@@ -600,7 +604,7 @@
       backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => v != null ? v.toFixed(2) + '%' : '—' }),
       legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
       grid: { left: 54, right: 14, top: 20, bottom: 24 },
-      xAxis: Object.assign({ type: 'category', data: yieldYearsAll }, AXIS),
+      xAxis: Object.assign({ type: 'category', data: yieldYearsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yieldYearsAll.length > 10 ? Math.ceil(yieldYearsAll.length / 8) : 'auto' }) }),   // v1.8.4 大师 M5：25 年份(2002-2026)窄屏必重叠，显式抽稀兜底
       yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
       series: results.map((r, i) => ({
         name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
@@ -609,7 +613,7 @@
         itemStyle: { color: CMP_COLORS[i % 5] },
       })),
     });
-    (function(){ try { const v = (ch2._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) ch2.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
+    window.fitLegendTop(ch2, $('#cmpChartYield'), 34);   // v1.8.4 大师 M2：统一全局实现
     // 表格（B4：股息率两列=近2财年+逐年；B8：表头排序；B10：存续年限；C8：类型标签）
     cmpResults = results;
     renderCmpTable();
