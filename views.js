@@ -536,8 +536,10 @@
     }
     const ch1 = cmpEnsureChart('cmpChartAsset');
     // x 轴防挤：日线数据抽样（最多 ~400 点），图例名称截断防分页（全名留在 tooltip）
-    const daily0 = results[0].res.daily;
-    const step = Math.max(1, Math.floor(daily0.length / 400));
+    // 主轴 = 最早/最长数据标的（v1.8.2: 原来只取 results[0]→若第一个标的上市晚，选 10 年也只显示它的存续期）
+    const master = results.reduce((a, b) => a.res.daily.length >= b.res.daily.length ? a : b);
+    const daily0 = master.res.daily;
+    const step = Math.max(1, Math.floor(daily0.length / 600));
     const idx = daily0.map((_, i) => i).filter(i => i % step === 0);
     const allDates = idx.map(i => daily0[i].date);
     const CMP_COLORS = ['#f2c94c', '#5aa9e6', '#3fbf7f', '#c46ae0', '#e06666'];   // 金(提亮)/蓝/青/紫/红
@@ -547,7 +549,7 @@
       backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, formatter: ps => {
         const x = daily0[idx[ps[0].dataIndex]];
         let s = '<b>' + x.date + '</b><br/>';
-        ps.forEach(p => { s += p.marker + p.seriesName + '：<b>' + fmt(p.value, 0) + '</b> 元<br/>'; });
+        ps.forEach(p => { s += p.marker + p.seriesName + '：<b>' + (p.value != null ? fmt(p.value, 0) : '—') + '</b> 元<br/>'; });
         results.forEach(r => {   // B6: 除息日 tooltip（悬停显示，不常驻）
           const ev = r.divByDate[x.date];
           if (ev && ev.length) s += '<span style="color:#3fbf7f">📅 ' + shortName(r.it.name) + ' 除息：' + ev.map(e => '派' + (e.dps * 10).toFixed(2) + '元').join('、') + '</span><br/>';
@@ -558,12 +560,16 @@
       grid: { left: 54, right: 14, top: 20, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ scale: true, axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
-      series: results.map((r, i) => ({
-        name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
-        data: idx.map(j => Math.round(r.res.daily[j].value)),
-        lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: 'solid' },   // B5: 全实线
-        itemStyle: { color: CMP_COLORS[i % 5] },
-      })),
+      series: results.map((r, i) => {
+        const vmap = {};
+        r.res.daily.forEach(x => { vmap[x.date] = x.value; });   // 各标的按日期对齐（缺=null 断点）
+        return {
+          name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
+          data: allDates.map(d => vmap[d] != null ? Math.round(vmap[d]) : null),
+          lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: 'solid' },   // B5: 全实线
+          itemStyle: { color: CMP_COLORS[i % 5] },
+        };
+      }),
     });
     fitLegendTop(ch1, $('#cmpChartAsset'), 34);
     // B9：累计分红曲线（多标的叠加，与总资产同轴语义：分红累计到账）
@@ -575,11 +581,10 @@
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => {
-        // 按日期累计分红（用抽样日对齐总资产图）
+        // 按日期累计分红（对齐主轴 allDates，缺=null）
         let cum = 0; const evMap = {};
         r.res.divEvents.forEach(e => { evMap[e.date] = (evMap[e.date] || 0) + e.cash; });
-        const data = [];
-        daily0.forEach((x, j) => { if (evMap[x.date]) cum += evMap[x.date]; if (j % step === 0) data.push(Math.round(cum)); });
+        const data = allDates.map(d => { if (evMap[d]) cum += evMap[d]; return cum > 0 ? Math.round(cum) : null; });
         return {
           name: r.it.name, type: 'line', showSymbol: false, data,
           lineStyle: { width: 1.8, color: CMP_COLORS[i % 5], type: 'solid' },

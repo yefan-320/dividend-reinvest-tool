@@ -328,7 +328,12 @@ async function fetchKlineTx(txPrefix, start, end) {
       const node = d && d.data && d.data[txPrefix];
       rows = (node && node.day) || [];
     } catch (e) { /* 尝试下一段 */ }
-    if (!rows.length) break;
+    if (!rows.length) {
+      // v1.8.2 修复：上市晚的标的（515080 2019 上市），起点前段为空 → 跳过该段继续，不提前终止（曾致 10 年周期下无数据）
+      const nd = new Date(segEnd); nd.setDate(nd.getDate() + 1);
+      cur = nd.toISOString().slice(0, 10);
+      continue;
+    }
     rows.forEach(r => { map[r[0]] = parseFloat(r[2]); });
     const last = rows[rows.length - 1][0];
     if (last >= end) break;

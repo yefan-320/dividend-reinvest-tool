@@ -760,7 +760,23 @@ async function run(sim, note){
   const reinvest = $('reinvest').checked;
   const monthly = parseFloat($('monthly').value) || 0;
   window.CURRENT_MONTHLY = monthly;
-  if(!/^\d{6}$/.test(code)) return setStatus('请输入 6 位股票代码', true);
+  if(!/^\d{6}$/.test(code)){
+    // v1.8.2: 支持名称查询（如"招商银行"→600036），与对比页同源解析
+    try {
+      const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(code) + '&type=14&count=5', 'cb');
+      const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
+      const hit = list.find(x => x.Code && /^\d{6}$/.test(x.Code)) || list[0];
+      if (hit && hit.Code && /^\d{6}$/.test(hit.Code)) {
+        code = hit.Code;
+        $('code').value = code;
+        const hint = $('codeHint'); if (hint) { hint.textContent = '已解析：' + (hit.Name || '') + '（' + code + '）'; hint.className = 'hint'; }
+      } else {
+        return setStatus('未找到「' + code + '」，请输入 6 位代码或正确名称', true);
+      }
+    } catch(e) {
+      return setStatus('名称解析失败：' + e.message + '，请直接输入 6 位代码', true);
+    }
+  }
   if(!(principal>0)) return setStatus('请输入正确的初始本金', true);
   if(!buyDate) return setStatus('请选择买入日期', true);
 
@@ -818,7 +834,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
     clearTimeout(timer);
     const code = input.value.trim();
     if(!/^\d{6}$/.test(code)){
-      hint.textContent = code ? '请输入 6 位股票代码' : '';
+      hint.textContent = code ? '支持 6 位代码或名称（如 600036 / 招商银行）' : '';
       hint.className = 'hint err';
       $('btnDemo').textContent = '用招行演示数据';
       return;
