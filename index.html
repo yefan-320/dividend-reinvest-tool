@@ -67,6 +67,39 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .foot{font-size:11px;color:var(--sub);line-height:1.7;margin-top:16px}
 .foot b{color:var(--txt)}
 @media (max-width:480px){ header .sub{display:none} .chart{height:260px} }
+
+/* ===== v1.7.0 UI 美化（大师清单：卡片层级/数字规范/线型辅助） ===== */
+#tab-home .card:nth-of-type(2),
+#tab-home .card:nth-of-type(3){border:1px solid rgba(212,160,23,.3)}
+.stat .v,.tbl td,.tbl th,.wl-main,.scan-row b{font-variant-numeric:tabular-nums}
+.stat .v{letter-spacing:.2px}
+#btnScan{margin-top:12px}
+
+
+/* ===== v1.7.0 新增样式 ===== */
+.tab-panel{display:block}
+.tabbar{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:100;padding-bottom:env(safe-area-inset-bottom)}
+.tabbar button{flex:1;padding:10px 0;background:transparent;border:none;color:var(--sub);font-size:12px;cursor:pointer;transition:color .2s}
+.tabbar button.active{color:var(--gold);font-weight:700}
+body{padding-bottom:64px}
+.chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;margin:3px}
+.wl-card{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.wl-card:active{transform:scale(.98)}
+.wl-head{display:flex;align-items:center;gap:8px}
+.wl-code{color:var(--sub);font-size:11px}
+.wl-del{margin-left:auto;background:none;border:none;color:var(--sub);font-size:14px;cursor:pointer}
+.wl-main{margin-top:6px;font-size:15px}
+.wl-price{color:var(--sub);font-size:12px;margin-left:8px}
+.alert-item{background:var(--card2);border:1px solid rgba(217,164,65,.4);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:13px;color:var(--gold)}
+.cal-item{font-size:12px;padding:4px 0;border-bottom:1px solid var(--line)}
+.cal-date{color:var(--gold);font-weight:600;margin-right:6px}
+.scan-row{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;font-size:13px}
+.scan-row:active{transform:scale(.98)}
+.rhythm-row{font-size:12px;padding:3px 0}
+.rhythm-year{display:inline-block;width:44px;color:var(--sub)}
+.rhythm-m{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin:1px;font-size:11px}
+.risk-badge{background:rgba(224,102,102,.15);color:var(--red);border:1px solid rgba(224,102,102,.4);border-radius:4px;padding:0 5px;font-size:10px;margin-left:4px}
+
 </style>
 </head>
 <body>
@@ -76,6 +109,68 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
   <span class="sub" id="headerInfo">A股 · 价值投资 · 整手模型</span>
 </header>
 
+<!-- ===== 决策台 tab（v1.7.0 新增） ===== -->
+<section id="tab-home" class="tab-panel">
+  <div class="card">
+    <h2>🔍 搜索</h2>
+    <input id="homeSearch" placeholder="输入 6 位代码或名称（回车诊断）">
+    <div class="hint" id="homeSearchHint">例：600036 或 招商银行</div>
+  </div>
+  <div class="card">
+    <h2>📌 机会速览</h2>
+    <div id="homeOpportunities"><div class="hint">加载中…</div></div>
+  </div>
+  <div class="card">
+    <h2>⭐ 我的自选 <span class="hint" style="float:right" id="wlFresh">—</span></h2>
+    <div id="homeWatchlist"></div>
+  </div>
+  <div class="card">
+    <h2>📅 除息日历（未来30天）</h2>
+    <div id="homeDivCalendar"></div>
+  </div>
+  <div class="card" id="scanPanel" style="display:none">
+    <h2>🔍 红利股扫描器</h2>
+  </div>
+  <button class="btn" id="btnScan">🔍 扫描新机会（全市场高股息）</button>
+  <div class="hint" style="margin-top:8px">扫描口径：近12月已宣告分红÷现价 ≥ 4%、市值≥50亿、排除ST（阈值后续可调）</div>
+</section>
+
+<!-- ===== 诊断 tab（v1.7.0 新增） ===== -->
+<section id="tab-diagnose" class="tab-panel" style="display:none">
+  <div class="card" id="diagEmpty">
+    <h2>🔬 单股诊断</h2>
+    <div class="hint">从决策台搜索或点击自选卡片进入。</div>
+  </div>
+  <div id="diagContent" style="display:none">
+    <div class="card"><h2 id="diagTitle">诊断</h2></div>
+    <div class="card">
+      <h2>📊 股息率历史分位（近5年）</h2>
+      <div class="chart tall" id="diagYieldChart"></div>
+      <div class="hint" id="diagYieldNote"></div>
+    </div>
+    <div class="card">
+      <h2>🔑 关键数据</h2>
+      <div id="diagStats"></div>
+    </div>
+    <div class="card">
+      <h2>🗓 分红节奏</h2>
+      <div id="diagRhythm"></div>
+    </div>
+    <button class="btn" id="btnDiagBacktest">📊 回测验证这只股票</button>
+  </div>
+</section>
+
+<!-- ===== 对比 tab（第二批占位） ===== -->
+<section id="tab-compare" class="tab-panel" style="display:none">
+  <div class="card">
+    <h2>📈 对比</h2>
+    <div id="compareBody"><div class="hint">加载中…</div></div>
+  </div>
+</section>
+
+
+<!-- ===== 回测 tab（v1.7.0 平移，功能不动） ===== -->
+<section id="tab-backtest" class="tab-panel" style="display:none">
 <div class="card">
   <h2>参数设置</h2>
   <div class="row">
@@ -138,12 +233,27 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
   <b>风险提示：</b>历史数据回测不代表未来收益，本工具仅供学习研究，不构成投资建议。<br>
   <span id="appVer" style="color:#d9a441"></span>
 </div>
-</div>
+</section></div>
 
 <script src="demo-data.js"></script>
+<script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.6.0';
+const APP_VERSION = 'v1.7.0';
+/* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
+(function(){
+  try{
+    const last = localStorage.getItem('divtool_ver_seen');
+    if(last && last !== APP_VERSION){
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;background:#c0862e;color:#201703;font-size:12px;padding:8px 12px;text-align:center;cursor:pointer';
+      bar.textContent = '🛠 v1.7.0：送转股持股/收益口径已修正（旧结果可能与新计算有差异），刷新后自动重算';
+      bar.onclick = ()=>{ bar.remove(); localStorage.setItem('divtool_ver_seen', APP_VERSION); };
+      document.body.appendChild(bar);
+    }
+    localStorage.setItem('divtool_ver_seen', APP_VERSION);
+  }catch(e){}
+})();
 /* 全局错误捕获：出问题时直接显示在状态栏，方便排查 */
 window.onerror = (msg, src, line, col, err)=>{
   const el = $('status');
@@ -242,14 +352,18 @@ async function fetchDividends(code){
   return parseDivs(rows2);
 }
 function parseDivs(rows){
+  // ⚠️ v1.7.0 送转口径修复（2026-08-16 实测）：BONUS_IT_RATIO=送转合计(每10股)，IT_RATIO=转增部分
+  // 旧版 song+zhuan 对纯转增翻倍（10转4.5→0.9 应 0.45），导致持股虚增、收益虚高
   return rows.map(r => ({
     report:(r.REPORT_DATE||'').slice(0,10),
     ex:(r.EX_DIVIDEND_DATE||'').slice(0,10),
     record:(r.EQUITY_RECORD_DATE||'').slice(0,10),
     dps:(parseFloat(r.PRETAX_BONUS_RMB)||0)/10,      // 元/股
-    song:(parseFloat(r.BONUS_IT_RATIO)||0)/10,        // 每股送股
-    zhuan:(parseFloat(r.IT_RATIO)||0)/10,             // 每股转增
-  })).filter(x => x.ex && (x.dps>0 || x.song>0 || x.zhuan>0));
+    bonus:(parseFloat(r.BONUS_IT_RATIO)||0)/10,      // 每股送转合计（修复后口径）
+    zhuanOnly:(parseFloat(r.IT_RATIO)||0)/10,        // 仅展示：每股转增部分
+    progress:r.ASSIGN_PROGRESS||'',
+    profile:r.IMPL_PLAN_PROFILE||'',
+  })).filter(x => x.ex && (x.dps>0 || x.bonus>0));
 }
 /* K线：腾讯 CORS 直连（主源，已验证支持 CORS）。
    注意：腾讯按“区间内末尾 count 条”返回，区间超过上限会丢开头，
@@ -336,7 +450,7 @@ function simulate(principal, buyDate, reinvest, closes, dividends){
       let cash = 0;
       ev.forEach(x => {
         cash += shares * x.dps;
-        const bonus = x.song + x.zhuan;                 // 送转股（除权日复权，直接加股数，可产生零股）
+        const bonus = x.bonus;                          // 送转股（v1.7.0 口径：送转合计，修复旧版翻倍 bug）
         if(bonus > 0) shares += shares * bonus;
       });
       divYearTotal += cash; divCountYear++;
@@ -483,6 +597,13 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   const step = Math.max(1, Math.floor(daily.length/1200));
   const sd = daily.filter((_,i)=> i%step===0);
   const sd2 = res2 ? res2.daily.filter((_,i)=> i%step===0) : null;
+  // v1.7.0 事件标注：除息/送转日标到曲线上（markPoint）
+  const evMap = {};
+  daily.forEach(x => { evMap[x.date] = x.value; });
+  const markPts = res.divEvents
+    .map(ev => ({ name: ev.date + (ev.cash>0 ? ' 派'+fmt(ev.cash/10000,2)+'万' : ' 送转'), coord: [ev.date, evMap[ev.date]] }))
+    .filter(p => p.coord[1] != null)
+    .slice(-12);   // 最多标最近 12 次，防乱
   const ch1 = ensureChart('chartAsset');
   ch1.setOption({
     backgroundColor:'transparent',
@@ -498,7 +619,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
     yAxis:Object.assign({type:'value', scale:true, axisLabel:{color:'#8fa69c',fontSize:10, formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}, AXIS),
     series:[
-      {name:'总资产(红利复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.value)), lineStyle:{width:2,color:'#d9a441'}, areaStyle:{color:'rgba(217,164,65,.12)'}},
+      {name:'总资产(红利复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.value)), lineStyle:{width:2,color:'#d9a441'}, areaStyle:{color:'rgba(217,164,65,.12)'},
+        markPoint:{ data: markPts, symbol:'pin', symbolSize:26, itemStyle:{color:'rgba(63,191,127,.85)'}, label:{show:false, position:'top', color:'#3fbf7f', fontSize:9} }},
       {name:'总资产(分红不买股)', type:'line', showSymbol:false, data:sd2? sd2.map(x=>Math.round(x.value)) : [], lineStyle:{width:1.5,color:'#5aa9e6',type:'dashed'}},
       {name:'累计投入(本金+复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#3fbf7f'}},
     ]
@@ -622,7 +744,7 @@ async function run(sim, note){
     setStatus(name+'：分红数据 '+divs.length+' 条 ✓，拉取行情…');
     try{
       const g = guessSec(code);
-      const closes = await fetchKline(g.tx, buyDate, todayStr());
+      const closes = await DL.getKline(code, buyDate, DL.todayStr());   // v1.7.0：走缓存层（IndexedDB + qfq + 新浪备源）
     const cnt = Object.keys(closes).length;
     if(!cnt){
       setStatus('⚠️ 实时行情获取失败（腾讯/新浪接口均不可用），已自动回退招行演示数据，可稍后重试', true);
@@ -731,5 +853,12 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   if(params.get('code')) run('live'); else run('demo');
 })();
 </script>
+<nav class="tabbar">
+  <button data-tab="home" class="active">🏠 决策台</button>
+  <button data-tab="diagnose">🔬 诊断</button>
+  <button data-tab="compare">📈 对比</button>
+  <button data-tab="backtest">📊 回测</button>
+</nav>
+<script src="views.js"></script>
 </body>
 </html>

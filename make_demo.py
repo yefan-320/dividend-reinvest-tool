@@ -19,8 +19,8 @@ for r in d:
         'ex': ex,
         'record': (r.get('EQUITY_RECORD_DATE') or '')[:10],
         'dps': dps,
-        'song': float(song or 0) / 10.0,
-        'zhuan': float(zhuan or 0) / 10.0,
+        'bonus': float(song or 0) / 10.0,       # v1.7.0: 送转合计（BONUS_IT_RATIO/10）
+        'zhuanOnly': float(zhuan or 0) / 10.0,  # 仅展示：转增部分
     })
 divs = [x for x in divs if x['ex']]  # 只要已除息的
 
