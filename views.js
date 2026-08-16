@@ -367,7 +367,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   // B8: 表格渲染（可排序）
   const yieldSeriesStr = r => (r.yieldSeries || []).filter(p => p.v != null).slice(-4).map(p => p.y + ' ' + p.v.toFixed(1) + '%').join(' · ') || '—';
   function renderCmpTable() {
-    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.principal + (r.res.final.monthlyTotal || 0), div: r.res.final.totalDiv, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
+    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.final.finalInvested, div: r.res.final.totalDiv, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
     const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
       const va = getVal(a), vb = getVal(b);
       if (va == null && vb == null) return 0;
@@ -381,7 +381,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       list.map((r, i) => `<tr>
         <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
-        <td>${fmt(r.res.principal + (r.res.final.monthlyTotal || 0), 0)} 元</td>
+        <td>${fmt(r.res.final.finalInvested, 0)} 元</td>   <!-- v1.8.8: 口径与回测页一致（本金+追加+复投），曾只算本金致两边数字对不上 -->
         <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
         <td>${r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' : '—'}</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
