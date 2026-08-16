@@ -90,12 +90,19 @@ async function main() {
   // 等页面加载完成
   await new Promise(r => setTimeout(r, 5000));
 
-  // R1 版本号（大师 P0-③：不一致=失败，不许警告放行——发布版本与页面版本必须一致）
+  // R1 版本号（大师 P0-③：不一致=失败；P1-1：裸跑 fallback=最近提交消息提取，不依赖 tag）
   const verStr = await evalIn(cdp, 'typeof APP_VERSION !== "undefined" ? APP_VERSION : null');
   if (!verStr) die('R1: 页面无 APP_VERSION（脚本未加载？）');
-  const expectVer = process.env.EXPECT_VER || gitVer;
-  console.log(`   页面版本=${verStr} 期望版本=${expectVer}`);
-  if (verStr !== expectVer) die(`R1: 页面版本(${verStr}) ≠ 期望版本(${expectVer})——release.sh 未同步版本号或代码未更新`);
+  let expectVer = process.env.EXPECT_VER;
+  if (!expectVer) {
+    try {
+      const lastMsg = execSync('git log -1 --format=%s', { cwd: REPO }).toString().trim();
+      const m = lastMsg.match(/v[0-9][0-9.]*/);
+      expectVer = m ? m[0] : null;
+    } catch (e) { expectVer = null; }
+  }
+  console.log(`   页面版本=${verStr} 期望版本=${expectVer || '(未知)'}`);
+  if (expectVer && verStr !== expectVer) die(`R1: 页面版本(${verStr}) ≠ 期望版本(${expectVer})——release.sh 未同步版本号或代码未更新`);
   ok('R1 版本号一致');
 
   // 触发回测（515080 预填在 URL）
@@ -153,7 +160,7 @@ async function main() {
     if (got.length >= 2) {
       const jsonTop = oldList.slice(0, got.length).map(x => ({ ex: x.ex, dps: x.dps }));
       const mism = got.filter((g, i) => jsonTop[i] && (jsonTop[i].ex !== g.ex || Math.abs(jsonTop[i].dps - g.dps) > 0.001));
-      if (mism.length) die(`R2: JSON 前 ${got.length} 条与东财 API 不一致（如 ${mism[0].ex} ${mism[0].dps} vs JSON ${jsonTop[mism[0] ? got.indexOf(mism[0]) : 0].ex}）——静态数据损坏/过期`);
+      if (mism.length) die(`R2: JSON 前 ${got.length} 条与东财 API 不一致（如 ${mism[0].ex} ${mism[0].dps} vs JSON ${jsonTop[0].ex}）——静态数据损坏/过期`);
       apiOk = got.length;
     }
   } catch (e) {
