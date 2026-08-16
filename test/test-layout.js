@@ -38,5 +38,16 @@ const callPos = html.indexOf('window.fitLegendTop(ch1');
 const fnPos = html.indexOf('function renderAllFull(');
 ok('6b. ch1 调用在 renderAllFull 内（点击时执行，非顶层）', callPos > fnPos && callPos < html.indexOf('function run('));
 
+// 7. 大师 M4 静态断言：grid.top 动态化 / legend 高度测量 / 四图调用点
+// 7a. 回测页 ch1 grid.top 预设 36（动态高度会覆盖为 h+8，静态写死仅作兜底）
+ok('7a. 回测 ch1 grid.top 预设存在', /grid:\{left:50,right:14,top:36,bottom:24\}/.test(html));
+// 7b. 对比页三图 grid.top 预设 34
+const grid34 = (views.match(/grid: \{ left: 54, right: 14, top: 34, bottom: 24 \}/g) || []).length;
+ok('7b. 对比页三图 grid.top 预设 34', grid34 === 3);
+// 7c. 全局实现里存在 legend 高度读取（非恒 0 坏补丁：读 getBoundingRect().height）
+ok('7c. legend 高度测量存在', /getBoundingRect\(\)\.height/.test(views));
+// 7d. 全局实现里存在 grid.top 动态设置（h+8）
+ok('7d. grid.top 动态设置 (h+8)', /grid: \{ top: h \+ 8 \}/.test(views));
+
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);

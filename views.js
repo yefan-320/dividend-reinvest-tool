@@ -561,7 +561,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         return s;
       } }),
       legend: { textStyle: { color: '#8fa69c', fontSize: 12 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 28, itemHeight: 14, formatter: shortName },
-      grid: { left: 54, right: 14, top: 20, bottom: 24 },
+      grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ scale: true, axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => {
@@ -581,7 +581,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     chDiv.setOption({
       backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => fmt(v, 0) + ' 元' }),
       legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
-      grid: { left: 54, right: 14, top: 20, bottom: 24 },
+      grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => {
@@ -603,7 +603,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     ch2.setOption({
       backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => v != null ? v.toFixed(2) + '%' : '—' }),
       legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
-      grid: { left: 54, right: 14, top: 20, bottom: 24 },
+      grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: yieldYearsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yieldYearsAll.length > 10 ? Math.ceil(yieldYearsAll.length / 8) : 'auto' }) }),   // v1.8.4 大师 M5：25 年份(2002-2026)窄屏必重叠，显式抽稀兜底
       yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
       series: results.map((r, i) => ({
