@@ -268,7 +268,7 @@ window.onerror = (msg, src, line, col, err)=>{
 };
 const fmt = (n, d=2) => (n==null?'—':Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}));
 const fmtPct = (n, d=2) => (n==null?'—':(n*100).toFixed(d)+'%');
-const $ = id => document.getElementById(id);
+const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼容 # 前缀
 
 /* JSONP 加载器：paramName 区分接口（东财 callback= / 腾讯 jsonp=） */
 function jsonp(url, paramName, timeout=15000){

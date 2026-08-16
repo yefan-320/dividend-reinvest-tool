@@ -19,7 +19,7 @@ const CALIB = {
 /* ---------- 工具函数 ---------- */
 const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString('zh-CN', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtPct = (n, d = 2) => (n == null ? '—' : (n * 100).toFixed(d) + '%');
-const $ = id => document.getElementById(id);
+const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼容 # 前缀（2026-08-16 修复：views.js 全站 # 风格调用）
 const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
 /* ---------- 限流队列（串行 + 间隔 + 重试指数退避；腾讯/东财时间窗口型限流应对 P2-19） ---------- */
