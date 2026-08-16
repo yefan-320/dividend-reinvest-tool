@@ -326,7 +326,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.8.0';
+const APP_VERSION = 'v1.8.4';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -946,7 +946,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   };
   // 版本号
   const ver = $('appVer');
-  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-03 · 若页面异常请强制刷新（下拉或清除缓存）';
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-17 · 若页面异常请强制刷新（下拉或清除缓存）';
 
   // URL 带 code → 自动联网回测该股票；否则离线演示
   if(params.get('code')) run('live'); else run('demo');
