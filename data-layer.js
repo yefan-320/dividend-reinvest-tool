@@ -19,7 +19,9 @@ const CALIB = {
 /* ---------- 工具函数 ---------- */
 const fmt = (n, d = 2) => (n == null ? '—' : Number(n).toLocaleString('zh-CN', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtPct = (n, d = 2) => (n == null ? '—' : (n * 100).toFixed(d) + '%');
-const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼容 # 前缀（2026-08-16 修复：views.js 全站 # 风格调用）
+/* 选择器规范（2026-08-16 大师 P2-31）：统一接受带/不带 #；新代码一律用原生 getElementById(id) 或 $('id')（不带 #），
+ * 禁止再引入其他选择器风格（如 jQuery $ 语义、querySelector 混用）——$ bug 就是风格混用 9 轮未暴露的教训 */
+const $ = id => document.getElementById(String(id).replace(/^#/, ''));
 const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
 /* ---------- 限流队列（串行 + 间隔 + 重试指数退避；腾讯/东财时间窗口型限流应对 P2-19） ---------- */
