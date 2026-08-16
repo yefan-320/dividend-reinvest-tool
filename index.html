@@ -70,16 +70,22 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 @media (max-width:480px){ header .sub{display:none} .chart{height:260px} }
 
 /* ===== v1.7.4 手机端布局优化（大师P1/P5） ===== */
-@media (max-width:480px){
-  #tab-compare .row{flex-direction:column}
-  #tab-compare .field{min-width:0;width:100%}
-  #tab-compare .field[style*="width:170px"]{width:100%}
+@media (max-width:900px){
+  #tab-compare .row{flex-wrap:wrap}
+  #tab-compare .field{flex:1 1 45%;min-width:200px}
   #cmpYears .quick{flex-wrap:wrap}
-  #cmpYears .quick button{flex:1 1 28%;min-width:70px}
+  #cmpYears .quick button{flex:1 1 26%;min-width:60px}
   #cmpCustom{width:100%!important;margin-top:6px}
   .cmp-tbl td,.cmp-tbl th{padding:6px 4px;font-size:11px}
   .cmp-tbl td:first-child,.cmp-tbl th:first-child{position:sticky;left:0;background:var(--card);z-index:1;box-shadow:2px 0 4px rgba(0,0,0,.25)}
   .cmp-tbl th:first-child{background:var(--card2)}
+}
+@media (max-width:480px){
+  #tab-compare .row{flex-direction:column}
+  #tab-compare .field{min-width:0;width:100%}
+  #tab-compare .field[style*="width:170px"]{width:100%}
+  #cmpYears .quick button{flex:1 1 28%;min-width:70px}
+  #cmpStrict~*{display:inline-block}
 }
 
 /* ===== v1.7.0 UI 美化（大师清单：卡片层级/数字规范/线型辅助） ===== */
@@ -185,14 +191,14 @@ body{padding-bottom:64px}
   <div class="card">
     <h2>📈 对比（同本金 ¥1,000,000 · 红利复投 · 月供可调）</h2>
     <div class="row">
-      <div class="field" style="flex:1">
+      <div class="field" style="flex:1.2">
         <label>添加标的（股票代码 / ETF / 名称搜索）</label>
         <input id="cmpInput" placeholder="如 600036 / 512890 / 招商银行" inputmode="text">
-        <div class="quick" id="cmpEtfChips"></div>
+        <div class="quick" id="cmpEtfChips" style="flex-wrap:wrap"></div>
       </div>
-      <div class="field" style="flex:1">
+      <div class="field" style="flex:2">
         <label>对比周期</label>
-        <div class="quick" id="cmpYears">
+        <div class="quick" id="cmpYears" style="flex-wrap:wrap">
           <button type="button" data-y="1">1年</button><button type="button" data-y="3">3年</button>
           <button type="button" data-y="5" class="on">5年</button><button type="button" data-y="10">10年</button>
           <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
@@ -200,11 +206,11 @@ body{padding-bottom:64px}
         </div>
         <div class="hint">周期内上市不足的标的按实际上市日起算（可开严格同期）</div>
       </div>
-      <div class="field" style="width:170px">
+      <div class="field" style="flex:0.9;min-width:170px">
         <label>每月追加（元，0=不追加）</label>
         <input id="cmpMonthly" value="0" inputmode="decimal" placeholder="0" style="width:100%;padding:6px 8px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         <div class="hint">所有标的同月供；每月首个交易日追加（首月不追）</div>
-        <label style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">
+        <label style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);flex-wrap:wrap">
           <input type="checkbox" id="cmpStrict" style="width:15px;height:15px;accent-color:var(--gold)"> 严格同期对比（不足周期则跳过）
         </label>
       </div>
@@ -304,7 +310,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.7.4';
+const APP_VERSION = 'v1.7.5';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -528,7 +534,8 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
         if(bonus > 0) shares += shares * bonus;
       });
       divYearTotal += cash; divCountYear++;
-      divEvents.push({date:d, cash, year:y, sharesBefore:shares, rateAtDiv: rateDenom>0? cash/rateDenom : 0});
+      // v1.7.5: reportYear=报告期年份（一年两派合并用）；无 report 字段时回退到账年
+      divEvents.push({date:d, cash, year:y, reportYear:(ev[0] && ev[0].report || '').slice(0,4) || y, sharesBefore:shares, rateAtDiv: rateDenom>0? cash/rateDenom : 0});
       cashPool += cash;                                  // 分红先入现金池
       if(reinvest && cash > 0){
         // 整手复投：现金池够一手（100股）就按除息日收盘价买入，零钱继续留存
@@ -669,6 +676,7 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   window.scrollTo({top:0});
 }
 function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
+  const yrs = res.years;   // v1.7.5: 分红率图/表格仍用按到账年分组（分红图已改报告期归组）
   const f = res.final;
   // 概览卡
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
@@ -721,15 +729,20 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     ]
   });
 
-  // 2. 每年分红
-  const yrs = res.years;
+  // 2. 每年分红（v1.7.5: 按报告期年度归组，一年两派合并——解决工行2025收到3笔虚高/2026骤降）
+  const divByReportYear = {};
+  res.divEvents.forEach(e => {
+    const ry = e.reportYear || e.year;
+    divByReportYear[ry] = (divByReportYear[ry] || 0) + e.cash;
+  });
+  const repYears = Object.keys(divByReportYear).sort();
   const ch2 = ensureChart('chartDiv');
   ch2.setOption({
     backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis'}),
     grid:{left:50,right:14,top:20,bottom:24},
-    xAxis:Object.assign({type:'category', data:yrs.map(y=>y.year)}, AXIS),
+    xAxis:Object.assign({type:'category', data:repYears}, AXIS),
     yAxis:axY({axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),
-    series:[{name:'分红到账(元)', type:'bar', data:yrs.map(y=>Math.round(y.divTotal)), itemStyle:{color:'#3fbf7f',borderRadius:[4,4,0,0]}, barMaxWidth:34,
+    series:[{name:'分红(报告年度)', type:'bar', data:repYears.map(y=>Math.round(divByReportYear[y])), itemStyle:{color:'#3fbf7f',borderRadius:[4,4,0,0]}, barMaxWidth:34,
       label:{show:true, position:'top', color:'#3fbf7f', fontSize:10, formatter:p=> (p.value/1e4).toFixed(1)+'万'}}]
   });
 
