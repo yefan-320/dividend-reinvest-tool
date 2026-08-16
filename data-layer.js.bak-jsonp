@@ -138,8 +138,7 @@ const toPlain = code => code.replace(/^(sh|sz|bj)/, '');
 /* ---------- 股票名称 ---------- */
 async function fetchName(code) {
   try {
-    // ⚠️ 2026-08-16 修复：东财 suggest 的 JSONP 参数名是 cb（callback= 返回纯 JSON 不触发回调，曾致添加/搜索干等15秒超时）
-    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + code + '&type=14&count=3', 'cb');
+    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + code + '&type=14&count=3', 'callback');
     const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
     const hit = list.find(x => x.Code === code) || list[0];
     if (hit && hit.Name) return hit.Name;
@@ -229,7 +228,7 @@ async function fetchDividendsOne(code) {
 
 /* ---------- K线（腾讯主源分段 / 新浪备源；缓存走 IndexedDB） ---------- */
 async function fetchKlineTx(txPrefix, start, end) {
-  const map = {}; let cur = start; let guard = 0; let prevLast = null;
+  const map = {}; let cur = start; let guard = 0;
   while (cur < end && guard++ < 12) {
     const d0 = new Date(cur);
     const segEnd = new Date(Date.UTC(d0.getUTCFullYear() + 2, d0.getUTCMonth() + 6, d0.getUTCDate()));
@@ -247,9 +246,6 @@ async function fetchKlineTx(txPrefix, start, end) {
     rows.forEach(r => { map[r[0]] = parseFloat(r[2]); });
     const last = rows[rows.length - 1][0];
     if (last >= end) break;
-    // v1.7.3: 区间末尾遇周末/节假日无交易时，同一 last 不再前进 → 提前终止（防重复请求耗限流配额）
-    if (last === prevLast) break;
-    prevLast = last;
     const nd = new Date(last); nd.setDate(nd.getDate() + 1);
     cur = nd.toISOString().slice(0, 10);
   }

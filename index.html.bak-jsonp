@@ -170,7 +170,7 @@ body{padding-bottom:64px}
 <!-- ===== 对比 tab（第二批占位） ===== -->
 <section id="tab-compare" class="tab-panel" style="display:none">
   <div class="card">
-    <h2>📈 对比（同本金100万 · 红利复投 · 月供可调）</h2>
+    <h2>📈 对比（同本金100万 · 红利复投 · 零月供）</h2>
     <div class="row">
       <div class="field" style="flex:1">
         <label>添加标的（股票代码 / ETF / 名称搜索）</label>
@@ -185,12 +185,7 @@ body{padding-bottom:64px}
           <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
           <input id="cmpCustom" type="number" min="1" max="30" placeholder="自定义年" style="width:76px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         </div>
-        <div class="hint">周期内标的需满成立年限；月供为 0 时即零月供对比，口径统一</div>
-      </div>
-      <div class="field" style="width:180px">
-        <label>每月追加（元，0=不追加）</label>
-        <input id="cmpMonthly" value="0" inputmode="decimal" placeholder="0" style="width:100%;padding:6px 8px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
-        <div class="hint">所有标的同月供；每月首个交易日追加（首月不追）</div>
+        <div class="hint">对比统一零月供（保证口径一致）；若标的存在时间短于所选周期会提示</div>
       </div>
     </div>
     <div class="btnrow">
@@ -288,7 +283,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.7.3';
+const APP_VERSION = 'v1.7.2';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -361,7 +356,7 @@ function guessSec(code){
 }
 async function fetchName(code){
   try{
-    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input='+code+'&type=14&count=3', 'cb');
+    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input='+code+'&type=14&count=3', 'callback');
     const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
     const hit = list.find(x => x.Code === code) || list[0];
     if(hit && hit.Name) return hit.Name;
@@ -568,7 +563,7 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
   return {
     principal, buyDateReal, buyPrice, buyIdx,
     daily, years: yearsOut, divEvents,
-    final:{ finalValue, finalInvested, monthlyTotal, cashPool, shares:lastDaily.shares,
+    final:{ finalValue, finalInvested, cashPool, shares:lastDaily.shares,
       totalReturn: finalValue/principal-1, xirr,
       totalDiv: divEvents.reduce((s,x)=>s+x.cash,0),
       latestDps: yearsOut.length? yearsOut[yearsOut.length-1].dps : 0,

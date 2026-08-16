@@ -320,7 +320,7 @@
     }
     // 名称搜索
     try {
-      const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'cb');
+      const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'callback');
       const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
       if (list.length) return { code: list[0].Code, name: list[0].Name };
     } catch (e) { }
@@ -358,8 +358,6 @@
     if (!cmpState.list.length) { alert('请先添加至少 1 个标的'); return; }
     el.style.display = 'none';
     const y = cmpState.years;
-    // v1.7.3：月供可调（默认 0=零月供）；所有标的同月供，保证口径一致
-    const monthly = Math.max(0, parseFloat($('#cmpMonthly').value) || 0);
     const start = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
     const end = DL.todayStr();
     const status = $('#status');
@@ -376,7 +374,7 @@
           continue;
         }
         const divs = await DL.fetchDividendsOne(it.code);
-        const res = simulate(1000000, start, true, kline, divs, monthly);   // 同参数：100万/复投/同月供
+        const res = simulate(1000000, start, true, kline, divs, 0);   // 同参数：100万/复投/零月供
         // 最大回撤 + 股息率
         let maxDD = 0, peak = -Infinity;
         res.daily.forEach(x => { if (x.value > peak) peak = x.value; const dd = (peak - x.value) / peak; if (dd > maxDD) maxDD = dd; });
@@ -423,25 +421,23 @@
         itemStyle: { color: '#d9a441', borderRadius: [4, 4, 0, 0] },
         label: { show: true, position: 'top', color: '#d9a441', fontSize: 10, formatter: p => p.value != null ? p.value + '%' : '—' } }],
     });
-    // 表格（P1-26：累计分红只进表格，注明 ETF 分红频率低；v1.7.3 月供>0 时展示累计投入）
+    // 表格（P1-26：累计分红只进表格，注明 ETF 分红频率低）
     const f = results[0].res.final;
-    $('#cmpTbl').innerHTML = `<table class="tbl"><tr><th>标的</th><th>期末总资产</th><th>累计投入</th><th>累计分红</th><th>年化(XIRR)</th><th>最大回撤</th><th>股息率(近12月)</th></tr>` +
+    $('#cmpTbl').innerHTML = `<table class="tbl"><tr><th>标的</th><th>期末总资产</th><th>累计分红</th><th>年化(XIRR)</th><th>最大回撤</th><th>股息率(近12月)</th></tr>` +
       results.map((r, i) => `<tr>
         <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}</span></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
-        <td>${fmt(r.res.principal + (r.res.final.monthlyTotal || 0), 0)} 元</td>
         <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
         <td class="red">${fmtPct(-r.maxDD)}</td>
         <td>${r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—'}</td>
       </tr>`).join('') + '</table>';
-    $('#cmpNote').textContent = ($('#cmpNote').textContent || '') + (monthly > 0 ? '｜月供 ' + fmt(monthly, 0) + ' 元/月（所有标的同月供，每月首个交易日追加，首月不追加）' : '｜零月供（口径统一）') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜注：ETF/指数分红频率低（通常一年一次），累计分红与股票不可直接比，请以股息率看分红能力' : '');
+    $('#cmpNote').textContent = ($('#cmpNote').textContent || '') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜注：ETF/指数分红频率低（通常一年一次），累计分红与股票不可直接比，请以股息率看分红能力' : '');
     el.style.display = 'block';
-    // URL 记忆（P2-27：版本号进分享参数；v1.7.3 月供进 m）
+    // URL 记忆（P2-27：版本号进分享参数）
     const q = new URLSearchParams(location.search);
     q.set('cmp', cmpState.list.map(x => x.code).join(','));
     q.set('y', y);
-    q.set('m', monthly);
     q.set('v', APP_VERSION);
     history.replaceState(null, '', location.pathname + '?' + q.toString());
   }
@@ -478,14 +474,9 @@
     const runBtn = $('#btnCmpRun');
     if (runBtn) runBtn.onclick = cmpRun;
     cmpRenderList();
-    // URL 恢复（?cmp=512890,600036&y=5&m=5000&v=...）
+    // URL 恢复（?cmp=512890,600036&y=5&v=...）
     const params = new URLSearchParams(location.search);
     const cmp = params.get('cmp');
-    const m = params.get('m');
-    if (m && parseFloat(m) >= 0) {
-      const mi = $('#cmpMonthly');
-      if (mi) mi.value = m;
-    }
     const y = parseInt(params.get('y'), 10);
     if (y && y >= 1 && y <= 30) {
       cmpState.years = y;
@@ -540,7 +531,7 @@
           if (/^\d{6}$/.test(v)) { openDiagnose(v); return; }
           if (v.length >= 2) {
             try {
-              const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'cb');
+              const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'callback');
               const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
               if (list.length) { openDiagnose(list[0].Code); return; }
             } catch (err) { }
