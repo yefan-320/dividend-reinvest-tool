@@ -18,7 +18,8 @@ if (typeof echarts === 'undefined') {
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;padding-bottom:48px}
-.wrap{max-width:860px;margin:0 auto;padding:14px}
+.wrap{max-width:1280px;margin:0 auto;padding:14px}
+@media (min-width:900px){.wrap{max-width:1400px}}
 header{display:flex;align-items:baseline;gap:10px;padding:18px 0 6px}
 header h1{font-size:20px;font-weight:700;letter-spacing:1px}
 header h1 .g{color:var(--gold)}
@@ -494,7 +495,7 @@ function ensureChart(id){
   charts[id] = echarts.init(el);
   return charts[id];
 }
-const AXIS = { axisLine:{lineStyle:{color:'#3a4f46'}}, axisLabel:{color:'#8fa69c', fontSize:10}, splitLine:{lineStyle:{color:'#22322c'}} };
+const AXIS = { axisLine:{lineStyle:{color:'#3a4f46'}}, axisLabel:{color:'#8fa69c', fontSize:10, interval:'auto', hideOverlap:true}, splitLine:{lineStyle:{color:'#22322c'}} };
 // v1.7.2: Object.assign({...}, AXIS) 会用 AXIS.axisLabel 覆盖前面自定义的 formatter → y轴长数字挤在一起。
 // 修法：各图 yAxis 用 axY(自定义formatter) 合并，不再直接 Object.assign。
 const axY = (extra = {}) => Object.assign({ type:'value' }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) }, { scale: extra.scale, axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) });
@@ -585,15 +586,15 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   const ch1 = ensureChart('chartAsset');
   ch1.setOption({
     backgroundColor:'transparent',
-    tooltip:Object.assign({}, TOOLTIP, { formatter: params => {
+    tooltip:Object.assign({}, TOOLTIP, { confine:true, formatter: params => {
       const x = sd[params[0].dataIndex];
       let s = '<b>'+x.date+'</b><br/>';
       params.forEach(p=>{ s += p.marker + p.seriesName + '：<b>'+fmt(p.value,0)+'</b> 元<br/>'; });
       s += '<span style="color:#8fa69c">持股 '+fmt(x.shares,0)+' 股 · 现金池 '+fmt(x.cashPool,0)+' 元 · 累计投入 '+fmt(x.invested,0)+' 元</span>';
       return s;
     }}),
-    legend:{textStyle:{color:'#8fa69c',fontSize:11}, top:0},
-    grid:{left:50,right:14,top:30,bottom:24},
+    legend:{textStyle:{color:'#8fa69c',fontSize:11}, top:0, left:0, type:'plain'},
+    grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
     yAxis:axY({scale:true, axisLabel:{formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}),
     series:[
@@ -603,6 +604,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       {name:'累计投入(本金+复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#3fbf7f'}},
     ]
   });
+  // 图例换行后 grid.top 跟随（防 y 轴被压）
+  (function(){ try { const v = (ch1._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) ch1.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
 
   // 2. 每年分红（v1.7.5: 按报告期年度归组，一年两派合并——解决工行2025收到3笔虚高/2026骤降）
   const divByReportYear = {};
@@ -613,7 +616,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   const repYears = Object.keys(divByReportYear).sort();
   const ch2 = ensureChart('chartDiv');
   ch2.setOption({
-    backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis'}),
+    backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis', confine:true}),
     grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:repYears}, AXIS),
     yAxis:axY({axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),
@@ -624,9 +627,9 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   // 3. 分红率（双口径：相对投入 / 相对初始本金）
   const ch3 = ensureChart('chartRate');
   ch3.setOption({
-    backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis', valueFormatter:v=> fmtPct(v/100)}),
-    legend:{textStyle:{color:'#8fa69c',fontSize:10}, top:0},
-    grid:{left:50,right:14,top:28,bottom:24},
+    backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{trigger:'axis', confine:true, valueFormatter:v=> fmtPct(v/100)}),
+    legend:{textStyle:{color:'#8fa69c',fontSize:10}, top:0, left:0, type:'plain'},
+    grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:yrs.map(y=>y.year)}, AXIS),
     yAxis:axY({axisLabel:{formatter:v=> v+'%'}}),
     series:[
@@ -636,11 +639,12 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
         label:{show:true, position:'top', color:'#3fbf7f', fontSize:9, formatter:p=> p.value+'%'}},
     ]
   });
+  (function(){ try { const v = (ch3._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) ch3.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
 
   // 4. 持股数
   const ch4 = ensureChart('chartShares');
   ch4.setOption({
-    backgroundColor:'transparent', tooltip:TOOLTIP,
+    backgroundColor:'transparent', tooltip:Object.assign({},TOOLTIP,{confine:true}),
     grid:{left:50,right:14,top:20,bottom:24},
     xAxis:Object.assign({type:'category', data:sd.map(x=>x.date)}, AXIS),
     yAxis:axY({scale:true, axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),

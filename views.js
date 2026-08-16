@@ -330,6 +330,20 @@
     cmpCharts[id] = echarts.init(el);
     return cmpCharts[id];
   }
+  // 窗口/横竖屏变化时对比页图表自适应（与回测页 charts 同款；缺这个=换设备/旋转后旧尺寸残留=图挤）
+  window.addEventListener('resize', () => {
+    Object.keys(cmpCharts).forEach(k => {
+      try {
+        const chart = cmpCharts[k];
+        const el = document.getElementById(k);
+        if (el && el.clientWidth > 0) {
+          // legend 数字宽度跟随容器（ECharts 5.5.0 百分比解析 bug 的规避）
+          chart.setOption({ legend: { width: Math.max(280, el.clientWidth - 20) } });
+        }
+        chart.resize();
+      } catch (e) { }
+    });
+  });
 
   async function cmpResolveCode(v) {
     v = (v || '').trim();
@@ -431,27 +445,53 @@
       if (st) { st.textContent = 'ℹ️ ' + shortOnes.map(r => `${r.it.name} 自 ${r.actualStart} 起算（实际存续约 ${r.liveYears} 年）`).join('；') + '（所选 ' + y + ' 年，上市不足）'; st.className = 'status'; }
     }
     // 总资产走势图（P1-26：对比图只画总资产+股息率；累计分红只进表格；v1.7.4 P2：5色提亮+线型双通道+图例12px+点标记）
+    // 图例自适应：容器显示后 rAF 设数字宽度（ECharts 5.5.0 百分比解析 bug + 隐藏容器 clientWidth=0 兜底害事）
+    // → 先设宽度触发横排布局，再读实际高度调 grid.top（防 y 轴被压）
+    function fitLegendTop(chart, el, gridTop) {
+      requestAnimationFrame(() => {
+        try {
+          // 先 resize：图表在容器隐藏时 init，canvas 只有默认 100px，显示后必须 resize 恢复真实尺寸
+          chart.resize();
+          const w = el.clientWidth - 20;
+          chart.setOption({ legend: { width: Math.max(280, w) } });
+          requestAnimationFrame(() => {
+            try {
+              const views = chart._componentsViews || [];
+              const lgView = views.find(v => v.type && v.type.indexOf('legend') === 0);
+              const h = lgView && lgView.group ? lgView.group.getBoundingRect().height : 0;
+              if (h > 0) chart.setOption({ grid: { top: h + 8 } });
+            } catch (e) { /* 保底 */ }
+          });
+        } catch (e) { /* 保底 */ }
+      });
+    }
     const ch1 = cmpEnsureChart('cmpChartAsset');
-    const allDates = results[0].res.daily.map(x => x.date);
+    // x 轴防挤：日线数据抽样（最多 ~400 点），图例名称截断防分页（全名留在 tooltip）
+    const daily0 = results[0].res.daily;
+    const step = Math.max(1, Math.floor(daily0.length / 400));
+    const idx = daily0.map((_, i) => i).filter(i => i % step === 0);
+    const allDates = idx.map(i => daily0[i].date);
     const CMP_COLORS = ['#f2c94c', '#5aa9e6', '#3fbf7f', '#c46ae0', '#e06666'];   // 金(提亮)/蓝/青/紫/红
     const CMP_DASH = [false, true, false, true, false];   // 线型双通道：色弱用户也能分辨
+    const shortName = n => n.length > 8 ? n.slice(0, 8) + '…' : n;
     ch1.setOption({
-      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis' }),
-      legend: { textStyle: { color: '#8fa69c', fontSize: 12 }, top: 0, type: 'scroll', itemWidth: 28, itemHeight: 14 },
-      grid: { left: 54, right: 14, top: 34, bottom: 24 },
+      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true }),
+      legend: { textStyle: { color: '#8fa69c', fontSize: 12 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 28, itemHeight: 14, formatter: shortName },
+      grid: { left: 54, right: 14, top: 20, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ scale: true, axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => ({
         name: r.it.name, type: 'line', showSymbol: true, symbol: i % 2 ? 'circle' : 'diamond', symbolSize: 4,
-        data: r.res.daily.map(x => Math.round(x.value)),
+        data: idx.map(j => Math.round(r.res.daily[j].value)),
         lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: CMP_DASH[i % 5] ? 'dashed' : 'solid' },
         itemStyle: { color: CMP_COLORS[i % 5] },
       })),
     });
+    fitLegendTop(ch1, $('#cmpChartAsset'), 34);
     // 股息率对比图（柱状，口径统一：年化股息率=近2报告年度平均÷现价，v1.7.4 P7）
     const ch2 = cmpEnsureChart('cmpChartYield');
     ch2.setOption({
-      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis' }),
+      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true }),
       grid: { left: 54, right: 14, top: 20, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: results.map(r => r.it.name) }, AXIS),
       yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
