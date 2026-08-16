@@ -18,22 +18,32 @@ async function fetchEtfDivs(code) {
     const anns = (JSON.parse(body).Data) || [];
     const divs = [];
     for (const a of anns) {
-      try {
-        const d = await (await fetch('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.ID + '&client_source=web&page_index=1', {
-          headers: { 'User-Agent': UA, 'Referer': 'https://data.eastmoney.com/' },
-          signal: AbortSignal.timeout(15000),
-        })).json();
-        const c = (d.data && d.data.notice_content) || '';
-        const mAmt = c.match(/本次分红方案[（(][\s\S]{0,80}?[）)][\s\S]{0,80}?([\d.]+)/);
-        const mEx = c.match(/除息日\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-        if (mAmt && mEx) {
-          divs.push({
-            ex: mEx[1] + '-' + mEx[2].padStart(2, '0') + '-' + mEx[3].padStart(2, '0'),
-            dps: parseFloat(mAmt[1]) / 10,   // 每10份 → 每份
+      // 2026-08-17 抗 WAF：每条最多 3 次尝试 + 间隔 800ms（东财按请求频率限流，实测连续 7+ 条后拦截）
+      let rec = null;
+      for (let attempt = 0; attempt < 3 && !rec; attempt++) {
+        try {
+          const r = await fetch('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.ID + '&client_source=web&page_index=1', {
+            headers: { 'User-Agent': UA, 'Referer': 'https://data.eastmoney.com/' },
+            signal: AbortSignal.timeout(15000),
           });
-        }
-      } catch (e) { /* 单条失败跳过 */ }
-      await new Promise(r => setTimeout(r, 150));   // 温和限速
+          const txt = await r.text();
+          if (r.status === 567 || txt.includes('501page')) { await new Promise(r2 => setTimeout(r2, 1000)); continue; }  // WAF 拦截 → 等 1s 重试
+          const d = JSON.parse(txt);
+          const c = (d.data && d.data.notice_content) || '';
+          const mAmt = c.match(/本次分红方案[（(][\s\S]{0,80}?[）)][\s\S]{0,80}?([\d.]+)/);
+          const mEx = c.match(/除息日\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+          if (mAmt && mEx) {
+            rec = {
+              ex: mEx[1] + '-' + mEx[2].padStart(2, '0') + '-' + mEx[3].padStart(2, '0'),
+              dps: parseFloat(mAmt[1]) / 10,   // 每10份 → 每份
+            };
+          }
+        } catch (e) { /* 重试 */ }
+        if (!rec) await new Promise(r2 => setTimeout(r2, 1000));
+      }
+      if (rec) divs.push(rec);
+      else console.log(code, '公告解析失败:', a.ID.slice(0, 12));
+      await new Promise(r => setTimeout(r, 800));   // 温和限速（实测连续快速请求触发 WAF）
     }
     divs.sort((a, b) => a.ex < b.ex ? 1 : -1);
     return divs;
@@ -51,6 +61,17 @@ async function main() {
     console.log(code, ':', divs ? divs.length + ' 条' : '失败');
   }
   const file = path.join(__dirname, '..', 'data', 'etf-dividends.json');
+  // 2026-08-17 防缩水保护：WAF 拦截导致单只条数少于现有文件时，保留旧数据（宁可旧不可残）
+  const old = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  if (old && old.data) {
+    for (const code of Object.keys(old.data)) {
+      const fresh = out.data[code];
+      if (!fresh || fresh.length < old.data[code].length * 0.8) {
+        console.log('⚠️', code, '新数据', fresh ? fresh.length : 0, '条 < 现有', old.data[code].length, '条——保留旧数据（防 WAF 缩水）');
+        out.data[code] = old.data[code];
+      }
+    }
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(out, null, 1));
   console.log('✅ 写入', file, '| 覆盖', Object.keys(out.data).length, '只');

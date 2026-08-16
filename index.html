@@ -565,12 +565,16 @@ function renderAll(res, name, res2){
 function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const f = res.final;
+  const yrs = res.years || [];
+  const lastY = yrs.length ? yrs[yrs.length-1] : null;
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
     ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
+    ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
+    ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
     ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
     ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
@@ -579,7 +583,9 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
   $('cardSummary').style.display='block';
-  ['cardAsset','cardDiv','cardRate','cardShares','cardTable'].forEach(id=>$(id).style.display='none');
+  // v1.8.7：降级模式也显示年度明细表（纯 HTML 不依赖 echarts，主人要求"每年分红的钱都要体现"）
+  if (yrs.length) { renderYearTable(yrs, 'pay'); $('cardTable').style.display='block'; }
+  ['cardAsset','cardDiv','cardRate','cardShares'].forEach(id=>$(id).style.display='none');
   window.scrollTo({top:0});
 }
 function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
@@ -587,12 +593,15 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   const f = res.final;
   // 概览卡
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
+  const lastY = yrs.length ? yrs[yrs.length-1] : null;
   const stats = [
     ['初始本金', fmt(res.principal,0)+' 元', ''],
     ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
     ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
+    ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
+    ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
     ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
     ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
@@ -600,6 +609,15 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
+  // v1.8.7：点击"累计分红/年均分红/最近年度"滚动到年度明细表（主人要求"每年分红的钱都要体现"）
+  const yt = $('#stats');
+  if (yt) yt.querySelectorAll('.stat').forEach((el, i) => {
+    if (i === 4 || i === 5 || i === 6) {
+      el.style.cursor = 'pointer';
+      el.title = '点击查看每年分红明细';
+      el.onclick = () => $('#cardTable').scrollIntoView({ behavior: 'smooth' });
+    }
+  });
   ['cardSummary','cardGauge','cardAsset','cardDiv','cardRate','cardShares','cardTable'].forEach(id=>$(id).style.display='block');
 
   // 1. 资产走势（日K可能点多，抽样到最多 ~1500 点）

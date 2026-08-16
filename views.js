@@ -367,7 +367,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   // B8: 表格渲染（可排序）
   const yieldSeriesStr = r => (r.yieldSeries || []).filter(p => p.v != null).slice(-4).map(p => p.y + ' ' + p.v.toFixed(1) + '%').join(' · ') || '—';
   function renderCmpTable() {
-    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.principal + (r.res.final.monthlyTotal || 0), div: r.res.final.totalDiv, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
+    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.principal + (r.res.final.monthlyTotal || 0), div: r.res.final.totalDiv, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
     const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
       const va = getVal(a), vb = getVal(b);
       if (va == null && vb == null) return 0;
@@ -376,13 +376,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       return (va - vb) * cmpSort.dir;
     }) : cmpResults;
     const arrow = k => cmpSort.key === k ? (cmpSort.dir > 0 ? ' ▲' : ' ▼') : '';
-    const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
+    const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['最新报告期分红', 'lastRepDiv'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
     $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
       list.map((r, i) => `<tr>
         <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
         <td>${fmt(r.res.principal + (r.res.final.monthlyTotal || 0), 0)} 元</td>
         <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
+        <td>${r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' : '—'}</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
         <td class="red">${fmtPct(-r.maxDD)}</td>
         <td>${r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—'}</td>
@@ -534,9 +535,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         return out;
       })() : null;
       // B6：除息日索引（tooltip 标注用）
+      // v1.8.7 P1-3：最新报告期分红金额（元，按报告期归组；口径与回测页分红图一致）
+      const annualCash = {};
+      res.divEvents.forEach(e => { if (e.cash && e.reportYear) { annualCash[e.reportYear] = (annualCash[e.reportYear] || 0) + e.cash; } });
+      const repCashYrs = Object.keys(annualCash).map(Number).sort();
+      const lastRepDiv = repCashYrs.length ? { year: repCashYrs[repCashYrs.length-1], cash: annualCash[repCashYrs[repCashYrs.length-1]] } : null;
       const divByDate = {};
       divs.forEach(d => { if (d.ex) (divByDate[d.ex] = divByDate[d.ex] || []).push(d); });
-      return { it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate };
+      return { it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate, lastRepDiv };
     })());
     const settled = await Promise.all(tasks);
     settled.forEach(r => { if (r) results.push(r); });

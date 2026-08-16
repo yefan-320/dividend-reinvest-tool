@@ -306,11 +306,7 @@ async function fetchEtfAnnouncement(artCode) {
 }
 async function fetchEtfDividends(code) {
   const cacheKey = 'dv:' + code;
-  try {
-    const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
-    if (hit && hit.data && hit.data.length) return hit.data;
-  } catch (e) { }
-  // 2026-08-17：优先读静态数据（GitHub Actions 每日生成，同源零 CORS；浏览器直连东财公告被 WAF 567 拦）
+  // 2026-08-17：静态 JSON 优先（GitHub Actions/本机 cron 每日更新，同源零 CORS，最权威）——排在缓存前，避免旧缓存挡住新数据
   try {
     const stat = await fetchJson('data/etf-dividends.json');
     const list = stat && stat.data && stat.data[code];
@@ -319,7 +315,11 @@ async function fetchEtfDividends(code) {
       try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }
       return out;
     }
-  } catch (e) { /* 静态文件缺失（首次部署前）→ 走实时 */ }
+  } catch (e) { /* 静态文件缺失（首次部署前）→ 走缓存/实时 */ }
+  try {
+    const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
+    if (hit && hit.data && hit.data.length) return hit.data;
+  } catch (e) { }
   const anns = parseEtfAnnList(await jsonp(
     'https://api.fund.eastmoney.com/f10/FHGG?fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));   // 2026-08-17：URL 去掉 callback=?（jsonp 自动追加 &callback=cb_xxx；写死 ?= 会返回 ?(...) 无法解析→超时）
   // 2026-08-17 性能+稳定：并发 2 + 每条重试（并发 4 触发 allorigins 限流，实测 5/6 成功率需低并发）
