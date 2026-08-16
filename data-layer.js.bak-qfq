@@ -233,14 +233,12 @@ async function fetchKlineTx(txPrefix, start, end) {
     const d0 = new Date(cur);
     const segEnd = new Date(Date.UTC(d0.getUTCFullYear() + 2, d0.getUTCMonth() + 6, d0.getUTCDate()));
     const endStr = segEnd > new Date(end) ? end : segEnd.toISOString().slice(0, 10);
-    // v1.7.2: 必须用不复权(真实价)K线！回测模型自带分红复投，前复权价已折算分红 → 双重计算虚高
-    // 实测：2016-08-16 真实价 18.31 vs qfq 4.419（差 4 倍）；qfq 导致持股/总资产/累计投入全部虚高
-    const url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + txPrefix + ',day,' + cur + ',' + endStr + ',800,';
+    const url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + txPrefix + ',day,' + cur + ',' + endStr + ',800,qfq';
     let rows = [];
     try {
       const d = await txQueue.push(() => fetchJson(url));
       const node = d && d.data && d.data[txPrefix];
-      rows = (node && node.day) || [];
+      rows = (node && (node.qfqday || node.day)) || [];
     } catch (e) { /* 尝试下一段 */ }
     if (!rows.length) break;
     rows.forEach(r => { map[r[0]] = parseFloat(r[2]); });
@@ -260,7 +258,7 @@ async function fetchKlineSina(txPrefix) {
 }
 async function getKline(code, start, end) {
   // 缓存键：code+start（端日期不参与键，避免同段多次拉）
-  const key = 'kl:v2:' + code + ':' + start;   // v2: 不复权价（v1 是 qfq 前复权，双重计算 bug）
+  const key = 'kl:' + code + ':' + start;
   // P2-30: 今日有除权（除息日=今天）→ 该代码 K 线缓存强制失效（qfq 序列当天重算）
   try {
     const today = todayStr();
@@ -375,7 +373,7 @@ async function getIndexKline(code, start, end) {
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.kline);
   if (hit) return hit.data;
   const secid = /^9/.test(code) ? '2.' + code : '1.' + code;
-  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=0&beg=   // v1.7.2: 不复权（fqt=1 前复权同样双重计算）${start.replace(/-/g, '')}&end=${end.replace(/-/g, '')}`;
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=101&fqt=1&beg=${start.replace(/-/g, '')}&end=${end.replace(/-/g, '')}`;
   const d = await emQueue.push(() => fetchJson(url));
   const map = {};
   ((d && d.data && d.data.klines) || []).forEach(k => { const p = k.split(','); map[p[0]] = parseFloat(p[2]); });
