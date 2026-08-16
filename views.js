@@ -102,7 +102,7 @@
       const s = snap[it.code];
       const dy = it.snapshot ? it.snapshot.divYield : null;
       return `<div class="wl-card" data-code="${it.code}">
-        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>
+        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
           <button class="wl-del" data-code="${it.code}">✕</button></div>
         <div class="wl-main">${dy != null ? `股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>'}
           ${s ? `<span class="wl-price">${fmt(s.price, 2)}元</span>` : ''}</div>
@@ -224,7 +224,7 @@
       const etfNoteEl = $('#diagEtfNote');
       if (etfNoteEl) {
         etfNoteEl.style.display = isEtf ? 'block' : 'none';
-        etfNoteEl.textContent = isEtf ? '⚠️ ETF/指数分红不连续（通常一年一次），且分红数据源限制（基金分红接口暂未接入），累计分红可能显示 0——非该基金不分红，请以年化股息率看分红能力' : '';
+        etfNoteEl.textContent = isEtf ? '⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源，正常应显示真实分红记录）' : '';
       }
       $('#diagTitle').textContent = '🔬 ' + (name === code ? '' : name + ' ') + code;
       const [divs, kline] = await Promise.all([
@@ -273,7 +273,7 @@
     }
   }
 
-  /* 股息率带状图：每年每股分红 ÷ 当年均价 → 分位带（简化：最近分红 ÷ 历史价格序列 = 滚动股息率带） */
+  /* 股息率带状图（C4：逐年滚动——每年用当年到账分红÷当日价，避免"2024年图用2026年分红"失真） */
   let _yieldChart = null;
   function renderYieldBand(divs, kline, years) {
     const el = $('#diagYieldChart');
@@ -282,11 +282,11 @@
     const chart = _yieldChart = echarts.init(el);
     const dates = Object.keys(kline).sort();
     if (!dates.length || !divs.length) { chart.dispose(); el.innerHTML = '<div class="hint">数据不足</div>'; return; }
-    // 用最新年度每股分红（避免多年期送转复杂化，第一版用最近完整年度 dps）
-    const latest = divs[0];
-    const dps = latest ? latest.dps : 0;
-    if (!dps) { chart.dispose(); el.innerHTML = '<div class="hint">暂无分红数据</div>'; return; }
-    const data = dates.map(d => ({ d, y: (dps / kline[d]) * 100 }));
+    // 逐年到账分红合计（报告期归组与到账年在此简化为自然年，与 simulate years 同口径）
+    const byYear = {};
+    divs.forEach(d => { if (!d.pending && d.ex) { const y = d.ex.slice(0, 4); byYear[y] = (byYear[y] || 0) + d.dps; } });
+    const data = dates.map(d => ({ d, y: (byYear[d.slice(0, 4)] || 0) / kline[d] * 100 })).filter(x => x.y > 0);
+    if (!data.length) { chart.dispose(); el.innerHTML = '<div class="hint">暂无分红数据</div>'; return; }
     const vals = data.map(x => x.y).sort((a, b) => a - b);
     const pct = p => vals.length ? vals[Math.floor(p * (vals.length - 1))] : null;
     const q25 = pct(0.25), q75 = pct(0.75), cur = data.length ? data[data.length - 1].y : null;
@@ -303,7 +303,7 @@
       ],
     });
     const note = $('#diagYieldNote');
-    if (note) note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · ${years||5}年区间 25%~75% 分位：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%（口径：最新年度每股分红÷历史价，送转未调）`;
+    if (note) note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · ${years||5}年区间 25%~75% 分位：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%（口径：逐年滚动——每年用当年到账分红÷当日价；顶部"当前股息率"为近2财年口径）`;
   }
 
   /* 分红节奏：每年几月派息 */
@@ -323,6 +323,43 @@
   /* ================= 对比页（v1.7.2 大师 P1-26/27/28 落地） ================= */
   const cmpState = { list: [], years: 5 };   // list: [{code,name}]
   let cmpCharts = {};
+  let cmpResults = [];   // B8: 表格排序数据源（cmpRun 填充）
+  let cmpSort = { key: null, dir: 1 };
+
+  // B8: 表格渲染（可排序）
+  const yieldSeriesStr = r => (r.yieldSeries || []).filter(p => p.v != null).slice(-4).map(p => p.y + ' ' + p.v.toFixed(1) + '%').join(' · ') || '—';
+  function renderCmpTable() {
+    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.principal + (r.res.final.monthlyTotal || 0), div: r.res.final.totalDiv, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
+    const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
+      const va = getVal(a), vb = getVal(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (va - vb) * cmpSort.dir;
+    }) : cmpResults;
+    const arrow = k => cmpSort.key === k ? (cmpSort.dir > 0 ? ' ▲' : ' ▼') : '';
+    const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
+    $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
+      list.map((r, i) => `<tr>
+        <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span></td>
+        <td>${fmt(r.res.final.finalValue, 0)} 元</td>
+        <td>${fmt(r.res.principal + (r.res.final.monthlyTotal || 0), 0)} 元</td>
+        <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
+        <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
+        <td class="red">${fmtPct(-r.maxDD)}</td>
+        <td>${r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—'}</td>
+        <td style="font-size:11px;color:var(--sub)">${yieldSeriesStr(r)}</td>
+      </tr>`).join('') + '</table>';
+    $('#cmpTbl').querySelectorAll('th[data-sort]').forEach(th => {
+      const k = th.dataset.sort;
+      if (!k) return;
+      th.onclick = () => {
+        if (cmpSort.key === k) cmpSort.dir = -cmpSort.dir;
+        else { cmpSort.key = k; cmpSort.dir = 1; }
+        renderCmpTable();
+      };
+    });
+  }
 
   function cmpEnsureChart(id) {
     if (cmpCharts[id]) { cmpCharts[id].dispose(); }
@@ -348,18 +385,27 @@
   async function cmpResolveCode(v) {
     v = (v || '').trim();
     if (!v) return null;
-    if (/^\d{6}$/.test(v)) {
-      let name = v;
-      try { name = await DL.fetchName(v); } catch (e) { }
-      return { code: v, name };
+    // C2：显式后缀 000300.SH / 000001.SZ（指数/股票不靠猜）
+    const parsed = DL.parseSecInput(v);
+    if (/^\d{6}$/.test(parsed.code)) {
+      let name = parsed.code;
+      try { name = await DL.fetchName(parsed.code, parsed.market); } catch (e) { }
+      return { code: parsed.code, name, market: parsed.market };
     }
     // 名称搜索
     try {
       const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'cb');
       const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
-      if (list.length) return { code: list[0].Code, name: list[0].Name };
+      if (list.length) return { code: list[0].Code, name: list[0].Name, market: null };
     } catch (e) { }
     return null;
+  }
+
+  // C8：标的类型标签（股/ETF/指数）
+  function secTypeLabel(it) {
+    if (it.market && /^000/.test(it.code)) return '指数';
+    if (/^(5|159|16)/.test(it.code)) return 'ETF';
+    return '股票';
   }
 
   function cmpRenderList() {
@@ -368,7 +414,7 @@
     if (!cmpState.list.length) { el.innerHTML = '<div class="hint">还没有标的。输入代码/名称添加，或点下方 ETF 快捷。</div>'; return; }
     el.innerHTML = '<div class="wl-main">' + cmpState.list.map((it, i) =>
       `<div class="wl-card" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px">
-         <span>${i+1}. ${it.name} <b style="color:var(--sub)">${it.code}</b></span>
+         <span>${i+1}. ${it.name} <b style="color:var(--sub)">${it.code}${it.market ? '.' + it.market.toUpperCase() : ''}</b> <span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel(it)}</span></span>
          <button class="chip" data-del="${i}" style="background:rgba(224,102,102,.15);color:var(--red)">✕</button>
        </div>`).join('') + '</div>';
     el.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
@@ -378,7 +424,7 @@
   }
 
   async function cmpAdd(v) {
-    const it = await cmpResolveCode(v);
+    const it = typeof v === 'object' ? v : await cmpResolveCode(v);   // C2：支持 {code,name,market} 对象（ETF_PRESETS 指数带 market）
     if (!it) { alert('未找到该标的，请输入 6 位代码或正确名称'); return; }
     if (cmpState.list.some(x => x.code === it.code)) { alert(it.name + ' 已在列表'); return; }
     if (cmpState.list.length >= 5) { alert('最多对比 5 个标的'); return; }
@@ -393,6 +439,9 @@
     if (!cmpState.list.length) { alert('请先添加至少 1 个标的'); return; }
     el.style.display = 'none';
     const y = cmpState.years;
+    // B2/B1：本金/复投可调（默认 100 万/复投，与回测页同口径）
+    const principal = Math.max(0, parseFloat($('#cmpPrincipal').value) || 0) || 1000000;
+    const reinvest = !$('#cmpReinvest') || $('#cmpReinvest').checked;
     // v1.7.3：月供可调（默认 0=零月供）；所有标的同月供，保证口径一致
     const monthly = Math.max(0, parseFloat($('#cmpMonthly').value) || 0);
     const strictSameStart = !!$('#cmpStrict') && $('#cmpStrict').checked;   // v1.7.4 P3：严格同期可切换（默认 B：按实际上市日起算）
@@ -405,7 +454,7 @@
     const skipped = [];
     for (const it of cmpState.list) {
       try {
-        const kline = await DL.getKline(it.code, start, end);
+        const kline = await DL.getKline(it.code, start, end, it.market);   // C2: 指数带 market（sh000300）
         const dates = Object.keys(kline).sort();
         // v1.7.4 P3 方案B：默认按实际上市日起算（不足周期不跳过），严格同期时保留旧逻辑
         if (!dates.length) {
@@ -418,17 +467,38 @@
         }
         const actualStart = dates[0] > start ? dates[0] : start;   // 实际起算日（上市日晚于所选周期起点）
         const divs = await DL.fetchDividendsOne(it.code);
-        const res = simulate(1000000, actualStart, true, kline, divs, monthly);   // 同参数：100万/复投/同月供
+        const res = simulate(principal, actualStart, reinvest, kline, divs, monthly);   // B2/B1: 本金/复投可调
         // 最大回撤 + 股息率（v1.7.4 P7：改用按报告期归组的年化股息率，替代365天窗口）
         let maxDD = 0, peak = -Infinity;
         res.daily.forEach(x => { if (x.value > peak) peak = x.value; const dd = (peak - x.value) / peak; if (dd > maxDD) maxDD = dd; });
         const snap = homeState.snap || await DL.getStockQuotes([it.code]);
         homeState.snap = snap;
         const s = snap[it.code] || {};
-        const lastPrice = s.price || res.final.lastClose;
+        // C2：指数无行情快照（腾讯 sz000922 会拿错佳电股份价）→ 直接用 K 线末收盘价
+        const lastPrice = it.market ? res.final.lastClose : (s.price || res.final.lastClose);
         const dy = DL.calcAnnualDivYield(divs, lastPrice);
         const liveYears = (dates[0] > start) ? Math.round((new Date(end) - new Date(dates[0])) / (365.25 * 86400000) * 10) / 10 : null;
-        results.push({ it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears });
+        // B3：逐年股息率序列（报告期归组 ÷ 年末价；起点=min(买入年-1, 首笔分红年)·大师裁）
+        const annual = {};
+        divs.forEach(d => { if (!d.pending && d.report) { const ry = d.report.slice(0, 4); annual[ry] = (annual[ry] || 0) + d.dps; } });
+        const repYrs = Object.keys(annual).map(Number).sort();
+        const yieldSeries = repYrs.length ? (() => {
+          const startY = Math.min(parseInt(actualStart.slice(0, 4), 10) - 1, repYrs[0]);
+          const endY = repYrs[repYrs.length - 1];
+          const out = [];
+          for (let yy = startY; yy <= endY; yy++) {
+            const dps = annual[yy] || 0;
+            if (!dps) { out.push({ y: yy, v: null }); continue; }
+            const yDates = dates.filter(d => d.startsWith(String(yy)));
+            const price = yDates.length ? kline[yDates[yDates.length - 1]] : lastPrice;
+            out.push({ y: yy, v: dps / price * 100 });
+          }
+          return out;
+        })() : null;
+        // B6：除息日索引（tooltip 标注用）
+        const divByDate = {};
+        divs.forEach(d => { if (d.ex) (divByDate[d.ex] = divByDate[d.ex] || []).push(d); });
+        results.push({ it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate });
       } catch (e) {
         errors.push(`「${it.name}(${it.code})」数据获取失败：${e.message}——已跳过`);
       }
@@ -472,53 +542,82 @@
     const idx = daily0.map((_, i) => i).filter(i => i % step === 0);
     const allDates = idx.map(i => daily0[i].date);
     const CMP_COLORS = ['#f2c94c', '#5aa9e6', '#3fbf7f', '#c46ae0', '#e06666'];   // 金(提亮)/蓝/青/紫/红
-    const CMP_DASH = [false, true, false, true, false];   // 线型双通道：色弱用户也能分辨
+    const CMP_SYMBOLS = ['circle', 'rect', 'triangle', 'diamond', 'pin'];   // B5: 全实线 + 符号双通道（色弱可辨），CMP_DASH 已删
     const shortName = n => n.length > 8 ? n.slice(0, 8) + '…' : n;
     ch1.setOption({
-      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true }),
+      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, formatter: ps => {
+        const x = daily0[idx[ps[0].dataIndex]];
+        let s = '<b>' + x.date + '</b><br/>';
+        ps.forEach(p => { s += p.marker + p.seriesName + '：<b>' + fmt(p.value, 0) + '</b> 元<br/>'; });
+        results.forEach(r => {   // B6: 除息日 tooltip（悬停显示，不常驻）
+          const ev = r.divByDate[x.date];
+          if (ev && ev.length) s += '<span style="color:#3fbf7f">📅 ' + shortName(r.it.name) + ' 除息：' + ev.map(e => '派' + (e.dps * 10).toFixed(2) + '元').join('、') + '</span><br/>';
+        });
+        return s;
+      } }),
       legend: { textStyle: { color: '#8fa69c', fontSize: 12 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 28, itemHeight: 14, formatter: shortName },
       grid: { left: 54, right: 14, top: 20, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ scale: true, axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => ({
-        name: r.it.name, type: 'line', showSymbol: true, symbol: i % 2 ? 'circle' : 'diamond', symbolSize: 4,
+        name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
         data: idx.map(j => Math.round(r.res.daily[j].value)),
-        lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: CMP_DASH[i % 5] ? 'dashed' : 'solid' },
+        lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: 'solid' },   // B5: 全实线
         itemStyle: { color: CMP_COLORS[i % 5] },
       })),
     });
     fitLegendTop(ch1, $('#cmpChartAsset'), 34);
-    // 股息率对比图（柱状，口径统一：年化股息率=近2报告年度平均÷现价，v1.7.4 P7）
-    const ch2 = cmpEnsureChart('cmpChartYield');
-    ch2.setOption({
-      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true }),
+    // B9：累计分红曲线（多标的叠加，与总资产同轴语义：分红累计到账）
+    const chDiv = cmpEnsureChart('cmpChartDiv');
+    chDiv.setOption({
+      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => fmt(v, 0) + ' 元' }),
+      legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
       grid: { left: 54, right: 14, top: 20, bottom: 24 },
-      xAxis: Object.assign({ type: 'category', data: results.map(r => r.it.name) }, AXIS),
-      yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
-      series: [{ name: '年化股息率(近2财年)', type: 'bar', barMaxWidth: 40,
-        data: results.map(r => r.yield12 != null ? +r.yield12.toFixed(2) : null),
-        itemStyle: { color: '#f2c94c', borderRadius: [4, 4, 0, 0] },
-        label: { show: true, position: 'top', color: '#f2c94c', fontSize: 10, formatter: p => p.value != null ? p.value + '%' : '—' } }],
+      xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
+      yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
+      series: results.map((r, i) => {
+        // 按日期累计分红（用抽样日对齐总资产图）
+        let cum = 0; const evMap = {};
+        r.res.divEvents.forEach(e => { evMap[e.date] = (evMap[e.date] || 0) + e.cash; });
+        const data = [];
+        daily0.forEach((x, j) => { if (evMap[x.date]) cum += evMap[x.date]; if (j % step === 0) data.push(Math.round(cum)); });
+        return {
+          name: r.it.name, type: 'line', showSymbol: false, data,
+          lineStyle: { width: 1.8, color: CMP_COLORS[i % 5], type: 'solid' },
+          itemStyle: { color: CMP_COLORS[i % 5] },
+        };
+      }),
     });
-    // 表格（P1-26：累计分红只进表格；v1.7.3 月供列；v1.7.4 P3 存续标注/P5 首列 sticky/P6 口径文案/N2 税前）
-    const f = results[0].res.final;
-    $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr><th>标的</th><th>期末总资产</th><th>累计投入</th><th>累计分红</th><th>年化(XIRR)</th><th>最大回撤</th><th>年化股息率(近2财年)</th></tr>` +
-      results.map((r, i) => `<tr>
-        <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.actualStart ? ' · 自 ' + r.actualStart + ' 起' : ''}</span></td>
-        <td>${fmt(r.res.final.finalValue, 0)} 元</td>
-        <td>${fmt(r.res.principal + (r.res.final.monthlyTotal || 0), 0)} 元</td>
-        <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
-        <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
-        <td class="red">${fmtPct(-r.maxDD)}</td>
-        <td>${r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—'}</td>
-      </tr>`).join('') + '</table>';
-    $('#cmpNote').textContent = (monthly > 0 ? '月供 ' + fmt(monthly, 0) + ' 元/月（所有标的同月供，每月首个交易日追加，首月不追加）' : '零月供（口径统一）') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜⚠️ ETF/指数：分红不连续（通常一年一次），且分红数据源限制（基金接口未接入），累计分红可能显示 0，请以年化股息率看分红能力' : '') + '｜股息率口径：近2报告年度平均÷现价(税前)';
+    (function(){ try { const v = (chDiv._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) chDiv.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
+    // B3：股息率逐年折线（报告期归组 ÷ 年末价，替代单值柱状；多标的多线）
+    const ch2 = cmpEnsureChart('cmpChartYield');
+    const yieldYearsAll = [...new Set(results.flatMap(r => (r.yieldSeries || []).map(p => p.y)))].sort();
+    ch2.setOption({
+      backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => v != null ? v.toFixed(2) + '%' : '—' }),
+      legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
+      grid: { left: 54, right: 14, top: 20, bottom: 24 },
+      xAxis: Object.assign({ type: 'category', data: yieldYearsAll }, AXIS),
+      yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
+      series: results.map((r, i) => ({
+        name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
+        data: yieldYearsAll.map(yy => { const p = (r.yieldSeries || []).find(p => p.y === yy); return p ? (p.v != null ? +p.v.toFixed(2) : null) : null; }),
+        lineStyle: { width: 2, color: CMP_COLORS[i % 5], type: 'solid' },
+        itemStyle: { color: CMP_COLORS[i % 5] },
+      })),
+    });
+    (function(){ try { const v = (ch2._componentsViews||[]).find(x=>x.type==='legend'||x.type==='legend.scroll'); const h = v && v.group ? v.group.getBoundingRect().height : 0; if (h > 0) ch2.setOption({ grid: { top: h + 8 } }); } catch(e){} })();
+    // 表格（B4：股息率两列=近2财年+逐年；B8：表头排序；B10：存续年限；C8：类型标签）
+    cmpResults = results;
+    renderCmpTable();
+    $('#cmpNote').textContent = '本金 ' + fmt(principal, 0) + ' 元 · ' + (reinvest ? '复投' : '不复投') + ' · ' + (monthly > 0 ? '月供 ' + fmt(monthly, 0) + ' 元/月（每月首交易日追加，首月不追）' : '零月供') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源）' : '') + '｜股息率口径：报告期归组÷年末价（逐年），2026 年数据截至 ' + results[0].res.final.lastDate;
     el.style.display = 'block';
-    // URL 记忆（P2-27：版本号进分享参数；v1.7.3 月供进 m；v1.7.4 严格同期进 s）
+    // URL 记忆（B2/B1：本金进 p、复投进 r；v1.7.3 月供进 m；v1.7.4 严格同期进 s）
     const q = new URLSearchParams(location.search);
-    q.set('cmp', cmpState.list.map(x => x.code).join(','));
+    q.set('cmp', cmpState.list.map(x => x.market ? x.code + '.' + x.market.toUpperCase() : x.code).join(','));   // C2: 指数带后缀进 URL
     q.set('y', y);
     q.set('m', monthly);
+    q.set('p', principal);
+    q.set('r', reinvest ? '1' : '0');
     q.set('s', strictSameStart ? '1' : '0');
     q.set('v', APP_VERSION);
     history.replaceState(null, '', location.pathname + '?' + q.toString());
@@ -529,7 +628,7 @@
     const ec = $('#cmpEtfChips');
     if (ec) {
       ec.innerHTML = DL.ETF_PRESETS.slice(0, 8).map(p =>
-        `<button type="button" class="chip" data-c="${p.code}">${p.name}</button>`).join('');
+        `<button type="button" class="chip" data-c="${p.code}${p.market ? '.' + p.market.toUpperCase() : ''}">${p.name}</button>`).join('');   // C2: 指数 chip 带 .SH
       ec.querySelectorAll('[data-c]').forEach(b => b.onclick = () => cmpAdd(b.dataset.c));
     }
     // 周期 chips + 自定义输入联动（P1-28：两者并存，同一状态）
@@ -563,6 +662,16 @@
     if (m && parseFloat(m) >= 0) {
       const mi = $('#cmpMonthly');
       if (mi) mi.value = m;
+    }
+    const p = params.get('p');   // B2: 本金 URL 记忆
+    if (p && parseFloat(p) > 0) {
+      const pi = $('#cmpPrincipal');
+      if (pi) pi.value = p;
+    }
+    const r = params.get('r');   // B1: 复投 URL 记忆
+    if (r === '1' || r === '0') {
+      const ri = $('#cmpReinvest');
+      if (ri) ri.checked = (r === '1');
     }
     const s = params.get('s');
     if (s === '1' || s === '0') {

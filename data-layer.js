@@ -128,27 +128,38 @@ async function cacheGetFresh(key, ttl) {
 }
 
 /* ---------- 代码/市场映射 ---------- */
-function guessSec(code) {
+function parseSecInput(v) {
+  // 2026-08-17 C2：显式后缀解析 000300.SH / 000001.SZ（大师裁决：程序不猜，歧义代码必须显式声明）
+  const m = String(v || '').trim().match(/^(\d{6})\.(SH|SZ)$/i);
+  return m ? { code: m[1], market: m[2].toLowerCase() } : { code: String(v || '').trim(), market: null };
+}
+function guessSec(code, market) {
   // 东财 secid: 沪 1.xxx / 深 0.xxx / 北 0.xxx(4/8/92开头)；腾讯: sh/sz/bj
   // 2026-08-16 修复：5开头=沪ETF(510/512/515/588)、1开头=深ETF(159xxx)、4/8/92=北交所
+  // 2026-08-17 C2：market 显式指定（指数 000xxx.SH → sh000300）优先，避免指数被当深市股票
+  if (market === 'sh') return { em: '1.' + code, tx: 'sh' + code };
+  if (market === 'sz') return { em: '0.' + code, tx: 'sz' + code };
   if (/^6/.test(code)) return { em: '1.' + code, tx: 'sh' + code };
   if (/^5/.test(code)) return { em: '1.' + code, tx: 'sh' + code };   // 沪 ETF（512890 红利低波等）
   if (/^(0|3|1)/.test(code)) return { em: '0.' + code, tx: 'sz' + code };  // 深市 + 深ETF(159xxx)
   return { em: '0.' + code, tx: 'bj' + code };   // 北交所 4/8/92 开头
 }
-const emSecidOf = code => guessSec(code).em;
-const txCodeOf = code => guessSec(code).tx;
+const emSecidOf = (code, market) => guessSec(code, market).em;
+const txCodeOf = (code, market) => guessSec(code, market).tx;
 /* push2 代码格式 sh600000 ↔ datacenter 600000 映射（P2-5） */
 const toPush2 = code => guessSec(code).tx;
 const toPlain = code => code.replace(/^(sh|sz|bj)/, '');
 
 /* ---------- 股票名称 ---------- */
-async function fetchName(code) {
+async function fetchName(code, market) {
   try {
     // ⚠️ 2026-08-16 修复：东财 suggest 的 JSONP 参数名是 cb（callback= 返回纯 JSON 不触发回调，曾致添加/搜索干等15秒超时）
-    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + code + '&type=14&count=3', 'cb');
+    // 2026-08-17 C2：类型过滤（MktNum 字符串：'0'=股票 '1'=指数 '150'=基金）——显式 .SH 取指数，默认股票优先指数兜底
+    const d = await jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + code + '&type=14&count=5', 'cb');
     const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
-    const hit = list.find(x => x.Code === code) || list[0];
+    const hit = market === 'sh'
+      ? (list.find(x => x.Code === code && x.MktNum === '1') || list.find(x => x.Code === code))
+      : (list.find(x => x.Code === code && x.MktNum === '0') || list.find(x => x.Code === code && x.MktNum === '1') || list.find(x => x.Code === code));
     if (hit && hit.Name) return hit.Name;
   } catch (e) { /* 换备源 */ }
   try {
@@ -225,12 +236,72 @@ async function fetchDividendsAll(fromDate) {
 }
 async function fetchDividendsOne(code) {
   // 单股全历史分红（回测用，保留全部历史）
+  // 2026-08-17 C1：ETF/基金代码（5xx 沪ETF/LOF、159/16x 深ETF/LOF）直接走基金公告源（股票接口无 ETF 数据）
+  if (/^(5|159|16)/.test(code)) {
+    try { return await fetchEtfDividends(code); } catch (e) { return []; }
+  }
   const filter = `(SECURITY_CODE="${code}")`;
   const d = await emQueue.push(() => jsonp(
     `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=${DIV_COLS}&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1&filter=${encodeURIComponent(filter)}`, 'callback'));
   const rows = (d && d.result && d.result.data) || [];
   const out = dedupDividends(parseDivs(rows));
   cacheSet('dv:' + code, { ts: Date.now(), data: out });   // P2-30: 供除权日缓存失效检查
+  return out;
+}
+
+/* ---------- ETF/基金分红（东财基金公告源，2026-08-17 C1 接入） ----------
+ * 链路：FHGG 公告列表（JSONP 免 CORS）→ np-cnotice 公告正文（CORS:*）→ 解析每10份金额+除息日
+ * 缓存：dv:code 复用（TTL 1 天，符合大师"1请求/标的+缓存1天"限流策略）
+ * 降级：任一步失败 → 返回 []（调用方显示"数据源暂缺"，不显示 0） */
+function parseEtfAnnList(data) {
+  // 兼容：jsonp 已解析对象 或 JSONP 文本（Node 测试用）
+  let obj = data;
+  if (typeof data === 'string') {
+    const m = data.match(/^[\w.]*\(([\s\S]*)\)\s*;?\s*$/);
+    obj = JSON.parse(m ? m[1] : data);
+  }
+  return ((obj && obj.Data) || []).map(a => ({
+    id: a.ID || '', title: a.TITLE || a.ShortTitle || '', publish: (a.PUBLISHDATEDesc || a.PUBLISHDATE || '').slice(0, 10),
+  })).filter(a => a.id);
+}
+function parseEtfAnnouncement(title, content) {
+  // 正文解析：本次分红方案（单位：元/10 份基金份额）X + 除息日；报告期取公告标题年度
+  const t = String(content || '');
+  const mAmt = t.match(/本次分红方案[（(][\s\S]{0,80}?[）)][\s\S]{0,80}?([\d.]+)/);
+  const mEx = t.match(/除息日\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  const mRec = t.match(/权益登记日\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  const mRep = String(title || '').match(/(\d{4})\s*年度/);
+  if (!mAmt || !mEx) return null;
+  const fmt = (m, i) => m[i].padStart(2, '0');
+  return {
+    code: '', report: (mRep ? mRep[1] : mEx[1]) + '-12-31',
+    ex: mEx[1] + '-' + fmt(mEx, 2) + '-' + fmt(mEx, 3),
+    record: mRec ? mRec[1] + '-' + fmt(mRec, 2) + '-' + fmt(mRec, 3) : '',
+    planNotice: '', notice: String(title || '').slice(0, 10),
+    dps: parseFloat(mAmt[1]) / 10,            // 每10份 → 每份（单位换算，大师验收项2）
+    bonus: 0, zhuanOnly: 0, progress: '实施分配',
+    profile: '每10份派' + mAmt[1] + '元',
+    eps: null, totalShares: null, name: '', pending: false,
+  };
+}
+async function fetchEtfDividends(code) {
+  const cacheKey = 'dv:' + code;
+  try {
+    const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
+    if (hit && hit.data && hit.data.length) return hit.data;
+  } catch (e) { }
+  const anns = parseEtfAnnList(await jsonp(
+    'https://api.fund.eastmoney.com/f10/FHGG?callback=?&fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));
+  const out = [];
+  for (const a of anns) {
+    try {
+      const d = await fetchJson('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.id + '&client_source=web&page_index=1');
+      const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
+      if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; out.push(rec); }
+    } catch (e) { /* 单条失败跳过，保整体 */ }
+  }
+  out.sort((x, y) => x.ex < y.ex ? 1 : -1);   // 与股票通道一致：除息日倒序
+  try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }
   return out;
 }
 
@@ -269,9 +340,9 @@ async function fetchKlineSina(txPrefix) {
   (Array.isArray(d) ? d : []).forEach(r => { map[r.day] = parseFloat(r.close); });
   return map;
 }
-async function getKline(code, start, end) {
+async function getKline(code, start, end, market) {
   // 缓存键：code+start（端日期不参与键，避免同段多次拉）
-  const key = 'kl:v2:' + code + ':' + start;   // v2: 不复权价（v1 是 qfq 前复权，双重计算 bug）
+  const key = 'kl:v2:' + code + ':' + (market || '') + ':' + start;   // v2: 不复权价（v1 是 qfq 前复权，双重计算 bug）；C2: market 入键防指数/股票同码串缓存
   // P2-30: 今日有除权（除息日=今天）→ 该代码 K 线缓存强制失效（qfq 序列当天重算）
   try {
     const today = todayStr();
@@ -282,7 +353,7 @@ async function getKline(code, start, end) {
   } catch (e) { }
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.kline);
   if (hit) return hit.data;
-  const g = guessSec(code);
+  const g = guessSec(code, market);
   let m = {};
   try { m = await fetchKlineTx(g.tx, start, end); } catch (e) { }
   if (!Object.keys(m).length) { try { m = await fetchKlineSina(g.tx); } catch (e) { } }
@@ -377,8 +448,8 @@ const ETF_PRESETS = [
   { code: '510500', name: '中证500ETF', type: 'etf' },
   { code: '588000', name: '科创50ETF', type: 'etf' },
   { code: '159915', name: '创业板ETF', type: 'etf' },
-  { code: '000922', name: '中证红利', type: 'index' },
-  { code: '000300', name: '沪深300', type: 'index' },
+  { code: '000922', name: '中证红利', type: 'index', market: 'sh' },   // C2: 指数显式市场，防被当深市股票
+  { code: '000300', name: '沪深300', type: 'index', market: 'sh' },
 ];
 async function getIndexKline(code, start, end) {
   // 东财指数K线（全量），缓存复用 getKline 同层
@@ -448,8 +519,9 @@ function calcAnnualDivYield(divs, price) {
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
-  guessSec, emSecidOf, txCodeOf, toPush2, toPlain,
+  guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
+  parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
 }
