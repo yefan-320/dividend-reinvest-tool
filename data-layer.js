@@ -292,13 +292,20 @@ async function fetchEtfDividends(code) {
   } catch (e) { }
   const anns = parseEtfAnnList(await jsonp(
     'https://api.fund.eastmoney.com/f10/FHGG?callback=?&fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));
+  // 2026-08-17 性能修复：公告正文并行拉取（并发 4，原来串行 17 条=秒级卡顿）
   const out = [];
-  for (const a of anns) {
-    try {
-      const d = await fetchJson('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.id + '&client_source=web&page_index=1');
-      const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
-      if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; out.push(rec); }
-    } catch (e) { /* 单条失败跳过，保整体 */ }
+  const CONC = 4;
+  for (let i = 0; i < anns.length; i += CONC) {
+    const batch = anns.slice(i, i + CONC);
+    const parsed = await Promise.all(batch.map(async a => {
+      try {
+        const d = await fetchJson('https://np-cnotice-stock.eastmoney.com/api/content/ann?art_code=' + a.id + '&client_source=web&page_index=1');
+        const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
+        if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; return rec; }
+      } catch (e) { /* 单条失败跳过，保整体 */ }
+      return null;
+    }));
+    parsed.forEach(r => { if (r) out.push(r); });
   }
   out.sort((x, y) => x.ex < y.ex ? 1 : -1);   // 与股票通道一致：除息日倒序
   try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }

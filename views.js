@@ -452,57 +452,56 @@
     const results = [];
     const errors = [];
     const skipped = [];
-    for (const it of cmpState.list) {
-      try {
-        const kline = await DL.getKline(it.code, start, end, it.market);   // C2: 指数带 market（sh000300）
-        const dates = Object.keys(kline).sort();
-        // v1.7.4 P3 方案B：默认按实际上市日起算（不足周期不跳过），严格同期时保留旧逻辑
-        if (!dates.length) {
-          errors.push(`「${it.name}(${it.code})」无行情数据——已跳过`);
-          continue;
-        }
-        if (strictSameStart && dates[0] > start) {
-          skipped.push(`「${it.name}(${it.code})」${y}年前（${start}）尚无数据，最早 ${dates[0]}——已跳过（严格同期）`);
-          continue;
-        }
-        const actualStart = dates[0] > start ? dates[0] : start;   // 实际起算日（上市日晚于所选周期起点）
-        const divs = await DL.fetchDividendsOne(it.code);
-        const res = simulate(principal, actualStart, reinvest, kline, divs, monthly);   // B2/B1: 本金/复投可调
-        // 最大回撤 + 股息率（v1.7.4 P7：改用按报告期归组的年化股息率，替代365天窗口）
-        let maxDD = 0, peak = -Infinity;
-        res.daily.forEach(x => { if (x.value > peak) peak = x.value; const dd = (peak - x.value) / peak; if (dd > maxDD) maxDD = dd; });
-        const snap = homeState.snap || await DL.getStockQuotes([it.code]);
-        homeState.snap = snap;
-        const s = snap[it.code] || {};
-        // C2：指数无行情快照（腾讯 sz000922 会拿错佳电股份价）→ 直接用 K 线末收盘价
-        const lastPrice = it.market ? res.final.lastClose : (s.price || res.final.lastClose);
-        const dy = DL.calcAnnualDivYield(divs, lastPrice);
-        const liveYears = (dates[0] > start) ? Math.round((new Date(end) - new Date(dates[0])) / (365.25 * 86400000) * 10) / 10 : null;
-        // B3：逐年股息率序列（报告期归组 ÷ 年末价；起点=min(买入年-1, 首笔分红年)·大师裁）
-        const annual = {};
-        divs.forEach(d => { if (!d.pending && d.report) { const ry = d.report.slice(0, 4); annual[ry] = (annual[ry] || 0) + d.dps; } });
-        const repYrs = Object.keys(annual).map(Number).sort();
-        const yieldSeries = repYrs.length ? (() => {
-          const startY = Math.min(parseInt(actualStart.slice(0, 4), 10) - 1, repYrs[0]);
-          const endY = repYrs[repYrs.length - 1];
-          const out = [];
-          for (let yy = startY; yy <= endY; yy++) {
-            const dps = annual[yy] || 0;
-            if (!dps) { out.push({ y: yy, v: null }); continue; }
-            const yDates = dates.filter(d => d.startsWith(String(yy)));
-            const price = yDates.length ? kline[yDates[yDates.length - 1]] : lastPrice;
-            out.push({ y: yy, v: dps / price * 100 });
-          }
-          return out;
-        })() : null;
-        // B6：除息日索引（tooltip 标注用）
-        const divByDate = {};
-        divs.forEach(d => { if (d.ex) (divByDate[d.ex] = divByDate[d.ex] || []).push(d); });
-        results.push({ it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate });
-      } catch (e) {
-        errors.push(`「${it.name}(${it.code})」数据获取失败：${e.message}——已跳过`);
+    // 2026-08-17 性能修复：各标的并行拉取（原来串行=5×(K线+分红+快照)依次排队）
+    const tasks = cmpState.list.map(it => (async () => {
+      const kline = await DL.getKline(it.code, start, end, it.market);   // C2: 指数带 market（sh000300）
+      const dates = Object.keys(kline).sort();
+      // v1.7.4 P3 方案B：默认按实际上市日起算（不足周期不跳过），严格同期时保留旧逻辑
+      if (!dates.length) {
+        errors.push(`「${it.name}(${it.code})」无行情数据——已跳过`);
+        return null;
       }
-    }
+      if (strictSameStart && dates[0] > start) {
+        skipped.push(`「${it.name}(${it.code})」${y}年前（${start}）尚无数据，最早 ${dates[0]}——已跳过（严格同期）`);
+        return null;
+      }
+      const actualStart = dates[0] > start ? dates[0] : start;   // 实际起算日（上市日晚于所选周期起点）
+      const divs = await DL.fetchDividendsOne(it.code);
+      const res = simulate(principal, actualStart, reinvest, kline, divs, monthly);   // B2/B1: 本金/复投可调
+      // 最大回撤 + 股息率（v1.7.4 P7：改用按报告期归组的年化股息率，替代365天窗口）
+      let maxDD = 0, peak = -Infinity;
+      res.daily.forEach(x => { if (x.value > peak) peak = x.value; const dd = (peak - x.value) / peak; if (dd > maxDD) maxDD = dd; });
+      const snap = homeState.snap || await DL.getStockQuotes([it.code]);
+      homeState.snap = snap;
+      const s = snap[it.code] || {};
+      // C2：指数无行情快照（腾讯 sz000922 会拿错佳电股份价）→ 直接用 K 线末收盘价
+      const lastPrice = it.market ? res.final.lastClose : (s.price || res.final.lastClose);
+      const dy = DL.calcAnnualDivYield(divs, lastPrice);
+      const liveYears = (dates[0] > start) ? Math.round((new Date(end) - new Date(dates[0])) / (365.25 * 86400000) * 10) / 10 : null;
+      // B3：逐年股息率序列（报告期归组 ÷ 年末价；起点=min(买入年-1, 首笔分红年)·大师裁）
+      const annual = {};
+      divs.forEach(d => { if (!d.pending && d.report) { const ry = d.report.slice(0, 4); annual[ry] = (annual[ry] || 0) + d.dps; } });
+      const repYrs = Object.keys(annual).map(Number).sort();
+      const yieldSeries = repYrs.length ? (() => {
+        const startY = Math.min(parseInt(actualStart.slice(0, 4), 10) - 1, repYrs[0]);
+        const endY = repYrs[repYrs.length - 1];
+        const out = [];
+        for (let yy = startY; yy <= endY; yy++) {
+          const dps = annual[yy] || 0;
+          if (!dps) { out.push({ y: yy, v: null }); continue; }
+          const yDates = dates.filter(d => d.startsWith(String(yy)));
+          const price = yDates.length ? kline[yDates[yDates.length - 1]] : lastPrice;
+          out.push({ y: yy, v: dps / price * 100 });
+        }
+        return out;
+      })() : null;
+      // B6：除息日索引（tooltip 标注用）
+      const divByDate = {};
+      divs.forEach(d => { if (d.ex) (divByDate[d.ex] = divByDate[d.ex] || []).push(d); });
+      return { it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate };
+    })());
+    const settled = await Promise.all(tasks);
+    settled.forEach(r => { if (r) results.push(r); });
     if (status) status.textContent = '';
     if (!results.length) { el.style.display = 'block'; $('#cmpTbl').innerHTML = '<div class="hint err">全部失败</div>'; $('#cmpNote').textContent = errors.join('；'); return; }
     if (errors.length || skipped.length) {
