@@ -599,27 +599,34 @@ function calcDivCAGR(divs, yearsN) {
  * 改为派息次数自适应：按最近派息间隔中位数估算一年应含几次，按次数取（天然容忍漂移） */
 const _ttmCache = new WeakMap();   // 按 divs 数组引用缓存（不同标的互不串）
 function ttmDivsAt(divs, dateStr) {
-  // v1.9.1 P8 优化：预排序 + 二分（原实现每次全量 filter+sort，500 只标的性能 O(n·m) 不可接受）
+  // v1.9.5 重写：真 366 天滚动窗口（口径与注释一致：TTM=滚动 366 天分红）
+  // 原实现“按派息次数估算”（N=round(365/中位间隔)，取最近 N 笔）在派息频率突变时失效：
+  // 招行 2026-01 起一年两派，N=1（历史年度派息）→ 2026-01-16 中期分红后 TTM 只算 1.013 丢 2.00，
+  // 信号线股息率 4.9% 腰斩到 2.6%（实际 5.28%）——2026-08-17 主人抓“平滑股息率有问题”实证
+  // 新口径：TTM(date) = 窗口 [date-366, date) 内所有派息之和（366 覆盖闰年；左闭右开，除息日当天不算）
+  // 空窗回退（派息日漂移 >366 天导致 1-3 天窗口为 0）：回退“窗口左边界前最近一笔”
+  //   ——大师边界2：漂移空窗期正确 TTM=旧频率最后一笔，不是“最近一笔”（频率突变期两者差一倍）
   let c = _ttmCache.get(divs);
   if (!c) {
     const sorted = divs.filter(d => d.ex && d.dps > 0).sort((a, b) => a.ex < b.ex ? -1 : 1);
-    const gaps = [];
-    for (let i = 1; i < sorted.length && i <= 6; i++) gaps.push((new Date(sorted[i].ex) - new Date(sorted[i - 1].ex)) / 86400000);
-    const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor((gaps.length - 1) / 2)] : 365;
-    const perYear = Math.max(1, Math.min(12, Math.round(365 / Math.max(30, med))));
-    c = { sorted, perYear };
+    c = { sorted };
     _ttmCache.set(divs, c);
   }
-  // 二分：找 ex < dateStr 的最后一条
-  let lo = 0, hi = c.sorted.length - 1, idx = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (c.sorted[mid].ex < dateStr) { idx = mid; lo = mid + 1; } else hi = mid - 1;
-  }
-  if (idx < 0) return 0;
+  const sorted = c.sorted;
+  if (!sorted.length) return 0;
+  const loDate = shiftDate(dateStr, -366);
+  // 窗口右边界：最后一个 ex < dateStr（除息日当天不算）
+  let lo = 0, hi = sorted.length - 1, right = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (sorted[mid].ex < dateStr) { right = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (right < 0) return 0;
+  // 窗口左边界：最后一个 ex < loDate（回退用：窗口左边界前最近一笔）
+  lo = 0; hi = right; let leftBefore = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (sorted[mid].ex < loDate) { leftBefore = mid; lo = mid + 1; } else hi = mid - 1; }
   let sum = 0;
-  for (let i = 0; i < c.perYear && idx - i >= 0; i++) sum += c.sorted[idx - i].dps;
-  return sum;
+  for (let i = right; i > leftBefore; i--) sum += sorted[i].dps;
+  if (sum > 0) return sum;
+  // 空窗回退（漂移空窗期正确值=窗口左边界前最近一笔）
+  return leftBefore >= 0 ? sorted[leftBefore].dps : 0;
 }
 function calcLockedTTM(divs) {
   const exDates = divs.filter(d => d.ex && d.dps > 0).map(d => d.ex).sort();
@@ -993,7 +1000,7 @@ window.DL = {
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
-  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, computeZone,
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, computeZone,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */

@@ -659,7 +659,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (!data.length) { chart.dispose(); el.innerHTML = '<div class="hint">暂无分红数据</div>'; return; }
     const vals = data.map(x => x.y).sort((a, b) => a - b);
     const pct = p => vals.length ? vals[Math.floor(p * (vals.length - 1))] : null;
-    const q25 = pct(0.25), q75 = pct(0.75), cur = data.length ? data[data.length - 1].y : null;
+    const q25 = pct(0.25), q75 = pct(0.75);
+    // v1.9.5：当前股息率统一 366 窗口 TTM 口径（与分位信号线一致，防两图“当前值”打架）
+    let curTtm = null;
+    try {
+      const lastDate = dates[dates.length - 1];
+      const t = DL.ttmDivsAt(divs, lastDate);
+      if (t > 0) curTtm = t / kline[lastDate] * 100;
+    } catch (e) { }
+    const cur = curTtm != null ? curTtm : (data.length ? data[data.length - 1].y : null);
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = data[p[0].dataIndex]; return `<b>${x.d}</b><br/>股息率 <b>${x.y.toFixed(2)}%</b>`; } },
@@ -676,7 +684,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (note) {
       // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
-      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；口径：逐年滚动——每年用当年到账分红÷当日价；顶部"当前股息率"为近2财年口径）`;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；口径：逐年滚动——每年用当年到账分红÷当日价；顶部“当前股息率”为滚动 366 天 TTM 口径，与分位信号线一致）`;
     }
   }
 
