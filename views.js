@@ -187,7 +187,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const last = series.filter(x => x.pct != null).pop();
           if (!last) continue;
           const eco = DL.calcEcoType(kline, series);
-          const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
+          // v1.9.3 R16：起建线按类型差异化（边界型可切 85）
+          const _tcls = DL.classifyTier(c.code);
+          let _ecoStart = eco.ecoStart;
+          if (_tcls.cls === 'neutral') { try { if (localStorage.getItem('divtool_neutral85') === '1') _ecoStart = 85; } catch (e) {} }
+          const z = DL.computeZone(last.pct, { mode, ecoStart: _ecoStart });
           // 只进不退记忆
           const posKey = 'divtool_pos_' + c.code + '_' + mode;
           let histPos = parseFloat(localStorage.getItem(posKey) || '0') || 0;
@@ -196,7 +200,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const trend = DL.calcDivTrend(divs);
           const tcls = DL.classifyTier(c.code);
           const warn = cagr != null && cagr <= 0;
-          items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: eco.ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, trend, tcls, series, kline });
+          items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: _ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, trend, tcls, series, kline });
         } catch (e) { /* 单只失败跳过 */ }
       }
       const totalPos = items.reduce((s, it) => s + it.pos, 0);
@@ -685,6 +689,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const last = series.filter(x => x.pct != null).pop();
     // 生态类型 + 起建线
     const eco = DL.calcEcoType(kline, series);
+    // v1.9.3 R16：起建线按类型差异化（边界型可切 85，默认 80）
+    const tcls = DL.classifyTier(diagCode);
+    let ecoStart = eco.ecoStart;
+    let neutral85 = false;
+    if (tcls.cls === 'neutral') {
+      try { neutral85 = localStorage.getItem('divtool_neutral85') === '1'; } catch (e) {}
+      if (neutral85) ecoStart = 85;
+    }
     const ecoName = { low: '低波动', mid: '中波动', high: '高波动', declining: '阴跌' }[eco.type] || '中波动';
     const zel = $('#diagZone');
     if (zel) {
@@ -694,7 +706,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         // 只进不退：position 记忆（已触发的最高档位比例）
         const posKey = 'divtool_pos_' + diagCode + '_' + mode;
         let histPos = parseFloat(localStorage.getItem(posKey) || '0') || 0;
-        const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
+        const z = DL.computeZone(last.pct, { mode, ecoStart });
         if (z.currentTier && z.currentTier.pos > histPos) { histPos = z.currentTier.pos; try { localStorage.setItem(posKey, String(histPos)); } catch (e) {} }
         const zoneColor = { start: '#d9a441', add: '#5aa9e6', full: '#4caf7d', extreme: '#e05a5a', watch: '#8fa69c', wait: '#8fa69c', nodata: '#8fa69c' }[z.zone] || '#8fa69c';
         const bar = Math.min(100, Math.max(0, last.pct));
@@ -723,6 +735,18 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const winGap = last && last500 ? Math.abs(last.pct - last500.pct) : null;
         const tclsHtml = tcls.cls !== 'direct'
           ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:${tcls.cls === 'trap' ? 'rgba(224,90,90,.14)' : tcls.cls === 'dull' ? 'rgba(217,164,91,.12)' : 'rgba(58,167,109,.10)'};border:1px solid ${tcls.cls === 'trap' ? 'rgba(224,90,90,.45)' : tcls.cls === 'dull' ? 'rgba(217,164,91,.4)' : 'rgba(58,167,109,.35)'}"><b style="color:${tcls.color}">${tcls.label}</b> <span style="font-size:11px;color:var(--sub)">${tcls.detail}</span></div>`
+          : '';
+        // v1.9.3 R16：可等90型触发时的权衡提示（等多久/差多少/踏空多大 → 主人自决）
+        const wait90Hint = tcls.cls === 'wait90' && tcls.profile && (z.zone === 'start' || z.zone === 'add' || z.zone === 'full' || z.zone === 'extreme')
+          ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(90,169,230,.10);border:1px solid rgba(90,169,230,.35)">🤔 <b>等不等 90？</b> <span style="font-size:11px;color:var(--sub)">该股历史等 90 档平均 ${(tcls.profile.gap90 / 30.4).toFixed(0)} 个月、90 档比 80 档 5 年多赚 <b>+${tcls.profile.diff.toFixed(0)}pp</b>（年化 ${tcls.profile.annual.toFixed(0)}pp/年）；但等待期间价格最大曾涨 <b>144%</b>（踏空风险）——<b>建议 80 档买入</b>；愿承担踏空风险可手动等 90 档</span></div>`
+          : '';
+        // v1.9.3 R16：陷阱型触发时补“持有后退出”动作
+        const trapHoldHint = tcls.cls === 'trap' && (z.zone === 'start' || z.zone === 'add' || z.zone === 'full' || z.zone === 'extreme')
+          ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(224,90,90,.10);border:1px solid rgba(224,90,90,.3)"><span style="font-size:11px;color:var(--sub)">⚠️ 若已持有：关注分红是否连续 2 年下降（报告期归组）——恶化则触发退出信号（见下方卖出信号卡）；买入前建议回避/小仓</span></div>`
+          : '';
+        // v1.9.3 R16：边界型 85 起建切换
+        const neutralSwitch = tcls.cls === 'neutral'
+          ? `<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><button type="button" class="mode-chip ${neutral85 ? 'on' : ''}" data-neutral85="1">🔀 85 起建（边界型，数据支持有限）</button><span style="font-size:10px;color:var(--muted)">默认 80（6 只样本，85 优势靠格力/海尔个案，大师 R16 挂起）</span></div>`
           : '';
         const trendHtml = trend && trend.degraded && tcls.cls !== 'trap'
           ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(224,90,90,.14);border:1px solid rgba(224,90,90,.45)"><b style="color:#e05a5a">⚠️ 分红连续 ${trend.decStreak} 年下降</b> <span style="font-size:11px;color:var(--sub)">（报告期归组，近3年 ${trend.last3 != null ? trend.last3.toFixed(0) + '%' : '—'}）——分位信号降权，建议回避/小仓</span></div>`
@@ -753,11 +777,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           </div>
           <div class="hint" style="margin-top:6px">${posTxt}${z.zone === 'extreme' ? '（历史 41/43 事件胜率，非买入即涨，浮亏均值 -19%±）' : ''}</div>
           <div class="hint" style="margin-top:2px">滚动股息率 <b>${rollingDy != null ? rollingDy.toFixed(2) + '%' : '—'}</b>（与分位同窗口）· 分红 CAGR <b class="${cagrColor}">${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</b>（${cagrWord}）${winGapHtml ? ' · ' + winGapHtml : ''}</div>
-          ${tclsHtml}${trendHtml}
+          ${tclsHtml}${trendHtml}${wait90Hint}${trapHoldHint}${neutralSwitch}
         </div>`;
-        // 模式/窗口切换绑定
+        // 模式/窗口/边界85切换绑定
         zel.querySelectorAll('.mode-chip').forEach(b => b.onclick = () => {
           if (b.dataset.win) { window.setDivWindowDays(parseInt(b.dataset.win, 10)); renderZoneAndSignal(divs, kline); return; }
+          if (b.dataset.neutral85) {
+            try { localStorage.setItem('divtool_neutral85', b.dataset.neutral85 === '1' ? (neutral85 ? '0' : '1') : '0'); } catch (e) {}
+            renderZoneAndSignal(divs, kline); return;
+          }
           localStorage.setItem('divtool_zone_mode', b.dataset.mode);
           renderZoneAndSignal(divs, kline);
         });
