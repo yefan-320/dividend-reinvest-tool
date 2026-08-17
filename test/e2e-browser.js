@@ -35,8 +35,12 @@ function ensureServer() {
 function launchChrome() {
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (!fs.existsSync(chrome)) die('Chrome 不存在');
+  // v1.9.1：清理 9222 残留（防复用旧实例读到旧版本页面）+ 独立 profile（防缓存）
+  try { require('child_process').execSync('lsof -ti:9222 | xargs kill -9 2>/dev/null; sleep 1'); } catch (e) {}
+  const profile = '/tmp/dvt-browser-profile-' + process.pid;
   const cp = require('child_process').spawn(chrome, [
     '--headless=new', '--disable-gpu', '--remote-debugging-port=9222',
+    '--user-data-dir=' + profile,
     '--window-size=800,1600', URL,
   ], { detached: true, stdio: 'ignore' });
   cp.unref();
