@@ -104,6 +104,8 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .tabbar button.active{color:var(--gold);font-weight:700}
 body{padding-bottom:64px}
 .chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;margin:3px}
+.mode-chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:4px 10px;font-size:11px;cursor:pointer}
+.mode-chip.on{background:var(--gold);color:#111;border-color:var(--gold);font-weight:600}
 .wl-card{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
 .wl-card:active{transform:scale(.98)}
 .wl-head{display:flex;align-items:center;gap:8px}
@@ -150,11 +152,18 @@ body{padding-bottom:64px}
     <h2>📅 除息日历（未来30天）</h2>
     <div id="homeDivCalendar"></div>
   </div>
+  <div class="card" id="portfolioCard">
+    <h2>🧺 组合建仓总览 <span class="hint" style="float:right" id="pfSummary">…</span></h2>
+    <div id="portfolioBody" style="display:none">
+      <div class="hint">展开加载中…</div>
+    </div>
+  </div>
   <div class="card" id="scanPanel" style="display:none">
     <h2>🔍 红利股扫描器</h2>
   </div>
   <button class="btn" id="btnScan">🔍 扫描新机会（全市场高股息）</button>
-  <div class="hint" style="margin-top:8px">扫描口径：近12月已宣告分红÷现价 ≥ 4%、市值≥50亿、排除ST（阈值后续可调）</div>
+  <button class="btn" id="btnDiscover" style="margin-top:8px">🔭 发现器（双通道：股息率≥3% ∪ 增长榜 CAGR≥10%）</button>
+  <div class="hint" style="margin-top:8px">扫描口径：近12月已宣告分红÷现价 ≥ 4%、市值≥50亿、排除ST（阈值后续可调）；发现器：第一通道股息率≥3%，第二通道增长榜（≥2%+CAGR≥10%）</div>
 </section>
 
 <!-- ===== 诊断 tab（v1.7.0 新增） ===== -->
@@ -194,6 +203,10 @@ body{padding-bottom:64px}
     <div class="card">
       <h2>💹 分红增长趋势（报告期归组，含中期+末期）</h2>
       <div id="diagDivTrend"></div>
+    </div>
+    <div class="card">
+      <h2>🛡 卖出信号（基本面：EPS 趋势 + 分红连续性 + 估值放大器）</h2>
+      <div id="diagSellSignals"></div>
     </div>
     <div class="card">
       <h2>⚖️ 策略对比（近5年历史回测：收益 + 最大浮亏 + 风险效率）</h2>
@@ -369,11 +382,11 @@ body{padding-bottom:64px}
 </div>
 </section></div>
 
-<script src="demo-data.js?v=v1.9.0"></script>
-<script src="data-layer.js?v=v1.9.0"></script>
+<script src="demo-data.js?v=v1.9.1"></script>
+<script src="data-layer.js?v=v1.9.1"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.0';
+const APP_VERSION = 'v1.9.1';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1085,6 +1098,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="compare">📈 对比</button>
   <button data-tab="backtest">📊 回测</button>
 </nav>
-<script src="views.js?v=v1.9.0"></script>
+<script src="views.js?v=v1.9.1"></script>
 </body>
 </html>

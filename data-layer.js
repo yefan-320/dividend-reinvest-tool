@@ -597,16 +597,29 @@ function calcDivCAGR(divs, yearsN) {
 /* 除息锁定 TTM：除息日当天/次日用除息前 TTM（防 10.24% 假高点误触发）
  * v1.9.0-O1 修复：固定 365/366 天窗口会因派息日漂移+闰年漏掉上次派息（2021-07-13→2022-07-15 间隔 367 天）
  * 改为派息次数自适应：按最近派息间隔中位数估算一年应含几次，按次数取（天然容忍漂移） */
+const _ttmCache = new WeakMap();   // 按 divs 数组引用缓存（不同标的互不串）
 function ttmDivsAt(divs, dateStr) {
-  const past = divs.filter(d => d.ex && d.dps > 0 && d.ex < dateStr)
-    .sort((a, b) => a.ex < b.ex ? 1 : -1);   // 倒序（最近在前）
-  if (!past.length) return 0;
-  const sorted = past.slice().reverse();     // 升序用于算间隔
-  const gaps = [];
-  for (let i = 1; i < sorted.length && i <= 6; i++) gaps.push((new Date(sorted[i].ex) - new Date(sorted[i - 1].ex)) / 86400000);
-  const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor((gaps.length - 1) / 2)] : 365;
-  const perYear = Math.max(1, Math.min(12, Math.round(365 / Math.max(30, med))));
-  return past.slice(0, perYear).reduce((s, d) => s + d.dps, 0);
+  // v1.9.1 P8 优化：预排序 + 二分（原实现每次全量 filter+sort，500 只标的性能 O(n·m) 不可接受）
+  let c = _ttmCache.get(divs);
+  if (!c) {
+    const sorted = divs.filter(d => d.ex && d.dps > 0).sort((a, b) => a.ex < b.ex ? -1 : 1);
+    const gaps = [];
+    for (let i = 1; i < sorted.length && i <= 6; i++) gaps.push((new Date(sorted[i].ex) - new Date(sorted[i - 1].ex)) / 86400000);
+    const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor((gaps.length - 1) / 2)] : 365;
+    const perYear = Math.max(1, Math.min(12, Math.round(365 / Math.max(30, med))));
+    c = { sorted, perYear };
+    _ttmCache.set(divs, c);
+  }
+  // 二分：找 ex < dateStr 的最后一条
+  let lo = 0, hi = c.sorted.length - 1, idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (c.sorted[mid].ex < dateStr) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  if (idx < 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < c.perYear && idx - i >= 0; i++) sum += c.sorted[idx - i].dps;
+  return sum;
 }
 function calcLockedTTM(divs) {
   const exDates = divs.filter(d => d.ex && d.dps > 0).map(d => d.ex).sort();
@@ -671,17 +684,103 @@ function calcRollingPercentile(kline, divs, windowDays) {
   return series;
 }
 
-/* 建仓区判定（J 方案）：
- * 输入 pct（当前滚动分位），返回 { zone, label, action }
- * 80 建1/3 / 85 加1/3 / 90 加满 / 95+ 极值确认；<80 未到建仓区 */
-function computeZone(pct) {
-  if (pct == null) return { zone: 'nodata', label: '数据不足', action: '' };
-  if (pct >= 95) return { zone: 'extreme', label: '95+ 极值确认', action: '历史 95% 胜率（41/43），可自决追加' };
-  if (pct >= 90) return { zone: 'full', label: '90 加满', action: '建仓计划已完成（J 方案第三档）' };
-  if (pct >= 85) return { zone: 'add', label: '85 加仓', action: '加 1/3（第二档）' };
-  if (pct >= 80) return { zone: 'start', label: '80 建仓', action: '建 1/3（第一档）' };
-  if (pct >= 75) return { zone: 'watch', label: '75-80 预告', action: '接近建仓区，关注' };
-  return { zone: 'wait', label: '未到建仓区', action: '等待分位回落至 75+' };
+/* 建仓区判定（v1.9.1 柔性模式 + 生态起建线偏移）
+ * 输入 pct（当前滚动分位）, opts { mode: 'conservative'|'flexible', ecoStart: 起建线 }
+ * 保守档：起建线 s / s+5 / s+10 → 各 1/3；95+ 已加满（可自决追加）
+ * 柔性档：起建线 s / s+10 / s+20 → 20%/40%/60%；95+ → 80% 封顶（留 20% 现金）
+ * 生态起建线（P0.5/P1）：低波 70 / 中波 80（默认）/ 高波 85 / 阴跌 85
+ * 只进不退：触发过的档位由调用方维护（position 状态），回落不撤；本函数给“当前档+下一档” */
+function computeZone(pct, opts) {
+  opts = opts || {};
+  const mode = opts.mode === 'flexible' ? 'flexible' : 'conservative';
+  const s = opts.ecoStart || 80;   // 生态起建线（默认中波 80）
+  if (pct == null) return { zone: 'nodata', label: '数据不足', action: '', mode, pct, currentTier: null, nextTier: null };
+  // 档位表（95+ 极值统一收尾）
+  const tiers = [];
+  if (mode === 'flexible') {
+    [0, 1, 2].forEach(i => { const t = s + i * 10; if (t < 95) tiers.push({ pct: t, pos: (i + 1) * 20, key: i === 0 ? 'start' : (i === 1 ? 'add' : 'full') }); });
+    tiers.push({ pct: 95, pos: 80, key: 'full' });
+  } else {
+    [0, 1, 2].forEach(i => { const t = s + i * 5; if (t < 95) tiers.push({ pct: t, pos: Math.round(100 / 3 * (i + 1)), key: i === 0 ? 'start' : (i === 1 ? 'add' : 'full') }); });
+    tiers.push({ pct: 95, pos: 100, key: 'full' });
+  }
+  // 95+ 极值（两模式统一文案：剩余 20% 可自决追加-不建议）
+  if (pct >= 95) {
+    const posTxt = mode === 'flexible' ? '80%（封顶）' : '已加满';
+    return { zone: 'extreme', label: '95+ 极值确认', action: '当前仓位 ' + posTxt + ' · 历史 95 分位胜率 41/43 · 剩余 20% 现金可自决追加（不建议常规操作）', mode, pct, currentTier: tiers[tiers.length - 1], nextTier: null };
+  }
+  // 已触发档（当前分位 ≥ 档位线的最高档）
+  let current = null;
+  for (const t of tiers) { if (pct >= t.pct) current = t; }
+  if (current) {
+    const next = tiers.find(t => t.pct > current.pct) || null;
+    return { zone: current.key, label: '已触发 ' + current.pct + ' 分位档', action: '已建 ' + current.pos + '% 仓位' + (next ? '，距下一档（' + next.pct + ' 分位）差 ' + (next.pct - pct).toFixed(0) : '（已达上限）'), mode, pct, currentTier: current, nextTier: next };
+  }
+  // 未触发
+  const gap = s - pct;
+  if (gap <= 5) {
+    return { zone: 'watch', label: '距 ' + s + ' 起建线差 ' + gap.toFixed(0), action: '接近建仓区，可提前观察', mode, pct, currentTier: null, nextTier: tiers[0] };
+  }
+  return {
+    zone: 'wait',
+    label: mode === 'flexible' ? '距 ' + s + ' 分位建仓线差 ' + gap.toFixed(0) + '，可提前观察' : '未触发建仓线（' + s + ' 分位）',
+    action: mode === 'flexible' ? '柔性模式：分位未到，继续等待' : '空仓者等待或切换柔性模式，持有者继续收息',
+    mode, pct, currentTier: null, nextTier: tiers[0]
+  };
+}
+
+/* 生态类型判定（P0.5，组合框架）：
+ * 输入 kline（{date:price}）+ 滚动分位序列 series（calcRollingPercentile 输出）
+ * 返回 'low'低波动 | 'mid'中波动 | 'high'高波动 | 'declining'阴跌
+ * 规则：先判阴跌（250日线下方 + 当前分位≥75 且高位持续≥60天），再判波动（近5年最大回撤 <-35% 高 / <-25% 中 / ≥-25% 低）
+ * 阴跌优先；生态起建线映射：low 70 / mid 80 / high 85 / declining 85 */
+function calcEcoType(kline, series) {
+  const ECO_START = { low: 70, mid: 80, high: 85, declining: 85 };
+  const dates = Object.keys(kline).sort();
+  if (!dates.length) return { type: 'mid', ecoStart: 80 };
+  // 近5年最大回撤（限近 1250 交易日）
+  const win = dates.slice(-1250);
+  let peak = -Infinity, mdd = 0;
+  win.forEach(d => { const p = kline[d]; if (!(p > 0)) return; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > mdd) mdd = dd; });
+  // 当前分位 + 高位持续天数
+  const last = series.filter(x => x.pct != null).pop();
+  const curPct = last ? last.pct : null;
+  let highDays = 0;
+  if (curPct != null && curPct >= 75) {
+    for (let i = series.length - 1; i >= 0; i--) {
+      if (series[i].pct != null && series[i].pct >= 75) highDays++;
+      else break;
+    }
+  }
+  // 250 日线：当前价 vs 250 日均价
+  const lastPrice = kline[dates[dates.length - 1]];
+  const ma250 = win.length >= 250 ? win.slice(-250).reduce((s, d) => s + kline[d], 0) / 250 : null;
+  const belowMa = ma250 != null && lastPrice < ma250;
+  const declining = belowMa && curPct != null && curPct >= 75 && highDays >= 60;
+  if (declining) return { type: 'declining', ecoStart: ECO_START.declining };
+  const ddPct = mdd * 100;   // mdd 为正数（如 50 = 回撤 50%），阈值用正数比较
+  let type = 'mid';
+  if (ddPct > 35) type = 'high';
+  else if (ddPct <= 25) type = 'low';
+  return { type, ecoStart: ECO_START[type] };
+}
+
+/* 分位独立事件（轻量组合参考用）：
+ * 输入 series（calcRollingPercentile 输出，升序），tierPct（档位阈值）
+ * 返回 [{ start, end }]：分位 ≥ 阈值的连续区间第一日（独立低估事件，沿用 48/48 口径） */
+function findZoneEvents(series, tierPct) {
+  const events = [];
+  let inZone = false, start = null;
+  for (const x of series) {
+    if (x.pct == null) continue;
+    if (x.pct >= tierPct) {
+      if (!inZone) { inZone = true; start = x.d; }
+    } else {
+      if (inZone) { events.push({ start, end: x.d }); inZone = false; start = null; }
+    }
+  }
+  if (inZone) events.push({ start, end: series[series.length - 1].d });
+  return events;
 }
 
 /* ---------- 对外导出 ---------- */
@@ -694,5 +793,7 @@ window.DL = {
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, computeZone,
+  /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
+  calcEcoType, findZoneEvents,
 }
 })();

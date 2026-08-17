@@ -79,6 +79,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     renderOpportunities();
     renderWatchlist();
     renderDivCalendar();
+    // v1.9.1 P2：组合建仓总览（默认折叠）
+    renderPortfolio(wl);
     // v1.9.0：三级到价提醒（自选股分位扫描 → 横幅 + 桌面通知尽力而为）
     renderZoneBanner(wl);
     // 数据新鲜度徽标（大师补：信任）
@@ -98,8 +100,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const el = $('#zoneBanner');
     if (!el) return;
     if (!wl || !wl.length) { el.innerHTML = ''; return; }
+    // v1.9.1：模式全局单例（与建仓卡同一状态）
+    let mode = localStorage.getItem('divtool_zone_mode') || 'conservative';
+    if (mode !== 'flexible' && mode !== 'conservative') mode = 'conservative';
     const today = DL.todayStr();
-    const lastNotified = await DL.cacheGet('zone:notified');
     const codes = wl.slice(0, 12);
     const rows = [];
     for (const c of codes) {
@@ -109,30 +113,177 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         if (!kline || !divs || !divs.length) continue;
         const series = DL.calcRollingPercentile(kline, divs, 500);
         const last = series.filter(x => x.pct != null).pop();
-        if (!last || last.pct < 75) continue;
-        const z = DL.computeZone(last.pct);
-        rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label });
+        if (!last) continue;
+        // 生态起建线偏移
+        const eco = DL.calcEcoType(kline, series);
+        const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
+        rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoStart: eco.ecoStart, ecoType: eco.type });
       } catch (e) { /* 单只失败跳过 */ }
     }
-    if (!rows.length) { el.innerHTML = ''; return; }
-    const act = rows.filter(r => r.pct >= 85);
-    const watch = rows.filter(r => r.pct >= 75 && r.pct < 85);
+    // 横幅三组（v1.9.1 P4）：① 待触发（距起建线≤5，展示不推）② 动作（已触发）③ 极值 95+
+    const watch = rows.filter(r => r.zone === 'watch');
+    const act = rows.filter(r => r.zone === 'start' || r.zone === 'add' || r.zone === 'full');
+    const extreme = rows.filter(r => r.zone === 'extreme');
     let html = '';
+    if (extreme.length) {
+      html += `<div style="background:rgba(224,90,90,.16);border:1px solid rgba(224,90,90,.5);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔴 <b>极值区</b>：${extreme.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位`).join(' · ')}</div>`;
+    }
     if (act.length) {
       html += `<div style="background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.4);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔔 <b>建仓区提醒</b>：${act.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位 [${r.label}]`).join(' · ')}</div>`;
     }
     if (watch.length) {
-      html += `<div style="background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:10px;padding:10px 14px;margin-bottom:10px">👀 <b>接近建仓区</b>：${watch.map(r => `${r.name}(${r.code}) ${r.pct.toFixed(0)}%`).join(' · ')}</div>`;
+      html += `<div style="background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:10px;padding:10px 14px;margin-bottom:10px">👀 <b>待触发预告</b>：${watch.map(r => `${r.name}(${r.code}) ${r.pct.toFixed(0)}% · 距${r.ecoStart}起建线差 ${(r.ecoStart - r.pct).toFixed(0)}`).join(' · ')}</div>`;
     }
     el.innerHTML = html;
-    // 桌面通知（尽力而为，仅 95+ 极值；iOS Safari/无权限静默）
-    const extreme = rows.filter(r => r.pct >= 95);
-    if (extreme.length && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      try { new Notification('🔔 红利建仓提醒', { body: extreme.map(r => r.name + ' ' + r.pct.toFixed(0) + '%分位 [95+极值]').join('，') }); } catch (e) {}
+    // 桌面通知（尽力而为，仅动作+极值；iOS Safari/无权限静默）
+    if ((act.length || extreme.length) && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification('🔔 红利建仓提醒', { body: [...act, ...extreme].map(r => r.name + ' ' + r.pct.toFixed(0) + '%分位 [' + r.label + ']').join('，') }); } catch (e) {}
     }
     if (act.length && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       try { Notification.requestPermission(); } catch (e) {}
     }
+  }
+
+  /* v1.9.1 P2：组合建仓总览卡（默认折叠零请求，展开懒加载 + 缓存 30min）
+   * 内容：每只标的进度条（已建/上限）+ 生态 + 二维排序 + 质量警示 + 资金分配模拟（截断不缩放）+ 轻量组合参考 */
+  let _pfLoaded = false, _pfCache = null;
+  async function renderPortfolio(wl) {
+    const card = $('#portfolioCard');
+    const body = $('#portfolioBody');
+    if (!card || !body) return;
+    if (!wl || !wl.length) {
+      $('#pfSummary').textContent = '空自选';
+      body.style.display = 'none';
+      return;
+    }
+    // 折叠态：零请求，显示汇总（用上次展开的缓存或占位）
+    const mode = (localStorage.getItem('divtool_zone_mode') || 'conservative');
+    let summary = '…';
+    try { const prev = JSON.parse(localStorage.getItem('divtool_pf_summary') || 'null'); if (prev) summary = prev.txt; } catch (e) {}
+    if (_pfCache) summary = `组合总仓位 ${_pfCache.totalPos}% · ${_pfCache.triggeredCount}/${_pfCache.items.length} 已触发`;
+    const ps = $('#pfSummary');
+    if (ps) ps.textContent = summary;
+    card.onclick = async () => {
+      if (body.style.display !== 'none') { body.style.display = 'none'; return; }
+      body.style.display = 'block';
+      // 缓存 30min：展开不重拉
+      if (_pfCache && Date.now() - _pfCache.ts < 30 * 60000) { renderPfBody(_pfCache); return; }
+      body.innerHTML = '<div class="hint">展开加载中…</div>';
+      const items = [];
+      for (const c of wl.slice(0, 20)) {
+        try {
+          const kline = await DL.getKline(c.code, '2021-01-01', DL.todayStr());
+          const divs = await DL.fetchDividendsOne(c.code);
+          if (!kline || !divs || !divs.length) continue;
+          const series = DL.calcRollingPercentile(kline, divs, 500);
+          const last = series.filter(x => x.pct != null).pop();
+          if (!last) continue;
+          const eco = DL.calcEcoType(kline, series);
+          const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
+          // 只进不退记忆
+          const posKey = 'divtool_pos_' + c.code + '_' + mode;
+          let histPos = parseFloat(localStorage.getItem(posKey) || '0') || 0;
+          if (z.currentTier && z.currentTier.pos > histPos) { histPos = z.currentTier.pos; try { localStorage.setItem(posKey, String(histPos)); } catch (e) {} }
+          const cagr = DL.calcDivCAGR(divs, 3);
+          const warn = cagr != null && cagr <= 0;
+          items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: eco.ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, series, kline });
+        } catch (e) { /* 单只失败跳过 */ }
+      }
+      const totalPos = items.reduce((s, it) => s + it.pos, 0);
+      const triggered = items.filter(it => it.pos > 0).length;
+      _pfCache = { ts: Date.now(), items, totalPos, triggeredCount: triggered, mode };
+      try { localStorage.setItem('divtool_pf_summary', JSON.stringify({ ts: Date.now(), txt: `组合总仓位 ${totalPos}% · ${triggered}/${items.length} 已触发` })); } catch (e) {}
+      renderPfBody(_pfCache);
+    };
+  }
+
+  /* 组合总览卡主体渲染（进度条 + 排序 + 资金模拟 + 轻量参考） */
+  function renderPfBody(cache) {
+    const body = $('#portfolioBody');
+    if (!body) return;
+    const { items, totalPos, triggeredCount, mode } = cache;
+    // 二维排序：触发档深度（90+ > 80 > 70 > 未触发）+ 生态内分位高者先
+    const tierRank = { extreme: 4, full: 3, add: 2, start: 1, watch: 0.5, wait: 0 };
+    const sorted = items.slice().sort((a, b) => {
+      const ra = tierRank[a.zone] || 0, rb = tierRank[b.zone] || 0;
+      if (ra !== rb) return rb - ra;
+      return b.pct - a.pct;
+    });
+    // 质量警示列（不混入排序）
+    const ecoName = { low: '低波', mid: '中波', high: '高波', declining: '阴跌' };
+    let rows = '';
+    sorted.forEach(it => {
+      const bar = Math.min(100, it.pos);
+      const color = it.zone === 'extreme' ? '#e05a5a' : (it.zone === 'full' ? '#4caf7d' : (it.zone === 'add' ? '#5aa9e6' : (it.zone === 'start' ? '#d9a441' : '#8fa69c')));
+      rows += `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span><b>${it.name}</b>(${it.code}) <span style="font-size:10px;color:var(--muted)">${ecoName[it.ecoType] || '中波'}·起${it.ecoStart}</span></span>
+          <span style="font-size:11px">${it.pct.toFixed(0)}%分位 <span style="color:${color}">${it.label}</span>${it.warn ? ' <span style="color:#e05a5a">⚠️分红缩水</span>' : ''}</span>
+        </div>
+        <div style="height:6px;background:var(--card2);border-radius:3px;margin-top:3px;position:relative">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${bar}%;background:${color};border-radius:3px"></div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">已建 ${it.pos}% / 上限 ${it.target || (it.zone === 'extreme' ? '80' : it.zone === 'full' ? '60' : it.zone === 'add' ? '40' : it.zone === 'start' ? '20' : '—')}%${it.zone === 'wait' || it.zone === 'watch' ? ' · 未触发' : ''}</div>
+      </div>`;
+    });
+    // 资金分配模拟（截断不缩放：90+ > 80 > 70 > 未触发，现金 ≥20%）
+    const fundInput = `<div style="display:flex;gap:6px;align-items:center;margin:8px 0">总资金 <input id="pfFund" type="number" value="1000000" style="width:110px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)"> 元 → <button type="button" class="chip" id="pfCalc">💡 分配建议</button></div>`;
+    body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">组合总仓位 <b>${totalPos}%</b> · 已触发 ${triggeredCount}/${items.length} · 模式：${mode === 'flexible' ? '柔性' : '保守'}（模式在建仓卡切换）</div>${rows}<div id="pfFundWrap">${fundInput}<div id="pfFundResult"></div></div><div id="pfRef" style="margin-top:6px"></div>`;
+    // 资金模拟绑定
+    const calcBtn = $('#pfCalc');
+    if (calcBtn) calcBtn.onclick = () => {
+      const F = parseFloat(($('#pfFund') || {}).value) || 0;
+      const result = $('#pfFundResult');
+      if (!F || !result) return;
+      // 截断：按排序买，现金 ≥20%
+      const cashLimit = F * 0.8;
+      let used = 0;
+      const lines = [];
+      for (const it of sorted) {
+        if (used >= cashLimit) { lines.push(`<div style="font-size:11px;color:var(--muted)">${it.name}：已触发但资金不足，待释放</div>`); continue; }
+        const target = it.target || (it.zone === 'extreme' ? 80 : 0);
+        if (!target) { continue; }
+        const amt = Math.min(F * target / 100, cashLimit - used);
+        used += amt;
+        lines.push(`<div style="font-size:11px">${it.name}：建议 <b>${(amt / 10000).toFixed(1)} 万</b>（档位 ${target}%${amt < F * target / 100 ? '，现金受限截断' : ''}）</div>`);
+      }
+      result.innerHTML = lines.join('') + `<div style="font-size:11px;margin-top:4px;color:var(--muted)">合计建议 ${(used / 10000).toFixed(1)} 万 / 预算上限 ${(cashLimit / 10000).toFixed(1)} 万（现金下限 20%：至少留 ${((F - cashLimit) / 10000).toFixed(1)} 万）</div>`;
+    };
+    // 轻量组合参考：每只当前触发档 → 独立事件均值 → 按当前资金权重加权
+    (async () => {
+      const ref = $('#pfRef');
+      if (!ref) return;
+      let totRet = 0, totMdd = 0, nEvt = 0, wSum = 0;
+      for (const it of sorted) {
+        const tier = it.target || (it.zone === 'extreme' ? 80 : 0);
+        if (!tier || !it.series || !it.kline) continue;
+        const tierPct = it.ecoStart + (mode === 'flexible' ? ((tier / 20 - 1) * 10) : ((tier / 33.33 - 1) * 5));
+        const events = DL.findZoneEvents(it.series, tierPct);
+        const dates = Object.keys(it.kline).sort();
+        let evRet = 0, evMdd = 0, cnt = 0;
+        for (const ev of events) {
+          const idx = dates.indexOf(ev.start);
+          if (idx < 0 || idx >= dates.length - 250) continue;   // 至少 1 年数据
+          const buyP = it.kline[dates[idx]];
+          const endP = it.kline[dates[dates.length - 1]];
+          let peak = -Infinity, mdd = 0;
+          for (let j = idx; j < dates.length; j++) { const p = it.kline[dates[j]]; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > mdd) mdd = dd; }
+          evRet += (endP / buyP - 1) * 100;
+          evMdd += mdd * 100;
+          cnt++;
+        }
+        if (cnt) {
+          const w = it.pos || 0.1;   // 权重：已建仓位（未建仓给小权重）
+          totRet += (evRet / cnt) * w;
+          totMdd += (evMdd / cnt) * w;
+          nEvt += cnt;
+          wSum += w;
+        }
+      }
+      if (wSum > 0 && nEvt > 0) {
+        ref.innerHTML = `<div class="hint">组合历史同类买点（按当前持仓权重）：平均收益 <b class="${totRet / wSum >= 0 ? 'green' : 'red'}">${(totRet / wSum).toFixed(1)}%</b> / 最大浮亏 <b class="red">-${(totMdd / wSum).toFixed(1)}%</b>（${nEvt} 次独立事件，仅参考非预测）</div>`;
+      }
+    })();
   }
 
   /* 机会速览：自选股股息率阈值突破提醒（打开时对比快照） */
@@ -271,6 +422,68 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
   }
 
+  /* v1.9.1 P5：发现器 MVP（三层动态池第一层粗筛的双通道落地）
+   * 第一通道：股息率 ≥3%（clist 接口 f9 直接全市场排序，快）
+   * 第二通道：增长榜（股息率 ≥2% + 分红 CAGR ≥10%）——对第一通道 top N 深扫补 CAGR
+   * 输出：候选列表（股息率/CAGR/生态色标/样本年数/置信度）+ 点击加自选 */
+  async function runDiscoverer() {
+    const el = $('#scanPanel');
+    el.style.display = 'block';
+    el.innerHTML = '<div class="hint">⏳ 发现器：拉取全市场股息率排序…</div>';
+    try {
+      // 第一通道：clist 全市场按股息率降序（f9=股息率%，实测可用）
+      const list = await DL.fetchJson('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f9&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&fields=f2,f9,f12,f14,f20,f21');
+      const raw = (list && list.data && list.data.diff) || [];
+      if (!raw.length) throw new Error('全市场列表为空（接口被限流）');
+      // 过滤：有股息率 + ≥3% + 非 ST + 市值≥50亿
+      const ch1 = raw.filter(r => r && r.f9 && r.f9 > 0 && r.f12 && !(r.f14 || '').includes('ST') && (!r.f20 || r.f20 >= 50e8))
+        .map(r => ({ code: r.f12, name: r.f14, price: r.f2, dy: r.f9, cap: r.f20 }))
+        .sort((a, b) => b.dy - a.dy);
+      el.innerHTML = `<div class="hint">✅ 第一通道（股息率≥3%）：${ch1.length} 只候选。深扫 top ${Math.min(40, ch1.length)} 算 CAGR/生态/置信度…</div>`;
+      // 深扫 top N（批处理：5 并发 × 8 批，避免东财限流）
+      const top = ch1.slice(0, 40);
+      const rows = [];
+      const scanOne = async (c) => {
+        try {
+          const [divs, kline] = await Promise.all([
+            DL.fetchDividendsOne(c.code),
+            DL.getKline(c.code, '2021-01-01', DL.todayStr()),
+          ]);
+          if (!divs || !divs.length) return;
+          const series = DL.calcRollingPercentile(kline, divs, 500);
+          const last = series.filter(x => x.pct != null).pop();
+          const eco = DL.calcEcoType(kline, series);
+          const cagr = DL.calcDivCAGR(divs, 3);
+          const payYears = new Set(divs.filter(x => !x.pending && x.ex).map(x => (x.report || x.ex).slice(0, 4)).filter(Boolean)).size;
+          // 低置信度：样本<500天 或 分红<4年
+          const lowConf = (last == null) || payYears < 4;
+          rows.push({ ...c, pct: last ? last.pct : null, ecoType: eco.type, cagr, payYears, lowConf });
+        } catch (e) { /* 单只跳过 */ }
+      };
+      for (let i = 0; i < top.length; i += 5) {
+        await Promise.all(top.slice(i, i + 5).map(scanOne));
+        el.innerHTML = `<div class="hint">⏳ 深扫进度：${Math.min(i + 5, top.length)}/${top.length}…</div>`;
+      }
+      // 第二通道标注：增长榜（CAGR≥10% 且股息率≥2%）高亮
+      rows.sort((a, b) => (b.dy || 0) - (a.dy || 0));
+      const ecoName = { low: '🟢低波', mid: '🟡中波', high: '🔴高波', declining: '🔻阴跌' };
+      el.innerHTML = `<div class="hint">✅ 发现器完成：${rows.length} 只深扫（第一通道 ${ch1.length} 只 → top ${top.length}）· 绿色=增长榜（CAGR≥10%）· 低置信=样本不足</div>` +
+        rows.slice(0, 40).map(r => `<div class="scan-row" data-code="${r.code}">
+          <b>${r.name}</b> <span class="wl-code">${r.code}</span>
+          <span class="gold">${r.dy.toFixed(2)}%</span>
+          ${r.cagr != null ? `<span class="${r.cagr >= 0.1 ? 'green' : (r.cagr >= 0 ? '' : 'red')}">CAGR ${(r.cagr * 100).toFixed(1)}%</span>` : '<span class="hint">CAGR—</span>'}
+          ${r.cagr != null && r.cagr >= 0.1 ? '<span class="green">📈增长榜</span>' : ''}
+          <span class="hint">${ecoName[r.ecoType] || ''}</span>
+          ${r.pct != null ? `<span class="hint">分位${r.pct.toFixed(0)}</span>` : ''}
+          ${r.lowConf ? '<span class="risk-badge">低置信</span>' : ''}
+          <span class="hint">连分${r.payYears}年</span>
+        </div>`).join('');
+      el.querySelectorAll('.scan-row').forEach(r => r.onclick = () => { addToWatchlist(r.dataset.code); openDiagnose(r.dataset.code); });
+    } catch (e) {
+      el.innerHTML = `<div class="hint err">发现器失败：${e.message}，请稍后重试</div>`;
+    }
+  }
+
   /* ---------- 诊断页 ---------- */
   let diagCode = null;
   let diagYears = 5;
@@ -352,6 +565,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       renderZoneAndSignal(divs, kline);
       renderDivTrend(divs);
       renderStrategy(divs, kline);
+      // v1.9.1 P7：卖出信号卡（EPS 趋势 + 分红连续性 + 估值放大器）
+      renderSellSignals(divs, kline);
       // 分红节奏
       renderRhythm(divs);
       // v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比）
@@ -402,34 +617,71 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   /* ===== v1.9.0：建仓区状态卡（J 方案）+ 分位信号线（滚动500天）+ 分红趋势 ===== */
   let _signalChart = null;
   function renderZoneAndSignal(divs, kline) {
-    // 建仓区状态卡
-    const zel = $('#diagZone');
+    // v1.9.1 模式全局单例（localStorage 记忆）
+    let mode = localStorage.getItem('divtool_zone_mode') || 'conservative';
+    if (mode !== 'flexible' && mode !== 'conservative') mode = 'conservative';
     const series = DL.calcRollingPercentile(kline, divs, 500);
     const last = series.filter(x => x.pct != null).pop();
+    // 生态类型 + 起建线
+    const eco = DL.calcEcoType(kline, series);
+    const ecoName = { low: '低波动', mid: '中波动', high: '高波动', declining: '阴跌' }[eco.type] || '中波动';
+    const zel = $('#diagZone');
     if (zel) {
       if (!last) {
         zel.innerHTML = '<div class="hint">数据不足（需≥250个交易日）</div>';
       } else {
-        const z = DL.computeZone(last.pct);
+        // 只进不退：position 记忆（已触发的最高档位比例）
+        const posKey = 'divtool_pos_' + diagCode + '_' + mode;
+        let histPos = parseFloat(localStorage.getItem(posKey) || '0') || 0;
+        const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
+        if (z.currentTier && z.currentTier.pos > histPos) { histPos = z.currentTier.pos; try { localStorage.setItem(posKey, String(histPos)); } catch (e) {} }
         const zoneColor = { start: '#d9a441', add: '#5aa9e6', full: '#4caf7d', extreme: '#e05a5a', watch: '#8fa69c', wait: '#8fa69c', nodata: '#8fa69c' }[z.zone] || '#8fa69c';
         const bar = Math.min(100, Math.max(0, last.pct));
+        // 阈值刻度（随模式+生态）
+        const tiers = [];
+        if (mode === 'flexible') { for (let t = eco.ecoStart; t < 95; t += 10) tiers.push(t); tiers.push(95); }
+        else { for (let t = eco.ecoStart; t < 95; t += 5) tiers.push(t); tiers.push(95); }
+        const tierLabels = tiers.map(t => t + (t === tiers[0] ? '建' : (t === tiers[tiers.length - 1] ? '满' : '加')));
+        // 第二维度：滚动股息率（同口径）+ CAGR 状态词
+        const rollingDy = last ? last.dyS : null;
+        const cagr = DL.calcDivCAGR(divs, 3);
+        const cagrWord = cagr == null ? '—' : (cagr >= 0.05 ? '增长中' : (cagr > 0 ? '停增' : '缩水'));
+        const cagrColor = cagr == null ? '' : (cagr >= 0.05 ? 'green' : (cagr > 0 ? '' : 'red'));
+        // 只进不退显示逻辑：历史已触发 > 当前档 → 显示“已建 X% 保留，距下一档差 N”
+        let posTxt = z.action;
+        if (histPos > 0 && (!z.currentTier || z.currentTier.pos < histPos)) {
+          const nextT = z.nextTier || tiers.find(t => t > last.pct);
+          posTxt = '已建 ' + histPos + '% 仓位（只进不退，回落保留），距下一档（' + (nextT || 95) + ' 分位）差 ' + ((nextT || 95) - last.pct).toFixed(0);
+        }
+        const rangeWord = last.pct < 25 ? '低位区' : (last.pct < 50 ? '中低位' : (last.pct < 75 ? '中高位' : (last.pct < 90 ? '高位区' : '极值区')));
         zel.innerHTML = `<div class="zone-row">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-weight:600;color:${zoneColor}">${z.label}</span>
-            <span>当前分位 <b>${last.pct.toFixed(0)}%</b> · 股息率 ${last.dyS.toFixed(2)}%</span>
+            <span>当前 <b>${last.pct.toFixed(0)}%</b> 分位（${rangeWord}）</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button type="button" class="mode-chip ${mode === 'conservative' ? 'on' : ''}" data-mode="conservative">🛡 保守（${eco.ecoStart} 起）</button>
+            <button type="button" class="mode-chip ${mode === 'flexible' ? 'on' : ''}" data-mode="flexible">🔶 柔性（更早参与）</button>
+            <span style="font-size:10px;color:var(--muted);align-self:center">生态：${ecoName}（起建线 ${eco.ecoStart} 分位）</span>
           </div>
           <div style="height:10px;background:var(--card2);border-radius:5px;overflow:hidden;position:relative">
             <div style="position:absolute;left:0;top:0;bottom:0;width:${bar}%;background:${zoneColor};border-radius:5px"></div>
-            ${[80,85,90,95].map(p => `<div style="position:absolute;left:${p}%;top:-3px;bottom:-3px;width:1px;background:rgba(255,255,255,.35)" title="${p}分位"></div>`).join('')}
+            ${tiers.map(t => `<div style="position:absolute;left:${t}%;top:-3px;bottom:-3px;width:1px;background:rgba(255,255,255,.35)" title="${t}分位"></div>`).join('')}
           </div>
           <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px">
-            <span>0</span><span>80建</span><span>85加</span><span>90满</span><span>95+极值</span><span>100</span>
+            <span>0</span>${tiers.map((t, i) => `<span>${t}${tierLabels[i] ? '·' + tierLabels[i].replace(t, '') : ''}</span>`).join('')}<span>100</span>
           </div>
-          <div class="hint" style="margin-top:6px">${z.action}${z.zone === 'extreme' ? '（历史 41/43 事件胜率，非买入即涨，浮亏均值 -19%±）' : ''}</div>
+          <div class="hint" style="margin-top:6px">${posTxt}${z.zone === 'extreme' ? '（历史 41/43 事件胜率，非买入即涨，浮亏均值 -19%±）' : ''}</div>
+          <div class="hint" style="margin-top:2px">滚动股息率 <b>${rollingDy != null ? rollingDy.toFixed(2) + '%' : '—'}</b>（500 日，与分位同口径）· 分红 CAGR <b class="${cagrColor}">${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</b>（${cagrWord}）</div>
         </div>`;
+        // 模式切换绑定
+        zel.querySelectorAll('.mode-chip').forEach(b => b.onclick = () => {
+          localStorage.setItem('divtool_zone_mode', b.dataset.mode);
+          renderZoneAndSignal(divs, kline);
+        });
       }
     }
-    // 信号线图（滚动 500 天分位曲线 + 80/85/90/95 阈值线）
+    // 信号线图（阈值虚线随模式+生态）
     const el = $('#diagSignalChart');
     if (el && typeof echarts !== 'undefined') {
       if (_signalChart) { _signalChart.dispose(); _signalChart = null; }
@@ -438,12 +690,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         el.innerHTML = '<div class="hint">数据不足</div>';
       } else {
         const chart = _signalChart = echarts.init(el);
-        const markAreas = [
-          [{ yAxis: 95, itemStyle: { color: 'rgba(224,90,90,.10)' } }, { yAxis: 100 }],
-          [{ yAxis: 90, itemStyle: { color: 'rgba(76,175,125,.10)' } }, { yAxis: 95 }],
-          [{ yAxis: 85, itemStyle: { color: 'rgba(90,169,230,.10)' } }, { yAxis: 90 }],
-          [{ yAxis: 80, itemStyle: { color: 'rgba(217,164,65,.10)' } }, { yAxis: 85 }],
-        ];
+        const tiers2 = [];
+        if (mode === 'flexible') { for (let t = eco.ecoStart; t < 95; t += 10) tiers2.push(t); tiers2.push(95); }
+        else { for (let t = eco.ecoStart; t < 95; t += 5) tiers2.push(t); tiers2.push(95); }
+        const markAreas = tiers2.slice(0, -1).map((t, i) => [{ yAxis: t, itemStyle: { color: 'rgba(217,164,65,.10)' } }, { yAxis: tiers2[i + 1] }]);
         chart.setOption({
           backgroundColor: 'transparent',
           tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 平滑股息率 ${x.dyS.toFixed(2)}%`; } },
@@ -455,13 +705,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             lineStyle: { width: 1.5, color: '#d9a441' }, areaStyle: { color: 'rgba(217,164,65,.12)' },
             markLine: {
               silent: true, symbol: 'none',
-              data: [80, 85, 90, 95].map(v => ({ yAxis: v, lineStyle: { type: 'dashed', width: 1, color: 'rgba(255,255,255,.4)' }, label: { formatter: v + '分位', color: '#8fa69c', fontSize: 10, position: 'insideEndTop' } })),
+              data: tiers2.map(v => ({ yAxis: v, lineStyle: { type: 'dashed', width: 1, color: 'rgba(255,255,255,.4)' }, label: { formatter: v + '分位', color: '#8fa69c', fontSize: 10, position: 'insideEndTop' } })),
             },
             markArea: { silent: true, data: markAreas },
           }],
         });
         const sn = $('#diagSignalNote');
-        if (sn) sn.textContent = '口径：滚动 500 个交易日分位（只用截至当日数据，无未来函数）；80 建1/3、85 加1/3、90 加满、95+ 极值确认。历史 90+ 分位买点胜率 95%（41/43 独立事件），浮亏均值 -19%±，最长套牢 6 年。';
+        if (sn) sn.textContent = '口径：滚动 500 个交易日分位（无未来函数）；' + (mode === 'flexible' ? '柔性档 ' : '保守档 ') + tiers2.map(t => t + ' 分位').join(' / ') + '；只进不退（触发档位保留）。历史 90+ 分位买点胜率 95%（41/43），浮亏均值 -19%±。';
       }
     }
   }
@@ -488,7 +738,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       yoy.push({ y: last5[i], pct: prev > 0 ? (cur - prev) / prev * 100 : null });
     }
     const stops = yoy.filter(v => v.pct != null && v.pct <= 0);
-    if (stops.length >= 2) html += '<span class="red"> ⚠️ 连续 ' + stops.length + ' 年分红停增/下调（' + stops.map(s => s.y + ' ' + s.pct.toFixed(1) + '%').join('、') + '）→ 降级观察（基本面卖出信号第1级）</span>';
+    // v1.9.1 修复：连续检测必须相邻两年（旧实现非连续累计误报——招行 2008/2013 各降一次被判“连续4年”）
+    const consec = [];
+    for (let i = 1; i < yoy.length; i++) { if (yoy[i].pct != null && yoy[i].pct <= 0 && yoy[i - 1].pct != null && yoy[i - 1].pct <= 0) consec.push(yoy[i]); }
+    if (consec.length > 0) html += '<span class="red"> ⚠️ 分红连续 2 年停增/下调（' + consec.slice(-1).map(s => s.y + ' ' + s.pct.toFixed(1) + '%').join('、') + '）→ 降级观察（基本面卖出信号第1级）</span>';
     else if (stops.length === 1) html += '<span style="color:#e0a030"> ⚠️ ' + stops[0].y + ' 分红' + (stops[0].pct < 0 ? '下调' : '停增') + ' ' + stops[0].pct.toFixed(1) + '%（第1年关注，连续2年触发降级观察）</span>';
     html += '</div><table style="width:100%;font-size:12px;margin-top:6px;border-collapse:collapse"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">报告期</th><th>每股分红</th><th>同比</th><th>趋势</th></tr>';
     last5.forEach((y, i) => {
@@ -558,6 +811,62 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.innerHTML = html;
     const g = $('#diagStrategyGuide');
     if (g) g.innerHTML = '<span>① 收益最高≠最优：浮亏深度决定拿不拿得住；② 金字塔浮亏最浅，且 90 分位永不出现也能建仓；③ 风险效率=收益÷浮亏，1.9 以上=赚得多亏得少，1.0 以下=赚得少亏得多。</span>';
+  }
+
+  /* v1.9.1 P6+P7：卖出信号卡（EPS 趋势 + 分红连续性 + 估值放大器）
+   * 基本面恶化：EPS 按报告期归组（每年最新），连续 2 年下滑 → 恶化
+   * 分红连续 2 年停增/下调 → 降级观察（已有 renderDivTrend 逻辑复用）
+   * 估值放大器：当前分位 ≤20（便宜）→ 卖出信号可信度低（提示谨慎）；≥80 → 可信度高 */
+  function renderSellSignals(divs, kline) {
+    const el = $('#diagSellSignals');
+    if (!el) return;
+    const series = DL.calcRollingPercentile(kline, divs, 500);
+    // EPS 趋势（按报告期年份取最新）
+    const epsByYear = {};
+    divs.forEach(d => { if (d.eps == null) return; const y = (d.report || '').slice(0, 4); if (y) epsByYear[y] = d.eps; });
+    const years = Object.keys(epsByYear).sort();
+    const epsTrend = [];
+    for (let i = 1; i < years.length; i++) {
+      const prev = epsByYear[years[i - 1]], cur = epsByYear[years[i]];
+      if (prev != null && cur != null) epsTrend.push({ y: years[i], pct: (cur - prev) / prev * 100 });
+    }
+    // v1.9.1 修复：真正的“连续”检测（相邻两年都下滑才计数；旧实现非连续年份累计误报——招行 2008/2013 各降一次被判“连续4年”）
+    const epsConsec = [];
+    for (let i = 1; i < epsTrend.length; i++) {
+      if (epsTrend[i].pct < 0 && epsTrend[i - 1].pct < 0) epsConsec.push({ y: epsTrend[i].y, p1: epsTrend[i - 1].pct, p2: epsTrend[i].pct });
+    }
+    const epsWorsened = epsConsec.length > 0;
+    // 分红连续停增（同样相邻两年检测）
+    const byYear = {};
+    divs.forEach(d => { if (d.pending || !d.ex || !(d.dps > 0)) return; const y = (d.report || d.ex).slice(0, 4); byYear[y] = (byYear[y] || 0) + d.dps; });
+    const ys = Object.keys(byYear).filter(y => byYear[y] > 0).sort();
+    const yoy = [];
+    for (let i = 1; i < ys.length; i++) { const prev = byYear[ys[i - 1]], cur = byYear[ys[i]]; yoy.push({ y: ys[i], pct: prev > 0 ? (cur - prev) / prev * 100 : null }); }
+    const divConsec = [];
+    for (let i = 1; i < yoy.length; i++) {
+      if (yoy[i].pct != null && yoy[i].pct <= 0 && yoy[i - 1].pct != null && yoy[i - 1].pct <= 0) divConsec.push({ y: yoy[i].y, p1: yoy[i - 1].pct, p2: yoy[i].pct });
+    }
+    const divDegraded = divConsec.length > 0;
+    // 估值放大器
+    const last = series.filter(x => x.pct != null).pop();
+    const curPct = last ? last.pct : null;
+    const valAmp = curPct != null ? (curPct <= 20 ? 'low' : (curPct >= 80 ? 'high' : 'mid')) : 'mid';
+    const ampTxt = { low: '当前估值低位（分位≤20%），基本面信号可能滞后，建议谨慎验证后再决策', mid: '当前估值中性', high: '当前估值高位（分位≥80%），基本面信号可信度较高' }[valAmp];
+    // 组合判定
+    const signals = [];
+    if (divDegraded) signals.push({ t: '🔴 分红连续 2 年停增/下调（' + divConsec.slice(-1).map(s => s.y + ' ' + s.p2.toFixed(1) + '%').join('、') + '）→ 降级观察' });
+    else if (yoy.length >= 2 && yoy[yoy.length - 1].pct != null && yoy[yoy.length - 1].pct <= 0) signals.push({ t: '🟡 最近年度（' + yoy[yoy.length - 1].y + '）分红停增/下调 ' + yoy[yoy.length - 1].pct.toFixed(1) + '%，第 1 年关注' });
+    else signals.push({ t: '🟢 分红近 ' + (yoy.length ? yoy.length : 0) + ' 年未见连续停增（最近 ' + (yoy.length ? yoy[yoy.length - 1].y : '—') + ' ' + (yoy.length && yoy[yoy.length - 1].pct != null ? (yoy[yoy.length - 1].pct > 0 ? '+' : '') + yoy[yoy.length - 1].pct.toFixed(1) + '%' : '—') + '）' });
+    if (epsWorsened) signals.push({ t: '🔴 EPS 连续 2 年下滑（' + epsConsec.slice(-1).map(t => t.y + ' ' + t.p2.toFixed(1) + '%').join('、') + '）→ 基本面恶化' });
+    else if (epsTrend.length >= 2 && epsTrend[epsTrend.length - 1].pct < 0) signals.push({ t: '🟡 最近年度 EPS 下滑（' + epsTrend[epsTrend.length - 1].pct.toFixed(1) + '%），关注' });
+    else if (epsTrend.length >= 2) signals.push({ t: '🟢 EPS 近 ' + epsTrend.length + ' 年无连续下滑' });
+    else signals.push({ t: '⚪ EPS 数据不足' });
+    const exit = divDegraded && epsWorsened;
+    const verdict = exit ? '<b class="red">⚠️ 建议退出或减仓</b>' : (divDegraded || epsWorsened) ? '<b style="color:#e0a030">⚠️ 降级观察</b>' : '<b class="green">✅ 无退出信号</b>';
+    el.innerHTML = `<div style="margin-bottom:4px">${signals.map(s => `<div style="font-size:12px;margin:2px 0">${s.t}</div>`).join('')}</div>
+      <div style="font-size:12px;margin:4px 0">判定：${verdict}</div>
+      <div class="hint">估值放大器：${ampTxt}${exit ? '（基本面恶化 + 估值' + (valAmp === 'high' ? '高位 → 退出信号可信' : valAmp === 'low' ? '低位 → 建议二次确认' : '中性') + '）' : ''}</div>
+      <div class="hint">口径：EPS/分红按报告期归组；连续 2 年（相邻年度）恶化才触发退出，单年波动仅关注；卖出信号是纪律参考，非自动执行</div>`;
   }
 
   /* 分红节奏：每年几月派息 */
@@ -718,7 +1027,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   async function cmpRun() {
     const el = $('#cmpResult');
     if (!el) return;
-    if (!cmpState.list.length) { alert('请先添加至少 1 个标的'); return; }
+    // v1.9.1 O2：运行锁（防连续点击并发跑两次，晚返回覆盖）
+    if (cmpState.running) return;
+    cmpState.running = true;
+    try {
+      if (!cmpState.list.length) { alert('请先添加至少 1 个标的'); return; }
     el.style.display = 'none';
     const y = cmpState.years;
     // B2/B1：本金/复投可调（默认 100 万/复投，与回测页同口径）
@@ -956,6 +1269,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     q.set('s', strictSameStart ? '1' : '0');
     q.set('v', APP_VERSION);
     history.replaceState(null, '', location.pathname + '?' + q.toString());
+    } finally {
+      cmpState.running = false;   // v1.9.1 O2：释放运行锁
+    }
   }
 
   function renderCompare() {
@@ -1124,6 +1440,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
     const btnScan = $('#btnScan');
     if (btnScan) btnScan.onclick = runScanner;
+    const btnDiscover = $('#btnDiscover');
+    if (btnDiscover) btnDiscover.onclick = runDiscoverer;
     const btnDiagBacktest = $('#btnDiagBacktest');
     if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; const bd = $('#buyDate'); if (bd) bd.value = new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10); switchTab('backtest'); $('#btnRun').click(); } };
     switchTab('home');
