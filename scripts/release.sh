@@ -60,8 +60,26 @@ if [ -f test/e2e-full.js ]; then
 fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
+# v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）
+DIRTY=$(git status --porcelain | grep -v '^??' | head -5)
+if [ -n "$DIRTY" ]; then
+  echo "!! 工作区有未提交改动，中止发布："
+  echo "$DIRTY"
+  exit 1
+fi
 git add index.html data-layer.js views.js
 git commit -m "$VER: 发布（版本号由 scripts/release.sh 自动同步）" 2>/dev/null || echo "(无变更可提交)"
 git tag "$VER" 2>/dev/null || echo "(tag 已存在)"
 git push origin main --tags
+# v1.9.1 O3：推送后复核签名（远程=本地）
+echo "==> 推送后复核："
+git fetch origin main >/dev/null 2>&1
+git rev-parse HEAD > /tmp/rel-head.txt
+git rev-parse origin/main > /tmp/rel-origin.txt
+if cmp -s /tmp/rel-head.txt /tmp/rel-origin.txt; then
+  echo "==> ✅ 本地 HEAD = 远程 HEAD（$(cat /tmp/rel-head.txt | cut -c1-7)）"
+else
+  echo "!! ⚠️ 本地与远程不一致！本地=$(cat /tmp/rel-head.txt | cut -c1-7) 远程=$(cat /tmp/rel-origin.txt | cut -c1-7)"
+  exit 1
+fi
 echo "==> 已推送 $VER（含 tag）"
