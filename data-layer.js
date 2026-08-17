@@ -716,16 +716,19 @@ function calcDivTrend(divs) {
  *   dull    低估值钝化（分红健康但90档收益差/价格长期不修复）——80建仓持有等均值回归
  * 返回 { cls, label, detail }；不在表内=direct（与工具现状保守一致） */
 const TIER_CLASS_TABLE = {
-  // 可等90（13）：年化等待收益>20pp/年（40只实证 R12）
-  '600036': 'wait90', '601398': 'wait90', '601988': 'wait90', '000001': 'wait90',
-  '600519': 'wait90', '000858': 'wait90', '601318': 'wait90', '601899': 'wait90',
-  '601668': 'wait90', '600104': 'wait90', '600019': 'wait90', '600887': 'wait90', '600031': 'wait90',
+  // 可等90（13）：年化等待收益>20pp/年（40只实证 R12）——格式 [cls, 年化pp/年, 间隔天, 90-80收益差pp]
+  '600036': ['wait90', 59.2, 206, 33.4], '601398': ['wait90', 33.1, 196, 17.8], '601988': ['wait90', 44.5, 147, 17.9], '000001': ['wait90', 80.7, 177, 39.1],
+  '600519': ['wait90', 96.4, 202, 53.4], '000858': ['wait90', 49.3, 278, 37.6], '601318': ['wait90', 112.3, 155, 47.7], '601899': ['wait90', 55.5, 228, 34.7],
+  '601668': ['wait90', 39.8, 131, 14.3], '600104': ['wait90', 35.4, 285, 27.6], '600019': ['wait90', 29.8, 235, 19.2], '600887': ['wait90', 26.6, 183, 13.3], '600031': ['wait90', 111.2, 261, 79.5],
   // 中性（6）：10-20pp/年，展示数字自决
-  '600016': 'neutral', '000651': 'neutral', '601166': 'neutral', '601006': 'neutral', '601288': 'neutral', '600690': 'neutral',
+  '600016': ['neutral', 16.8, 227, 10.5], '000651': ['neutral', 16.4, 356, 16.0], '601166': ['neutral', 15.8, 227, 9.8], '601006': ['neutral', 15.6, 239, 10.2], '601288': ['neutral', 12.1, 130, 4.3], '600690': ['neutral', 10.0, 205, 5.6],
+  // 直接买（9）：<10pp/年 或负值
+  '601628': ['direct', 9.8, 295, 7.9], '600900': ['direct', 9.6, 528, 13.9], '601088': ['direct', 5.5, 143, 2.1], '601328': ['direct', 4.5, 137, 1.7],
+  '601600': ['direct', 3.0, 160, 1.3], '601857': ['direct', 1.9, 187, 1.0], '000895': ['direct', 1.6, 285, 1.3], '600009': ['direct', 0.0, 211, 0.0], '000333': ['direct', -2.3, 348, -2.2],
   // 分红陷阱（6）：报告期归组连续2年下降（R14 修正后真名单：周期行业）
-  '600188': 'trap', '600585': 'trap', '601225': 'trap', '600028': 'trap', '601390': 'trap', '601111': 'trap',
+  '600188': ['trap'], '600585': ['trap'], '601225': ['trap'], '600028': ['trap'], '601390': ['trap'], '601111': ['trap'],
   // 低估值钝化（6）：分红健康但90档收益差（R14 误报纠正后）
-  '601601': 'dull', '600795': 'dull', '000100': 'dull', '601985': 'dull', '600027': 'dull', '600886': 'dull',
+  '601601': ['dull'], '600795': ['dull'], '000100': ['dull'], '601985': ['dull'], '600027': ['dull'], '600886': ['dull'],
 };
 const TIER_CLASS_LABEL = {
   wait90: { label: '可等90', color: '#3aa76d', detail: '历史等90档平均7个月、10年收益+18~22pp——可等更极端（年化等待收益>20pp/年）' },
@@ -735,8 +738,54 @@ const TIER_CLASS_LABEL = {
   dull: { label: '低估值钝化', color: '#d9a45b', detail: '分红健康但90档后价格长期不修复——等90意义小，80档建仓长期持有等均值回归' },
 };
 function classifyTier(code) {
-  const cls = TIER_CLASS_TABLE[code] || 'direct';
-  return { cls, ...TIER_CLASS_LABEL[cls] };
+  const row = TIER_CLASS_TABLE[code];
+  const cls = row ? row[0] : 'direct';
+  const base = TIER_CLASS_LABEL[cls];
+  const profile = row && row.length > 1 ? { annual: row[1], gap90: row[2], diff: row[3] } : null;
+  return { cls, ...base, profile };
+}
+
+/* v1.9.3：未来分红到账预测（已宣告 + 上年同期估计）
+ * 输入 divs（已 parse）, holdings { code: shares }, todayStr 'YYYY-MM-DD', monthsN（默认12）
+ * 返回 [{ month:'YYYY-MM', total, items:[{ code, name, ex, dps, shares, est(是否估计) }] }] 按月份升序
+ * 已宣告（ex>=today）直接计入；未宣告用上年同期除息日+365 天估计（est=true，标“估”） */
+function calcFutureCashflow(divs, holdings, todayStr, monthsN) {
+  const months = monthsN || 12;
+  const today = new Date(todayStr + 'T00:00:00');
+  const horizon = new Date(today.getTime() + months * 30.4 * 86400000);
+  const byMonth = {};
+  const push = (m, item) => { if (!byMonth[m]) byMonth[m] = []; byMonth[m].push(item); };
+  divs.forEach(d => {
+    if (d.pending || !(d.dps > 0) || !d.ex) return;
+    const code = d.code;
+    const shares = (holdings && holdings[code]) || 0;
+    const exD = new Date(d.ex + 'T00:00:00');
+    if (exD >= today && exD <= horizon) {
+      push(d.ex.slice(0, 7), { code, name: d.name, ex: d.ex, dps: d.dps, shares, est: false });
+    }
+  });
+  // 估计未宣告：去年对应除息（ex 在今天之后 11 个月内且今年无对应宣告）——用“上年同月”近似
+  const declaredMonths = {};
+  Object.keys(byMonth).forEach(m => { declaredMonths[m] = true; });
+  divs.forEach(d => {
+    if (d.pending || !(d.dps > 0) || !d.ex) return;
+    const exY = new Date(d.ex + 'T00:00:00');
+    const estEx = new Date(exY.getTime() + 365 * 86400000);
+    if (estEx <= today || estEx > horizon) return;
+    // 若该 code 已有宣告落在同年份估计月附近（±1月），跳过防重复
+    const m = estEx.toISOString().slice(0, 7);
+    const code = d.code;
+    const shares = (holdings && holdings[code]) || 0;
+    const dup = (byMonth[m] || []).some(x => x.code === code && !x.est);
+    if (dup) return;
+    push(m, { code, name: d.name, ex: estEx.toISOString().slice(0, 10), dps: d.dps, shares, est: true });
+  });
+  const out = Object.keys(byMonth).sort().map(m => {
+    const items = byMonth[m].sort((a, b) => a.ex < b.ex ? -1 : 1);
+    const total = items.reduce((s, x) => s + x.dps * x.shares, 0);
+    return { month: m, total, items };
+  });
+  return out;
 }
 
 /* 建仓区判定（v1.9.1 柔性模式 + 生态起建线偏移）
@@ -943,6 +992,7 @@ window.DL = {
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
   calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS,
+  calcFutureCashflow,
   /* v1.9.2 新增：组合级回测 */
   calcPortfolioBacktest,
 }

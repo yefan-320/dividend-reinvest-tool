@@ -239,7 +239,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     });
     // 资金分配模拟（截断不缩放：90+ > 80 > 70 > 未触发，现金 ≥20%）
     const fundInput = `<div style="display:flex;gap:6px;align-items:center;margin:8px 0">总资金 <input id="pfFund" type="number" value="1000000" style="width:110px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)"> 元 → <button type="button" class="chip" id="pfCalc">💡 分配建议</button></div>`;
-    body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">组合总仓位 <b>${totalPos}%</b> · 已触发 ${triggeredCount}/${items.length} · 模式：${mode === 'flexible' ? '柔性' : '保守'}（模式在建仓卡切换）</div>${rows}<div id="pfFundWrap">${fundInput}<div id="pfFundResult"></div></div><div id="pfRef" style="margin-top:6px"></div>`;
+    // v1.9.3 持仓巡检汇总：健康/观察/警示
+    const nTrap = items.filter(it => it.tcls && it.tcls.cls === 'trap').length;
+    const nDull = items.filter(it => it.tcls && it.tcls.cls === 'dull').length;
+    const nWarn = items.filter(it => it.warn && (!it.tcls || (it.tcls.cls !== 'trap' && it.tcls.cls !== 'dull'))).length;
+    const patrolHtml = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px;padding:5px 8px;background:var(--card2);border-radius:8px">🔍 持仓巡检：<b class="green">${items.length - nTrap - nDull - nWarn} 健康</b> · ${nDull ? `<b style="color:#d9a45b">${nDull} 观察（低估值钝化）</b> · ` : ''}${nTrap ? `<b class="red">${nTrap} 警示（分红陷阱）</b> · ` : ''}${nWarn ? `<b class="red">${nWarn} 分红缩水</b>` : ''}</div>`;
+    body.innerHTML = `${patrolHtml}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">组合总仓位 <b>${totalPos}%</b> · 已触发 ${triggeredCount}/${items.length} · 模式：${mode === 'flexible' ? '柔性' : '保守'}（模式在建仓卡切换）</div>${rows}<div id="pfFundWrap">${fundInput}<div id="pfFundResult"></div></div><div id="pfRef" style="margin-top:6px"></div>`;
     // 资金模拟绑定
     const calcBtn = $('#pfCalc');
     if (calcBtn) calcBtn.onclick = () => {
@@ -360,26 +365,49 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     });
   }
 
-  /* 除息日历：自选未来30天 */
+  /* 分红到账日历 v1.9.3：自选未来12个月（已宣告+上年同期估计，月度汇总+持仓金额）
+   * 持仓股数可填（divtool_holdings_{code}），未填只显示每股合计 */
   async function renderDivCalendar() {
     const el = $('#homeDivCalendar');
     if (!el) return;
     const wl = homeState.watchlist;
     if (!wl.length) { el.innerHTML = ''; return; }
-    el.innerHTML = '<div class="hint">除息日历加载中…</div>';
+    el.innerHTML = '<div class="hint">分红日历加载中…</div>';
     const today = DL.todayStr();
-    const future = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-    const items = (await Promise.all(wl.map(async it => {
+    let holdings = {};
+    try { holdings = JSON.parse(localStorage.getItem('divtool_holdings') || '{}'); } catch (e) {}
+    const allDivs = [];
+    const names = {};
+    for (const it of wl.slice(0, 20)) {
       try {
         const divs = await DL.fetchDividendsOne(it.code);
-        return divs.filter(d => d.ex && d.ex >= today && d.ex <= future && !d.pending)
-          .map(d => ({ ex: d.ex, name: it.name, profile: d.profile || `派${(d.dps * 10).toFixed(2)}元` }));
-      } catch (e) { return []; }
-    }))).flat();
-    items.sort((a, b) => a.ex < b.ex ? -1 : 1);
-    el.innerHTML = items.length
-      ? items.slice(0, 10).map(i => `<div class="cal-item"><span class="cal-date">${i.ex}</span> ${i.name} · ${i.profile}</div>`).join('')
-      : '<div class="hint">未来 30 天无除息安排</div>';
+        divs.forEach(d => { if (d.dps > 0 && !d.pending) { d.code = it.code; d.name = it.name || it.code; } });
+        allDivs.push(...divs);
+        names[it.code] = it.name || it.code;
+      } catch (e) {}
+    }
+    const cf = DL.calcFutureCashflow(allDivs, holdings, today, 12);
+    // 持仓管理行
+    const holdInput = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><span style="font-size:11px;color:var(--muted)">持仓股数：</span><input id="divtoolHoldInput" type="text" placeholder="600036:5000, 601398:20000" value="${Object.entries(holdings).map(([c, s]) => c + ':' + s).join(', ')}" style="flex:1;min-width:0;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divtoolHoldSave">💾 保存</button></div>`;
+    const rows = cf.map(m => {
+      const hasAmt = m.items.some(x => x.shares > 0);
+      const amt = hasAmt ? m.items.reduce((s, x) => s + x.dps * x.shares, 0) : 0;
+      const items = m.items.map(x => `${x.name}${x.est ? '(估)' : ''} ${(x.dps * 10).toFixed(2)}元${x.shares > 0 ? '×' + x.shares : ''}`).join(' · ');
+      return `<div class="cal-item" style="display:flex;justify-content:space-between;gap:6px"><span class="cal-date">${m.month}</span><span style="flex:1;font-size:11px">${items}</span>${hasAmt ? `<b style="color:var(--txt)">${(amt / 10000).toFixed(2)}万</b>` : ''}</div>`;
+    });
+    const yearTotal = cf.reduce((s, m) => s + m.total, 0);
+    el.innerHTML = `${holdInput}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}`;
+    const saveBtn = $('#divtoolHoldSave');
+    if (saveBtn) saveBtn.onclick = () => {
+      const v = ($('#divtoolHoldInput') || {}).value || '';
+      const h = {};
+      v.split(',').forEach(part => {
+        const m = part.trim().match(/^(\d{6})\s*[:：]\s*(\d+)$/);
+        if (m) h[m[1]] = parseInt(m[2], 10);
+      });
+      try { localStorage.setItem('divtool_holdings', JSON.stringify(h)); } catch (e) {}
+      renderDivCalendar();
+    };
   }
 
   /* 扫描入口：决策台底部按钮 → 打开扫描子页（简单内嵌） */
@@ -598,6 +626,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       renderStrategy(divs, kline);
       // v1.9.1 P7：卖出信号卡（EPS 趋势 + 分红连续性 + 估值放大器）
       renderSellSignals(divs, kline);
+      // v1.9.3：档位画像卡
+      renderTierProfile(code);
       // 分红节奏
       renderRhythm(divs);
       // v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比）
@@ -918,7 +948,30 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.innerHTML = `<div style="margin-bottom:4px">${signals.map(s => `<div style="font-size:12px;margin:2px 0">${s.t}</div>`).join('')}</div>
       <div style="font-size:12px;margin:4px 0">判定：${verdict}</div>
       <div class="hint">估值放大器：${ampTxt}${exit ? '（基本面恶化 + 估值' + (valAmp === 'high' ? '高位 → 退出信号可信' : valAmp === 'low' ? '低位 → 建议二次确认' : '中性') + '）' : ''}</div>
+      ${exit ? '<div class="hint" style="margin-top:4px;color:#d9a45b">💡 释放资金去向：切到 <b>决策台</b> 查看顶部“建仓区提醒”横幅（当前建仓区标的 + 档位距离 + 分红陷阱/钝化标注），或自选持仓巡检卡对比健康标的</div>' : ''}
       <div class="hint">口径：EPS/分红按报告期归组；连续 2 年（相邻年度）恶化才触发退出，单年波动仅关注；卖出信号是纪律参考，非自动执行</div>`;
+  }
+
+  /* v1.9.3：档位画像卡（诊断页）——五态分类 + 年化等待收益/间隔/收益差（研究固化数据） */
+  function renderTierProfile(code) {
+    const el = $('#diagTierProfile');
+    if (!el) return;
+    const tcls = DL.classifyTier(code);
+    const p = tcls.profile;
+    const known = p != null;
+    let html = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="color:${tcls.color}">${tcls.label}</b><span style="font-size:11px;color:var(--sub)">${tcls.detail}</span></div>`;
+    if (known) {
+      html += `<table class="tbl" style="margin-top:6px"><tr><th>指标</th><th>数值</th><th>含义</th></tr>
+        <tr><td>年化等待收益</td><td><b>${p.annual.toFixed(1)} pp/年</b></td><td>等 90 档每年多赚的收益（>20 值得等 / <10 直接买）</td></tr>
+        <tr><td>90 档平均间隔</td><td>${p.gap90} 天（约 ${(p.gap90 / 30.4).toFixed(0)} 个月）</td><td>等 90 档的历史等待成本</td></tr>
+        <tr><td>90 vs 80 收益差</td><td>${p.diff >= 0 ? '+' : ''}${p.diff.toFixed(1)} pp</td><td>90 档买入比 80 档 5 年收益高出的百分点</td></tr>
+      </table>`;
+      html += `<div class="hint" style="margin-top:6px">建议：${tcls.cls === 'wait90' ? '触发 80 档时可选择等待 90 档（平均 ' + (p.gap90 / 30.4).toFixed(0) + ' 个月），年化多赚 ' + p.annual.toFixed(1) + 'pp；若等不起可在 80 档分批建仓' : tcls.cls === 'neutral' ? '80/90 档收益差适中（年化 ' + p.annual.toFixed(1) + 'pp）——按自身风险偏好：等得起就等 90，等不起 80 档直接建' : tcls.cls === 'direct' ? '等 90 档年化收益仅 ' + p.annual.toFixed(1) + 'pp（或 90 档收益反而差）——80 档直接建仓，不值得等' : ''}</div>`;
+    } else {
+      html += `<div class="hint">该标的暂无研究画像数据（40 只高股息池外）——默认按“80 直接买”保守处理；后续随研究扩展补充。</div>`;
+    }
+    html += `<div class="hint" style="margin-top:4px">口径：40 只高股息标的 2010-2026 实测（R12-R14）；年化等待收益=90档5年收益差÷等待年数；样本量见研究记录，非全部标的覆盖</div>`;
+    el.innerHTML = html;
   }
 
   /* 分红节奏：每年几月派息 */
