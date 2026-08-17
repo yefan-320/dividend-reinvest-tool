@@ -1490,8 +1490,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       html += '</table>';
       // 结论行：推荐风险效率最高（收益/|浮亏|）的策略
       const best = res.filter(r => r.ret != null && r.mdd != null).sort((a, b) => (a.ret / Math.max(0.01, Math.abs(a.mdd))) - (b.ret / Math.max(0.01, Math.abs(b.mdd))))[res.filter(r => r.ret != null).length - 1];
-      if (best) html += `<div class="hint" style="margin-top:6px">📌 风险效率最优：<b>${best.name}</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}% · 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%）。历史回测不代表未来，仅验证规则方向。</div>`;
-      html += '<div class="hint">口径：事件首日买入（分位≥档位的连续区间）→ 持有至今；收益=期末价+期间分红÷买入价；组合=各标等权平均。策略规则没变就不用重跑。</div>';
+      if (best) html += `<div class="hint" style="margin-top:6px">📌 风险效率最优：<b>${best.name}</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}% · 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%）。⚠️ 结论基于“买入持有”口径（策略买入→持有至今，未计卖出/再平衡）；历史回测不代表未来，仅验证规则方向。</div>`;
+      html += '<div class="hint">口径：事件首日买入（分位≥档位的连续区间）→ 持有至今；收益=期末价+期间分红÷买入价；组合=标的<u>等权</u>（与组合总览卡的“档位权重”口径不同）；含分红近似再投。策略规则没变就不用重跑。</div>';
       el.innerHTML = html;
     } catch (e) {
       el.innerHTML = `<div class="hint err">组合回测失败：${e.message}</div>`;
