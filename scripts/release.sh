@@ -58,6 +58,11 @@ if [ -f test/e2e-full.js ]; then
   echo "==> e2e 全功能实测（27 场景）…"
   node test/e2e-full.js || { echo "!! e2e-full 失败，中止发布"; exit 1; }
 fi
+# v1.9.4：自选入口闭环实测（A/B/C 三入口+去重）——失败即中止发布
+if [ -f test/e2e-v194.js ]; then
+  echo "==> e2e-v194 自选入口闭环（10 断言）…"
+  node test/e2e-v194.js || { echo "!! e2e-v194 失败，中止发布"; exit 1; }
+fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 # v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）
