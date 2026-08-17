@@ -71,15 +71,24 @@ git add index.html data-layer.js views.js
 git commit -m "$VER: 发布（版本号由 scripts/release.sh 自动同步）" 2>/dev/null || echo "(无变更可提交)"
 git tag "$VER" 2>/dev/null || echo "(tag 已存在)"
 git push origin main --tags
-# v1.9.1 O3：推送后复核签名（远程=本地）
-echo "==> 推送后复核："
+# v1.9.1 O3：推送后复核签名（本地=远程）
+# v1.9.2 O3 升级：从 HEAD sha 对比升级为三文件 blob sha 对比——HEAD sha 相同但文件内容不同（amend/force-push/提交不完整）也能拦住
+echo "==> 推送后复核（文件级 blob sha）："
 git fetch origin main >/dev/null 2>&1
-git rev-parse HEAD > /tmp/rel-head.txt
-git rev-parse origin/main > /tmp/rel-origin.txt
-if cmp -s /tmp/rel-head.txt /tmp/rel-origin.txt; then
-  echo "==> ✅ 本地 HEAD = 远程 HEAD（$(cat /tmp/rel-head.txt | cut -c1-7)）"
-else
-  echo "!! ⚠️ 本地与远程不一致！本地=$(cat /tmp/rel-head.txt | cut -c1-7) 远程=$(cat /tmp/rel-origin.txt | cut -c1-7)"
+FAIL=0
+for f in views.js index.html data-layer.js; do
+  LOCAL=$(git rev-parse HEAD:$f)
+  REMOTE=$(git rev-parse origin/main:$f)
+  if [ "$LOCAL" = "$REMOTE" ]; then
+    echo "==> ✅ $f: 本地=远程 ($(echo $LOCAL | cut -c1-10))"
+  else
+    echo "!! ⚠️ $f 不一致！本地=$LOCAL 远程=$REMOTE"
+    FAIL=1
+  fi
+done
+if [ $FAIL -ne 0 ]; then
+  echo "!! 文件级复核失败，发布中止"
   exit 1
 fi
+echo "==> ✅ 三文件 blob sha 全部一致"
 echo "==> 已推送 $VER（含 tag）"
