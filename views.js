@@ -359,7 +359,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* ---------- 对比页占位（第二批） ---------- */
   /* ================= 对比页（v1.7.2 大师 P1-26/27/28 落地） ================= */
-  const cmpState = { list: [], years: 5 };   // list: [{code,name}]
+  const cmpState = { list: [], years: 5, startDate: null };   // list: [{code,name}]；startDate: 精确起始日期（null=用 years 快捷）
   let cmpCharts = {};
   let cmpResults = [];   // B8: 表格排序数据源（cmpRun 填充）
   let cmpSort = { key: null, dir: 1 };
@@ -379,7 +379,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['最新报告期分红', 'lastRepDiv'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
     $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
       list.map((r, i) => `<tr>
-        <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
+        <td>${i+1}. ${r.it.name}<br><span style="color:${r.actualStart ? 'var(--red)' : 'var(--sub)'};font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
           <details style="margin-top:4px;font-size:11px;color:var(--sub)"><summary style="cursor:pointer;color:#3fbf7f">逐年分红明细 ▾</summary>
             <div style="margin-top:3px;line-height:1.7">${(r.res.years || []).slice().reverse().map(y => y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : '')).join('<br>') || '—'}</div>
           </details></td>
@@ -482,12 +482,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.style.display = 'none';
     const y = cmpState.years;
     // B2/B1：本金/复投可调（默认 100 万/复投，与回测页同口径）
-    const principal = Math.max(0, parseFloat($('#cmpPrincipal').value) || 0) || 1000000;
+    const principalRaw = parseFloat($('#cmpPrincipal').value);
+    const monthlyRaw = parseFloat($('#cmpMonthly').value);
+    // v1.8.11 大师 M4-②：非法金额红框提示（不静默回退）
+    const markBad = (id, bad) => { const el = $(id); if (el) el.style.borderColor = bad ? 'var(--red)' : 'var(--line)'; };
+    let bad = false;
+    if (isNaN(principalRaw) || principalRaw < 0) { markBad('#cmpPrincipal', true); bad = true; } else markBad('#cmpPrincipal', false);
+    if (isNaN(monthlyRaw) || monthlyRaw < 0) { markBad('#cmpMonthly', true); bad = true; } else markBad('#cmpMonthly', false);
+    if (bad) { alert('本金/月供请输入有效金额（≥0）'); return; }
+    const principal = principalRaw || 1000000;
+    // v1.8.11 大师 M1/M3：起始日期优先（cmpStartDate），否则快捷年数（今天-N年）
+    const start = cmpState.startDate || new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
     const reinvest = !$('#cmpReinvest') || $('#cmpReinvest').checked;
     // v1.7.3：月供可调（默认 0=零月供）；所有标的同月供，保证口径一致
     const monthly = Math.max(0, parseFloat($('#cmpMonthly').value) || 0);
     const strictSameStart = !!$('#cmpStrict') && $('#cmpStrict').checked;   // v1.7.4 P3：严格同期可切换（默认 B：按实际上市日起算）
-    const start = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
     const end = DL.todayStr();
     const status = $('#status');
     if (status) { status.textContent = '对比中：拉取 ' + cmpState.list.length + ' 个标的 K线/分红…'; status.className = 'status'; }
@@ -555,12 +564,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (errors.length || skipped.length) {
       const note = $('#cmpNote'); if (note) note.textContent = '⚠️ ' + [...skipped, ...errors].join('；');
     }
-    // P3：不足周期标的存在时，顶部 toast 级提示（升级强度，非表格角落小字）
+    // P3 + v1.8.11 大师 M2：不足周期标的存在时，图区顶部显式警告（旧版仅 status 小字，日期输入模式下起点非标变常态）
     const shortOnes = results.filter(r => r.actualStart);
-    if (shortOnes.length) {
-      const st = $('#status');
-      if (st) { st.textContent = 'ℹ️ ' + shortOnes.map(r => `${r.it.name} 自 ${r.actualStart} 起算（实际存续约 ${r.liveYears} 年）`).join('；') + '（所选 ' + y + ' 年，上市不足）'; st.className = 'status'; }
-    }
+    const warnEl = $('#cmpWarn');
+    if (shortOnes.length && warnEl) {
+      warnEl.style.display = 'block';
+      warnEl.innerHTML = '⚠️ ' + shortOnes.map(r => `<b>${r.it.name}</b> 上市晚于所选起点（${start}），实际自 <b>${r.actualStart}</b> 起（约 ${r.liveYears} 年）——曲线起点不同，对比仅供参考`).join('<br>');
+    } else if (warnEl) { warnEl.style.display = 'none'; }
     // 总资产走势图（P1-26：对比图只画总资产+股息率；累计分红只进表格；v1.7.4 P2：5色提亮+线型双通道+图例12px+点标记）
     // 图例自适应：v1.8.4 全局 window.fitLegendTop（大师 M2：全站唯一实现，此局部定义已删）
     const ch1 = cmpEnsureChart('cmpChartAsset');
@@ -687,6 +697,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const q = new URLSearchParams(location.search);
     q.set('cmp', cmpState.list.map(x => x.market ? x.code + '.' + x.market.toUpperCase() : x.code).join(','));   // C2: 指数带后缀进 URL
     q.set('y', y);
+    q.set('d', cmpState.startDate || '');   // v1.8.11 大师 M3：起始日期精确值（空则恢复时用 y）
     q.set('m', monthly);
     q.set('p', principal);
     q.set('r', reinvest ? '1' : '0');
@@ -703,22 +714,41 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         `<button type="button" class="chip" data-c="${p.code}${p.market ? '.' + p.market.toUpperCase() : ''}">${p.name}</button>`).join('');   // C2: 指数 chip 带 .SH
       ec.querySelectorAll('[data-c]').forEach(b => b.onclick = () => cmpAdd(b.dataset.c));
     }
-    // 周期 chips + 自定义输入联动（P1-28：两者并存，同一状态）
+    // 周期 chips + 起始日期输入联动（v1.8.11 大师 M1/M3/M5：日期输入替代自定义年；实时反馈行；min/max 约束）
     const cy = $('#cmpYears');
+    const setPeriodNote = () => {
+      const pn = $('#cmpPeriodNote');
+      if (!pn) return;
+      if (cmpState.startDate) {
+        const days = Math.max(0, Math.round((new Date(DL.todayStr()) - new Date(cmpState.startDate)) / 86400000));
+        pn.textContent = '自 ' + cmpState.startDate + ' 起 · 约 ' + (days / 365.25).toFixed(1) + ' 年';
+      } else {
+        pn.textContent = '近 ' + cmpState.years + ' 年（自 ' + new Date(Date.now() - cmpState.years * 366 * 86400000).toISOString().slice(0, 10) + ' 起）';
+      }
+    };
     if (cy) {
       cy.querySelectorAll('button').forEach(b => b.onclick = () => {
         cmpState.years = +b.dataset.y;
+        cmpState.startDate = null;
+        const di = $('#cmpStartDate'); if (di) di.value = '';
         cy.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-        const ci = $('#cmpCustom'); if (ci) ci.value = '';
+        setPeriodNote();
       });
-      const ci = $('#cmpCustom');
-      if (ci) ci.addEventListener('change', () => {
-        const v = parseInt(ci.value, 10);
-        if (v && v >= 1 && v <= 30) {
-          cmpState.years = v;
+      const di = $('#cmpStartDate');
+      if (di) {
+        // M5：min=今天-30年，max=今天（源头挡未来日期/超长周期）
+        di.max = DL.todayStr();
+        di.min = new Date(Date.now() - 30 * 366 * 86400000).toISOString().slice(0, 10);
+        di.addEventListener('change', () => {
+          const v = di.value;
+          if (!v) { cmpState.startDate = null; setPeriodNote(); return; }
+          if (v > di.max) { alert('起始日期不能晚于今天'); di.value = ''; cmpState.startDate = null; setPeriodNote(); return; }
+          cmpState.startDate = v;
           cy.querySelectorAll('button').forEach(x => x.classList.toggle('on', false));
-        }
-      });
+          setPeriodNote();
+        });
+      }
+      setPeriodNote();
     }
     const addBtn = $('#btnCmpAdd');
     if (addBtn) addBtn.onclick = () => cmpAdd($('#cmpInput').value);
@@ -750,11 +780,38 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const sc = $('#cmpStrict');
       if (sc) sc.checked = (s === '1');
     }
+    // v1.8.11 大师 M3：URL 规则——d（起始日期）优先于 y（年数）；非法/未来 d 回退 y=10；y 不在快捷集时按钮全不亮+日期回填
+    const dParam = params.get('d');
     const y = parseInt(params.get('y'), 10);
-    if (y && y >= 1 && y <= 30) {
+    let dValid = false;
+    if (dParam) {
+      const today = DL.todayStr();
+      const minD = new Date(Date.now() - 30 * 366 * 86400000).toISOString().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dParam) && dParam <= today && dParam >= minD) {
+        cmpState.startDate = dParam;
+        dValid = true;
+        const di3 = $('#cmpStartDate'); if (di3) di3.value = dParam;
+        const cy3 = $('#cmpYears');
+        if (cy3) cy3.querySelectorAll('button').forEach(b => b.classList.toggle('on', false));
+        setPeriodNote();
+      } else {
+        cmpState.years = 10;   // 非法/未来 d：toast + 回退 y=10
+        const st3 = $('#status');
+        if (st3) { st3.textContent = '⚠️ 分享链接的起始日期无效（' + dParam + '），已回退为近 10 年'; st3.className = 'status err'; }
+      }
+    }
+    if (!dValid && y && y >= 1 && y <= 30) {
       cmpState.years = y;
       const cy2 = $('#cmpYears');
-      if (cy2) cy2.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.y === y));
+      if (cy2) {
+        cy2.querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.y === y));
+        if (![1, 3, 5, 10].includes(y)) {
+          // M3-③：y 非快捷集（如老链接 y=15/20）→ 按钮全不亮，日期输入回填计算出的日期
+          const di2 = $('#cmpStartDate');
+          if (di2) di2.value = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+        }
+      }
+      setPeriodNote();
     }
     if (cmp) {
       const ver = params.get('v');
