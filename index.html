@@ -901,36 +901,63 @@ async function run(sim, note){
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.className='status'+(isErr?' err':''); }
 
-/* 股票代码即时提示：输入 6 位后自动查询公司名 */
+/* 股票代码即时提示：输入 6 位自动查公司名；输入名称即时解析成代码（v1.8.14 修复：不再红字拒绝名称） */
 (function(){
   const input = $('code'), hint = $('codeHint');
   let timer = null;
   input.addEventListener('input', ()=>{
     clearTimeout(timer);
     const code = input.value.trim();
-    if(!/^\d{6}$/.test(code)){
-      hint.textContent = code ? '支持 6 位代码或名称（如 600036 / 招商银行）' : '';
-      hint.className = 'hint err';
-      $('btnDemo').textContent = '用招行演示数据';
+    if(/^\d{6}$/.test(code)){
+      hint.textContent = '查询中…';
+      hint.className = 'hint';
+      timer = setTimeout(async ()=>{
+        const name = await DL.fetchName(code);   // v1.7.6 M2：统一 DL 版（旧全局 fetchName 已删除）
+        if(input.value.trim() !== code) return;   // 输入已变，丢弃过期结果
+        if(name && name !== code){
+          hint.textContent = '✅ ' + code + ' → ' + name;
+          hint.className = 'hint ok';
+          $('btnDemo').textContent = (code === '600036')
+            ? '⚡ 用招商银行演示数据（离线）'
+            : '🌐 查询 ' + name + '（联网）';
+        }else{
+          hint.textContent = '⚠️ 未找到 ' + code + '，请检查是否为 6 位 A 股代码';
+          hint.className = 'hint err';
+          $('btnDemo').textContent = '用招行演示数据';
+        }
+      }, 500);
       return;
     }
-    hint.textContent = '查询中…';
-    hint.className = 'hint';
-    timer = setTimeout(async ()=>{
-      const name = await DL.fetchName(code);   // v1.7.6 M2：统一 DL 版（旧全局 fetchName 已删除）
-      if(input.value.trim() !== code) return;   // 输入已变，丢弃过期结果
-      if(name && name !== code){
-        hint.textContent = '✅ ' + code + ' → ' + name;
-        hint.className = 'hint ok';
-        $('btnDemo').textContent = (code === '600036')
-          ? '⚡ 用招商银行演示数据（离线）'
-          : '🌐 查询 ' + name + '（联网）';
-      }else{
-        hint.textContent = '⚠️ 未找到 ' + code + '，请检查是否为 6 位 A 股代码';
-        hint.className = 'hint err';
-        $('btnDemo').textContent = '用招行演示数据';
-      }
-    }, 500);
+    // v1.8.14：名称输入 → 即时解析（与对比页/诊断页同源 suggest API），不再红字拒绝
+    if(code.length >= 2){
+      hint.textContent = '🔍 正在解析「' + code + '」…';
+      hint.className = 'hint';
+      timer = setTimeout(async ()=>{
+        try{
+          const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(code) + '&type=14&count=3', 'cb');
+          const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
+          const hit = list.find(x => x.Code && /^\d{6}$/.test(x.Code)) || list[0];
+          if(input.value.trim() !== code) return;   // 输入已变，丢弃过期结果
+          if(hit && hit.Code && /^\d{6}$/.test(hit.Code)){
+            hint.textContent = '✅ ' + code + ' → ' + hit.Name + '（' + hit.Code + '）';
+            hint.className = 'hint ok';
+            $('btnDemo').textContent = '🌐 查询 ' + hit.Name + '（联网）';
+          }else{
+            hint.textContent = '⚠️ 未找到「' + code + '」，请输入 6 位代码或正确名称';
+            hint.className = 'hint err';
+            $('btnDemo').textContent = '用招行演示数据';
+          }
+        }catch(e){
+          hint.textContent = '⚠️ 名称解析失败（网络？），可直接点回测重试';
+          hint.className = 'hint err';
+          $('btnDemo').textContent = '用招行演示数据';
+        }
+      }, 500);
+    }else{
+      hint.textContent = code ? '支持 6 位代码或名称（如 600036 / 招商银行）' : '';
+      hint.className = 'hint';
+      $('btnDemo').textContent = '用招行演示数据';
+    }
   });
   input.dispatchEvent(new Event('input'));   // 初始化时也查一次（默认600036）
 })();
