@@ -1,3 +1,8 @@
+/* v1.9.3：分位窗口全局（默认 375，可预设切换 250/375/500）——R6-R9 窗口讨论落地 */
+window.G_WINDOW = window.G_WINDOW || (window.DL ? window.DL.DEFAULT_WINDOW_DAYS : 375);
+window.setDivWindowDays = function (d) { if (window.DL && window.DL.WINDOW_PRESETS.indexOf(d) >= 0) { window.G_WINDOW = d; try { localStorage.setItem('divtool_window_days', String(d)); } catch (e) {} return true; } return false; };
+try { var _savedWin = parseInt(localStorage.getItem('divtool_window_days') || '', 10); if (window.DL && window.DL.WINDOW_PRESETS.indexOf(_savedWin) >= 0) window.G_WINDOW = _savedWin; } catch (e) {}
+
 /* ============================================================
  * views.js — 红利工具视图层 v1.7.0
  * 四 tab 导航：决策台 / 诊断 / 对比 / 回测（回测逻辑在 index.html 内，不动）
@@ -111,13 +116,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const kline = await DL.getKline(c.code, '2023-01-01', today);
         const divs = await DL.fetchDividendsOne(c.code);
         if (!kline || !divs || !divs.length) continue;
-        const series = DL.calcRollingPercentile(kline, divs, 500);
+        const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
         const last = series.filter(x => x.pct != null).pop();
         if (!last) continue;
         // 生态起建线偏移
         const eco = DL.calcEcoType(kline, series);
         const z = DL.computeZone(last.pct, { mode, ecoStart: eco.ecoStart });
-        rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoStart: eco.ecoStart, ecoType: eco.type });
+        const tcls = DL.classifyTier(c.code);
+        rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoStart: eco.ecoStart, ecoType: eco.type, tcls });
       } catch (e) { /* 单只失败跳过 */ }
     }
     // 横幅三组（v1.9.1 P4）：① 待触发（距起建线≤5，展示不推）② 动作（已触发）③ 极值 95+
@@ -129,7 +135,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       html += `<div style="background:rgba(224,90,90,.16);border:1px solid rgba(224,90,90,.5);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔴 <b>极值区</b>：${extreme.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位`).join(' · ')}</div>`;
     }
     if (act.length) {
-      html += `<div style="background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.4);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔔 <b>建仓区提醒</b>：${act.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位 [${r.label}]`).join(' · ')}</div>`;
+      html += `<div style="background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.4);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔔 <b>建仓区提醒</b>：${act.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位 [${r.label}]${r.tcls && r.tcls.cls === 'trap' ? ' <span style="color:#e05a5a">⚠️分红陷阱</span>' : r.tcls && r.tcls.cls === 'dull' ? ' <span style="color:#d9a45b">钝化</span>' : ''}`).join(' · ')}</div>`;
     }
     if (watch.length) {
       html += `<div style="background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:10px;padding:10px 14px;margin-bottom:10px">👀 <b>待触发预告</b>：${watch.map(r => `${r.name}(${r.code}) ${r.pct.toFixed(0)}% · 距${r.ecoStart}起建线差 ${(r.ecoStart - r.pct).toFixed(0)}`).join(' · ')}</div>`;
@@ -177,7 +183,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const kline = await DL.getKline(c.code, '2021-01-01', DL.todayStr());
           const divs = await DL.fetchDividendsOne(c.code);
           if (!kline || !divs || !divs.length) continue;
-          const series = DL.calcRollingPercentile(kline, divs, 500);
+          const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
           const last = series.filter(x => x.pct != null).pop();
           if (!last) continue;
           const eco = DL.calcEcoType(kline, series);
@@ -187,8 +193,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           let histPos = parseFloat(localStorage.getItem(posKey) || '0') || 0;
           if (z.currentTier && z.currentTier.pos > histPos) { histPos = z.currentTier.pos; try { localStorage.setItem(posKey, String(histPos)); } catch (e) {} }
           const cagr = DL.calcDivCAGR(divs, 3);
+          const trend = DL.calcDivTrend(divs);
+          const tcls = DL.classifyTier(c.code);
           const warn = cagr != null && cagr <= 0;
-          items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: eco.ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, series, kline });
+          items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: eco.ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, trend, tcls, series, kline });
         } catch (e) { /* 单只失败跳过 */ }
       }
       const totalPos = items.reduce((s, it) => s + it.pos, 0);
@@ -221,7 +229,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       rows += `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span><b>${it.name}</b>(${it.code}) <span style="font-size:10px;color:var(--muted)">${ecoName[it.ecoType] || '中波'}·起${it.ecoStart}</span></span>
-          <span style="font-size:11px">${it.pct.toFixed(0)}%分位 <span style="color:${color}">${it.label}</span>${it.warn ? ' <span style="color:#e05a5a">⚠️分红缩水</span>' : ''}</span>
+          <span style="font-size:11px">${it.pct.toFixed(0)}%分位 <span style="color:${color}">${it.label}</span>${it.tcls && it.tcls.cls !== 'direct' ? ` <span style="color:${it.tcls.color}" title="${it.tcls.detail}">${it.tcls.label}</span>` : ''}${it.warn && (!it.tcls || it.tcls.cls !== 'trap') ? ' <span style="color:#e05a5a">⚠️分红缩水</span>' : ''}</span>
         </div>
         <div style="height:6px;background:var(--card2);border-radius:3px;margin-top:3px;position:relative">
           <div style="position:absolute;left:0;top:0;bottom:0;width:${bar}%;background:${color};border-radius:3px"></div>
@@ -469,7 +477,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             DL.getKline(c.code, '2021-01-01', DL.todayStr()),
           ]);
           if (!divs || !divs.length) return;
-          const series = DL.calcRollingPercentile(kline, divs, 500);
+          const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
           const last = series.filter(x => x.pct != null).pop();
           const eco = DL.calcEcoType(kline, series);
           const cagr = DL.calcDivCAGR(divs, 3);
@@ -584,7 +592,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>`;
       // 带状图：历史股息率分位（滚动口径：每年用当年分红）
       renderYieldBand(divs, kline, diagYears);
-      // v1.9.0：建仓区状态卡 + 分位信号线（滚动500天） + 分红增长趋势
+      // v1.9.0：建仓区状态卡 + 分位信号线（滚动分位，窗口 G_WINDOW） + 分红增长趋势
       renderZoneAndSignal(divs, kline);
       renderDivTrend(divs);
       renderStrategy(divs, kline);
@@ -637,13 +645,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
   }
 
-  /* ===== v1.9.0：建仓区状态卡（J 方案）+ 分位信号线（滚动500天）+ 分红趋势 ===== */
+  /* ===== v1.9.0：建仓区状态卡（J 方案）+ 分位信号线（滚动分位）+ 分红趋势 ===== */
   let _signalChart = null;
   function renderZoneAndSignal(divs, kline) {
     // v1.9.1 模式全局单例（localStorage 记忆）
     let mode = localStorage.getItem('divtool_zone_mode') || 'conservative';
     if (mode !== 'flexible' && mode !== 'conservative') mode = 'conservative';
-    const series = DL.calcRollingPercentile(kline, divs, 500);
+    const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     const last = series.filter(x => x.pct != null).pop();
     // 生态类型 + 起建线
     const eco = DL.calcEcoType(kline, series);
@@ -677,6 +685,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           posTxt = '已建 ' + histPos + '% 仓位（只进不退，回落保留），距下一档（' + (nextT || 95) + ' 分位）差 ' + ((nextT || 95) - last.pct).toFixed(0);
         }
         const rangeWord = last.pct < 25 ? '低位区' : (last.pct < 50 ? '中低位' : (last.pct < 75 ? '中高位' : (last.pct < 90 ? '高位区' : '极值区')));
+        // v1.9.3：五态分类 + 分红趋势 + 窗口双值（敏感度弱化为信息展示）
+        const tcls = DL.classifyTier(diagCode);
+        const trend = DL.calcDivTrend(divs);
+        const series500 = DL.calcRollingPercentile(kline, divs, 500);
+        const last500 = series500.filter(x => x.pct != null).pop();
+        const winGap = last && last500 ? Math.abs(last.pct - last500.pct) : null;
+        const tclsHtml = tcls.cls !== 'direct'
+          ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:${tcls.cls === 'trap' ? 'rgba(224,90,90,.14)' : tcls.cls === 'dull' ? 'rgba(217,164,91,.12)' : 'rgba(58,167,109,.10)'};border:1px solid ${tcls.cls === 'trap' ? 'rgba(224,90,90,.45)' : tcls.cls === 'dull' ? 'rgba(217,164,91,.4)' : 'rgba(58,167,109,.35)'}"><b style="color:${tcls.color}">${tcls.label}</b> <span style="font-size:11px;color:var(--sub)">${tcls.detail}</span></div>`
+          : '';
+        const trendHtml = trend && trend.degraded && tcls.cls !== 'trap'
+          ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(224,90,90,.14);border:1px solid rgba(224,90,90,.45)"><b style="color:#e05a5a">⚠️ 分红连续 ${trend.decStreak} 年下降</b> <span style="font-size:11px;color:var(--sub)">（报告期归组，近3年 ${trend.last3 != null ? trend.last3.toFixed(0) + '%' : '—'}）——分位信号降权，建议回避/小仓</span></div>`
+          : '';
+        const winGapHtml = winGap != null
+          ? `<span class="hint">窗口敏感度：W375=<b>${last.pct.toFixed(0)}%</b> · W500=${last500.pct.toFixed(0)}%${winGap > 15 ? ' · ⚠️跨窗口差异大，结论参考性降低' : ''}</span>`
+          : '';
         zel.innerHTML = `<div class="zone-row">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-weight:600;color:${zoneColor}">${z.label}</span>
@@ -687,6 +710,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             <button type="button" class="mode-chip ${mode === 'flexible' ? 'on' : ''}" data-mode="flexible">🔶 柔性（更早参与）</button>
             <span style="font-size:10px;color:var(--muted);align-self:center">生态：${ecoName}（起建线 ${eco.ecoStart} 分位）</span>
           </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <span style="font-size:10px;color:var(--muted);align-self:center">窗口：</span>
+            ${[250, 375, 500].map(w => `<button type="button" class="mode-chip ${(window.G_WINDOW || 375) === w ? 'on' : ''}" data-win="${w}">${w}日${w === 375 ? '·默认' : w === 250 ? '·灵敏' : '·极简'}</button>`).join('')}
+          </div>
           <div style="height:10px;background:var(--card2);border-radius:5px;overflow:hidden;position:relative">
             <div style="position:absolute;left:0;top:0;bottom:0;width:${bar}%;background:${zoneColor};border-radius:5px"></div>
             ${tiers.map(t => `<div style="position:absolute;left:${t}%;top:-3px;bottom:-3px;width:1px;background:rgba(255,255,255,.35)" title="${t}分位"></div>`).join('')}
@@ -695,10 +722,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             <span>0</span>${tiers.map((t, i) => `<span>${t}${tierLabels[i] ? '·' + tierLabels[i].replace(t, '') : ''}</span>`).join('')}<span>100</span>
           </div>
           <div class="hint" style="margin-top:6px">${posTxt}${z.zone === 'extreme' ? '（历史 41/43 事件胜率，非买入即涨，浮亏均值 -19%±）' : ''}</div>
-          <div class="hint" style="margin-top:2px">滚动股息率 <b>${rollingDy != null ? rollingDy.toFixed(2) + '%' : '—'}</b>（500 日，与分位同口径）· 分红 CAGR <b class="${cagrColor}">${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</b>（${cagrWord}）</div>
+          <div class="hint" style="margin-top:2px">滚动股息率 <b>${rollingDy != null ? rollingDy.toFixed(2) + '%' : '—'}</b>（与分位同窗口）· 分红 CAGR <b class="${cagrColor}">${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</b>（${cagrWord}）${winGapHtml ? ' · ' + winGapHtml : ''}</div>
+          ${tclsHtml}${trendHtml}
         </div>`;
-        // 模式切换绑定
+        // 模式/窗口切换绑定
         zel.querySelectorAll('.mode-chip').forEach(b => b.onclick = () => {
+          if (b.dataset.win) { window.setDivWindowDays(parseInt(b.dataset.win, 10)); renderZoneAndSignal(divs, kline); return; }
           localStorage.setItem('divtool_zone_mode', b.dataset.mode);
           renderZoneAndSignal(divs, kline);
         });
@@ -734,7 +763,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           }],
         });
         const sn = $('#diagSignalNote');
-        if (sn) sn.textContent = '口径：滚动 500 个交易日分位（无未来函数）；' + (mode === 'flexible' ? '柔性档 ' : '保守档 ') + tiers2.map(t => t + ' 分位').join(' / ') + '；只进不退（触发档位保留）。历史 90+ 分位买点胜率 95%（41/43），浮亏均值 -19%±。';
+        if (sn) sn.textContent = '口径：滚动分位（无未来函数，窗口 ' + (window.G_WINDOW||375) + ' 日）；' + (mode === 'flexible' ? '柔性档 ' : '保守档 ') + tiers2.map(t => t + ' 分位').join(' / ') + '；只进不退（触发档位保留）。历史 90+ 分位买点胜率 95%（41/43），浮亏均值 -19%±。';
       }
     }
   }
@@ -786,7 +815,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const dates = Object.keys(kline).sort();
     const startD = dates[0];
     const endD = dates[dates.length - 1];
-    const series = DL.calcRollingPercentile(kline, divs, 500);
+    const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     if (series.length < 60) { el.innerHTML = '<div class="hint">数据不足</div>'; return; }
     const priceOf = d => kline[d];
     const retOf = (buyD) => priceOf(endD) / priceOf(buyD) - 1;
@@ -843,7 +872,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   function renderSellSignals(divs, kline) {
     const el = $('#diagSellSignals');
     if (!el) return;
-    const series = DL.calcRollingPercentile(kline, divs, 500);
+    const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     // EPS 趋势（按报告期年份取最新）
     const epsByYear = {};
     divs.forEach(d => { if (d.eps == null) return; const y = (d.report || '').slice(0, 4); if (y) epsByYear[y] = d.eps; });
@@ -1466,7 +1495,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           try {
             const [divs, kline] = await Promise.all([DL.fetchDividendsOne(c.code), DL.getKline(c.code, from, DL.todayStr())]);
             if (!divs || !divs.length || !kline || !Object.keys(kline).length) return;
-            const series = DL.calcRollingPercentile(kline, divs, 500);
+            const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
             pool.push({ code: c.code, name: c.name || c.code, series, kline, divs });
           } catch (e) { /* 跳过 */ }
         }));

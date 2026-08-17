@@ -642,12 +642,16 @@ function shiftDate(dateStr, days) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-/* 滚动分位（500天窗口，无未来函数）：
+/* 滚动分位（默认 375 天窗口，无未来函数）：
+ * v1.9.3（R6-R9 窗口讨论）：默认 500→375——40 只实证 250-500 差异小（6pp），375 均衡+覆盖 A 股中级调整中段（100-800 天）；
+ * 预设 250（深熊灵敏型）/375（默认）/500（极简型）可切换。
  * 输入 kline（{date: price}，升序）, divs（已 parse）
  * 返回 [{d, dy(平滑股息率%), pct(滚动分位 0-100)}]
- * 口径：TTM 滚动 366 天分红 ÷ 当日价（366 覆盖闰年）；5日均线平滑；滚动窗口=近 500 交易日；样本<250 天 pct=null */
+ * 口径：TTM 滚动 366 天分红 ÷ 当日价（366 覆盖闰年）；5日均线平滑；滚动窗口=近 375 交易日；样本<250 天 pct=null */
+const DEFAULT_WINDOW_DAYS = 375;
+const WINDOW_PRESETS = [250, 375, 500];
 function calcRollingPercentile(kline, divs, windowDays) {
-  const win = windowDays || 500;
+  const win = windowDays || DEFAULT_WINDOW_DAYS;
   const dates = Object.keys(kline).sort();
   if (!dates.length) return [];
   // 除息锁定表
@@ -682,6 +686,57 @@ function calcRollingPercentile(kline, divs, windowDays) {
     series[i].pct = less / window.length * 100;
   }
   return series;
+}
+
+/* v1.9.3：分红趋势（报告期归组）——连续下降年数 + 是否恶化（连续>=2年）
+ * 输入 divs（已 parse，含 report 字段）；复用 calcReportYearDivs 报告期归组口径（R14 修正：相邻除息对比会混入中期/特别分红假下降，必须报告期归组）
+ * 返回 { seq: [{year, dps}], decStreak: 连续下降年数, degraded: 是否恶化, last3: 近3年变化% } 或 null（样本不足） */
+function calcDivTrend(divs) {
+  const years = calcReportYearDivs(divs);
+  if (!years || years.length < 3) return null;
+  const seq = years.map(y => ({ year: +y, dps: divs.filter(d => (d.report || d.ex).slice(0, 4) === y && !d.pending && d.dps > 0).reduce((t, d) => t + d.dps, 0) }));
+  let decStreak = 0;
+  for (let i = seq.length - 1; i > 0; i--) {
+    if (seq[i].dps < seq[i - 1].dps - 0.001) decStreak++;
+    else break;
+  }
+  const last = seq[seq.length - 1].dps;
+  const y3 = seq.length >= 4 ? seq[seq.length - 4].dps : null;
+  const last3 = y3 != null && y3 > 0.1 ? (last - y3) / y3 * 100 : null;
+  return { seq, decStreak, degraded: decStreak >= 2, last3 };
+}
+
+/* v1.9.3：档位五态分类（R9-R14 研究固化表 + 默认保守）
+ * 判定源统一（大师 R15 隐藏1：四态标签+钝化标注必须同一函数产出，防判定漂移）
+ * 分类：
+ *   wait90  可等90（年化等待收益>20pp/年）——等更极端划算
+ *   direct  80直接买（年化<10pp/年 或 默认保守）——等90不值
+ *   neutral 中性（10-20pp/年）——展示数据自决
+ *   trap    分红陷阱（报告期归组连续2年下降=分红恶化）——全档位降权回避
+ *   dull    低估值钝化（分红健康但90档收益差/价格长期不修复）——80建仓持有等均值回归
+ * 返回 { cls, label, detail }；不在表内=direct（与工具现状保守一致） */
+const TIER_CLASS_TABLE = {
+  // 可等90（13）：年化等待收益>20pp/年（40只实证 R12）
+  '600036': 'wait90', '601398': 'wait90', '601988': 'wait90', '000001': 'wait90',
+  '600519': 'wait90', '000858': 'wait90', '601318': 'wait90', '601899': 'wait90',
+  '601668': 'wait90', '600104': 'wait90', '600019': 'wait90', '600887': 'wait90', '600031': 'wait90',
+  // 中性（6）：10-20pp/年，展示数字自决
+  '600016': 'neutral', '000651': 'neutral', '601166': 'neutral', '601006': 'neutral', '601288': 'neutral', '600690': 'neutral',
+  // 分红陷阱（6）：报告期归组连续2年下降（R14 修正后真名单：周期行业）
+  '600188': 'trap', '600585': 'trap', '601225': 'trap', '600028': 'trap', '601390': 'trap', '601111': 'trap',
+  // 低估值钝化（6）：分红健康但90档收益差（R14 误报纠正后）
+  '601601': 'dull', '600795': 'dull', '000100': 'dull', '601985': 'dull', '600027': 'dull', '600886': 'dull',
+};
+const TIER_CLASS_LABEL = {
+  wait90: { label: '可等90', color: '#3aa76d', detail: '历史等90档平均7个月、10年收益+18~22pp——可等更极端（年化等待收益>20pp/年）' },
+  direct: { label: '80直接买', color: '#8fa69c', detail: '历史等90档年化收益<10pp/年或数据不足——80档即买，等90不值' },
+  neutral: { label: '中性', color: '#5aa9e6', detail: '等90档年化收益10-20pp/年——按自身风险偏好自决（数字见详情）' },
+  trap: { label: '⚠分红陷阱', color: '#e05a5a', detail: '分红连续2年下降（报告期归组）——高股息率分位=分红下调信号，全档位降权，建议回避/小仓' },
+  dull: { label: '低估值钝化', color: '#d9a45b', detail: '分红健康但90档后价格长期不修复——等90意义小，80档建仓长期持有等均值回归' },
+};
+function classifyTier(code) {
+  const cls = TIER_CLASS_TABLE[code] || 'direct';
+  return { cls, ...TIER_CLASS_LABEL[cls] };
 }
 
 /* 建仓区判定（v1.9.1 柔性模式 + 生态起建线偏移）
@@ -886,6 +941,8 @@ window.DL = {
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, computeZone,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
+  /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
+  calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS,
   /* v1.9.2 新增：组合级回测 */
   calcPortfolioBacktest,
 }
