@@ -379,7 +379,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['最新报告期分红', 'lastRepDiv'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
     $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
       list.map((r, i) => `<tr>
-        <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span></td>
+        <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
+          <div style="font-size:10px;color:#3fbf7f;margin-top:3px;line-height:1.5">逐年分红：${(r.res.years || []).map(y => y.year + '年 ' + fmt(y.divTotal, 0) + '元').join(' · ') || '—'}</div></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
         <td>${fmt(r.res.final.finalInvested, 0)} 元</td>   <!-- v1.8.8: 口径与回测页一致（本金+追加+复投），曾只算本金致两边数字对不上 -->
         <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
