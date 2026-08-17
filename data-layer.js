@@ -234,7 +234,7 @@ async function fetchDividendsAll(fromDate) {
     pages = (d && d.result && d.result.pages) || 1;
     all.push(...rows);
     pn++;
-    if (pn > 20) break;   // 保险丝
+    if (pn > 40) break;   // 保险丝（v1.9.6：连分判定需 3 年数据，约 30 页）
   } while (pn <= pages);
   return dedupDividends(parseDivs(all));
 }
@@ -464,7 +464,14 @@ async function fetchSnapshotPage(pn) {
   // 排除北交所 fs；pageSize=100；push2delay 实测支持 CORS（2026-08-16）
   const fs = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23';
   const url = `https://push2delay.eastmoney.com/api/qt/clist/get?pn=${pn}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=${fs}&fields=${SNAP_FIELDS}`;
-  return emQueue.push(() => fetchJson(url));
+  // v1.9.6 P0-10：clist 自动重试 2 次（1.5s 间隔，避瞬时限流）
+  const doFetch = () => emQueue.push(() => fetchJson(url));
+  for (let i = 0; ; i++) {
+    try { return await doFetch(); } catch (e) {
+      if (i >= 2) throw e;
+      await sleep(1500);
+    }
+  }
 }
 let _snapPromise = null;
 async function getMarketSnapshot() {
@@ -476,6 +483,7 @@ async function getMarketSnapshot() {
   _snapPromise = (async () => {
     const out = {};
     let pn = 1, total = Infinity;
+    const meta = { total: 0, actual: 0 };   // v1.9.6 P0-4：完整性统计（扫描器据 warning）
     while ((pn - 1) * 100 < total && pn <= 70) {
       const d = await fetchSnapshotPage(pn);
       const diff = d && d.data && d.data.diff || [];
@@ -486,8 +494,10 @@ async function getMarketSnapshot() {
           pe: x.f9, pb: x.f23, industry: x.f100,
         };
       });
+      meta.total = total; meta.actual += diff.length;
       pn++;
     }
+    out.__meta = meta;
     await cacheSet(key, { ts: Date.now(), data: out });
     return out;
   })();
@@ -991,6 +1001,49 @@ function calcPortfolioBacktest(pool, opts) {
   return out;
 }
 
+/* ---------- v1.9.6：结论行规则树（P0-9，规则与 test/rule-tree-backtest.js 一致） ---------- */
+/* 五档结论：strong强烈建仓 / buy可建仓 / watch观望 / wait等待 / avoid回避 / avoid_small回避(陷阱型) */
+function divTrendBadAt(divs, asOfYear) {
+  const byRep = {};
+  divs.forEach(d => { if (d.pending || !d.report) return; const y = parseInt(d.report.slice(0, 4), 10); if (!y || y >= asOfYear) return; byRep[y] = (byRep[y] || 0) + (d.dps || 0); });
+  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a);
+  if (ys.length < 3) return false;
+  return byRep[ys[0]] < byRep[ys[1]] * 0.99 && byRep[ys[1]] < byRep[ys[2]] * 0.99;
+}
+function coverageAt(divs, asOfYear) {
+  const byRep = {};
+  divs.forEach(d => { if (d.pending || !d.report) return; const y = parseInt(d.report.slice(0, 4), 10); if (!y || y >= asOfYear) return; if (!byRep[y]) byRep[y] = { dps: 0, eps: 0 }; byRep[y].dps += d.dps || 0; byRep[y].eps = Math.max(byRep[y].eps, d.eps || 0); });
+  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a).slice(0, 2);
+  if (ys.length < 2 || !byRep[ys[0]].eps || !byRep[ys[1]].eps) return null;
+  return (byRep[ys[0]].dps + byRep[ys[1]].dps) / (byRep[ys[0]].eps + byRep[ys[1]].eps);
+}
+/* 结论规则树：返回 { tier, steps: [{layer, msg}] }——steps 供展开详情 */
+function ruleVerdict(pct, cls, trendBad, cov) {
+  const steps = [];
+  if (trendBad) { steps.push({ layer: 1, msg: '分红趋势：近2个完整财年连续下降（一票否决）' }); return { tier: 'avoid', steps }; }
+  steps.push({ layer: 1, msg: '分红趋势：健康' });
+  if (cls === 'trap') { steps.push({ layer: 3, msg: '生态类型：陷阱型（分位信号不适用，历史1年收益-16%/胜率18%）' }); return { tier: 'avoid_small', steps }; }
+  steps.push({ layer: 3, msg: '生态类型：' + (cls === 'wait90' ? '可等90型' : cls === 'boundary' ? '边界型' : cls === 'scarce' ? '稀缺型' : '常规型') });
+  let tier;
+  if (pct >= 90) tier = 'strong';
+  else if (cls === 'wait90') tier = pct >= 80 ? 'buy' : 'wait';
+  else if (cls === 'boundary') tier = pct >= 85 ? 'buy' : (pct >= 80 ? 'watch' : 'wait');
+  else if (cls === 'scarce') tier = pct >= 80 ? 'buy' : 'wait';
+  else tier = pct >= 85 ? 'buy' : (pct >= 80 ? 'watch' : 'wait');
+  steps.push({ layer: 3, msg: `分位：${pct != null ? pct.toFixed(0) + '%' : '—'}（档位线 ${tier === 'buy' ? (cls === 'boundary' ? 85 : 80) : (cls === 'boundary' ? 80 : 80)}）` });
+  if (tier === 'strong' && cov != null && cov < 0.35) { steps.push({ layer: 2, msg: '覆盖率 ' + cov.toFixed(2) + ' < 0.35，强烈建仓降级为可建仓' }); tier = 'buy'; }
+  else if (cov != null) steps.push({ layer: 2, msg: '覆盖率（近2财年≈支付率）：' + cov.toFixed(2) });
+  if (tier === 'buy' && cov != null && cov < 0.25) { steps.push({ layer: 2, msg: '覆盖率 < 0.25，可建仓降级为观望' }); tier = 'watch'; }
+  if (tier === 'watch' && cov != null && cov < 0.25) { steps.push({ layer: 2, msg: '覆盖率 < 0.25，观望降级为等待' }); tier = 'wait'; }
+  return { tier, steps };
+}
+/* 结论行历史胜率表（由 test/rule-tree-backtest.js 产出，2026-08-18 40只×16年）：[3年收益%, 3年胜率%, 事件数] */
+const RULE_STATS = {
+  strong: [44.8, 72, 2155], buy: [41.8, 72, 4508], watch: [39.1, 73, 3145],
+  avoid: [33.2, 67, 95], avoid_small: [14.1, 55, 32], wait: [null, null, 1050],
+};
+const RULE_TIER_LABEL = { strong: '强烈建仓', buy: '可建仓', watch: '观望', wait: '等待', avoid: '回避', avoid_small: '回避/小仓' };
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
@@ -1006,6 +1059,8 @@ window.DL = {
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
   calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS,
   calcFutureCashflow,
+  /* v1.9.6 新增：结论行规则树 */
+  divTrendBadAt, coverageAt, ruleVerdict, RULE_STATS, RULE_TIER_LABEL,
   /* v1.9.2 新增：组合级回测 */
   calcPortfolioBacktest,
 }

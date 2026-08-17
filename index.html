@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>红利复投工具</title>
-<script src="https://cdn.staticfile.net/echarts/5.5.0/echarts.min.js"></script>
+<script src="vendor/echarts.min.js"></script>
 <script>
 if (typeof echarts === 'undefined') {
-  document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"><\/script>');
+  document.write('<script src="vendor/echarts.min.js"><\/script>');
 }
 </script>
 <style>
@@ -32,7 +32,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:4px}
 .field input,.field select{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;font-size:14px;outline:none}
 .field input:focus{border-color:var(--gold)}
-.hint{font-size:11px;color:var(--sub);margin-top:4px;min-height:14px}
+.hint{font-size:12px;color:var(--sub);margin-top:6px;min-height:14px;line-height:1.55}   /* v1.9.6 P2-2：字号 11→12、行距优化（视觉模型抓“说明文字过小拥挤”） */
 .hint.ok{color:var(--green)} .hint.err{color:var(--red)}
 .quick{display:flex;gap:6px;margin-top:6px}
 .quick button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--sub);border-radius:6px;padding:5px 0;font-size:11px;cursor:pointer}
@@ -44,6 +44,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .gauge-note{font-size:11px;color:var(--sub);text-align:center;margin-top:8px;line-height:1.6}
 .btn[disabled]{opacity:.6}
 .btn{background:linear-gradient(135deg,#d9a441,#c0862e);color:#201703;border:none;border-radius:10px;padding:12px 18px;font-size:15px;font-weight:700;cursor:pointer;width:100%}
+.flexbtn{width:auto}   /* v1.9.6：flex 容器内的 .btn 防撑满（主人抓搜索框4px） */
 .btn:active{opacity:.85}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--sub);font-weight:500}
 .btnrow{display:flex;gap:10px;margin-top:4px}
@@ -139,7 +140,7 @@ body{padding-bottom:64px}
     <h2>🔍 搜索</h2>
     <div style="display:flex;gap:6px;align-items:center">
       <input id="homeSearch" placeholder="输入 6 位代码或名称（回车诊断）" style="flex:1;min-width:0">
-      <button type="button" class="btn" id="homeSearchAdd" title="输入 6 位代码后点击加入自选">➕ 加自选</button>
+      <button type="button" class="btn flexbtn" id="homeSearchAdd" title="输入 6 位代码后点击加入自选">➕ 加自选</button>
     </div>
     <div class="hint" id="homeSearchHint">例：600036 或 招商银行（回车=诊断，➕=加入自选）</div>
   </div>
@@ -179,8 +180,12 @@ body{padding-bottom:64px}
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <h2 id="diagTitle" style="margin:0">诊断</h2>
-        <button type="button" class="btn" id="diagWlBtn" style="display:none">⭐ 加自选</button>
+        <button type="button" class="btn flexbtn" id="diagWlBtn" style="display:none">⭐ 加自选</button>
       </div>
+    </div>
+    <div class="card" id="diagSummary" style="display:none">
+      <h2>🎯 决策摘要 <span class="hint" style="font-weight:400">基于历史数据 · 非投资建议</span></h2>
+      <div id="diagSummaryBody"></div>
     </div>
     <div class="card">
       <h2>📊 股息率历史分位（<span id="diagYieldYears">5</span>年）</h2>
@@ -190,7 +195,7 @@ body{padding-bottom:64px}
         <button type="button" data-y="15">15年</button><button type="button" data-y="20">20年</button>
         <input id="diagYieldCustom" type="number" min="1" max="30" placeholder="自定义年" style="width:76px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
       </div>
-      <div class="chart tall" id="diagYieldChart"></div>
+      <div class="chart tall" id="diagYieldChart"><div class="hint">加载中…</div></div>
       <div class="hint" id="diagYieldNote"></div>
       <div class="hint err" id="diagEtfNote" style="display:none"></div>
     </div>
@@ -205,7 +210,7 @@ body{padding-bottom:64px}
     </div>
     <div class="card">
       <h2>📈 分位信号线（滚动分位 · 默认 375 天窗口，无未来函数）</h2>
-      <div class="chart" id="diagSignalChart"></div>
+      <div class="chart" id="diagSignalChart"><div class="hint">加载中…</div></div>
       <div class="hint" id="diagSignalNote"></div>
     </div>
     <div class="card">
@@ -404,7 +409,7 @@ body{padding-bottom:64px}
       <button type="button" class="chip pfbt-y on" data-y="3">3年</button>
       <button type="button" class="chip pfbt-y" data-y="5">5年</button>
       <button type="button" class="chip pfbt-y" data-y="10">10年</button>
-      <button type="button" class="btn" id="pfbtRun" style="margin-left:8px">▶ 运行组合回测</button>
+      <button type="button" class="btn flexbtn" id="pfbtRun" style="margin-left:8px">▶ 运行组合回测</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap;background:var(--card2);padding:8px 10px;border-radius:8px">
       <span style="font-size:12px">🧪 金字塔模拟器（自定义档位方案加入对比）：</span>
@@ -417,11 +422,11 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.5"></script>
-<script src="data-layer.js?v=v1.9.5"></script>
+<script src="demo-data.js?v=v1.9.6"></script>
+<script src="data-layer.js?v=v1.9.6"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.5';
+const APP_VERSION = 'v1.9.6';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -673,6 +678,7 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
     ['当前总资产', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
+    ['回本进度', fmt(Math.min(100, f.totalDiv / res.principal * 100),1)+'%'+ (yrs.length ? ' · 按年均分红约'+fmt(Math.max(0, (res.principal - f.totalDiv) / (f.totalDiv / yrs.length)),1)+'年回本' : ''), 'green'],
     ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
     ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
@@ -700,6 +706,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', 'gold'],
     ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
+    ['回本进度', fmt(Math.min(100, f.totalDiv / res.principal * 100),1)+'%'+ (yrs.length ? ' · 按年均分红约'+fmt(Math.max(0, (res.principal - f.totalDiv) / (f.totalDiv / yrs.length)),1)+'年回本' : ''), 'green'],
     ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
     ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
     ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
@@ -1117,7 +1124,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   };
   // 版本号
   const ver = $('appVer');
-  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-17 · 若页面异常请强制刷新（下拉或清除缓存）';
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-18 · 若页面异常请强制刷新（下拉或清除缓存）';
 
   // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
   // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
@@ -1134,6 +1141,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.5"></script>
+<script src="views.js?v=v1.9.6"></script>
 </body>
 </html>
