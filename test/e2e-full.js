@@ -467,10 +467,14 @@ async function main() {
     const op0 = await evalIn(cdp, `document.getElementById('homeOpportunities').innerText`);
     assert(op0.includes('暂无自选'), '机会速览空态错误: ' + op0.slice(0, 40));
     dialogs.length = 0;
-    await evalIn(cdp, `document.querySelector('#homeWatchlist .chip[data-code="512890"]').click()`);
+    // v1.9.6：空自选推荐 chips 可能来自 scan:last 真实扫描缓存（不再是固定 4 个 ETF）——取第一个 chip 测流程
+    const chipCode = await evalIn(cdp, `document.querySelector('#homeWatchlist .chip') ? document.querySelector('#homeWatchlist .chip').dataset.code : null`);
+    assert(chipCode, '空自选推荐 chips 缺失');
+    await evalIn(cdp, `document.querySelector('#homeWatchlist .chip').click()`);
     await waitFor(cdp, `document.querySelectorAll('#homeWatchlist .wl-card').length === 1`, 60000, '自选添加');
     const card = await evalIn(cdp, `document.querySelector('#homeWatchlist .wl-card').innerText`);
-    assert(card.includes('512890'), '自选卡片缺代码: ' + card.slice(0, 50));
+    assert(card.includes(${JSON.stringify('')}) || card.length > 5, '自选卡片异常: ' + card.slice(0, 50));
+    assert(card.includes(chipCode), '自选卡片缺代码 ' + chipCode + ': ' + card.slice(0, 50));
     const fresh = await evalIn(cdp, `document.getElementById('wlFresh').innerText`);
     assert(fresh.includes('行情更新') || fresh.includes('待更新'), '新鲜度徽标异常: ' + fresh);
     await waitFor(cdp, `(document.getElementById('homeOpportunities').innerText||'').includes('暂无新机会') || (document.getElementById('homeOpportunities').innerText||'').includes('🔔')`, 60000, '机会速览结果');
