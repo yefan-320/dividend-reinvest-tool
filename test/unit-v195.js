@@ -57,5 +57,21 @@ T('漂移后 2026-08-20：窗口值 1.0（新笔进窗）', Math.abs(DL.ttmDivsA
 const locked = DL.calcLockedTTM(drift);
 T('calcLockedTTM 除息前 TTM 正确（2024-07-10 锁定=1.0）', Math.abs((locked['2024-07-10'] || {}).lockedDps - 1.0) < 1e-9, JSON.stringify(locked['2024-07-10']));
 
+// ===== 4. 去平滑（v1.9.5 大师 A-）：分位直接用真实 TTM 值，无 dyS =====
+const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const kline2 = {};
+const end = new Date('2026-01-20');
+for (let i = 299; i >= 0; i--) { const d = new Date(end); d.setDate(d.getDate() - i); kline2[fmt(d)] = 40; }
+kline2['2026-01-16'] = 38.55;   // 除息日（1.013 派息，锁定除息前 TTM）
+kline2['2026-01-19'] = 38.6;
+kline2['2026-01-20'] = 38.5;
+const s2 = DL.calcRollingPercentile(kline2, zhao, 375);
+const last2 = s2[s2.length - 1];
+T('去平滑：输出无 dyS 字段（平滑已删）', last2.dyS === undefined, JSON.stringify(last2));
+T('去平滑：末点 dy=真实 TTM÷价（3.013/38.5=7.82%，非平滑均值）', Math.abs(last2.dy - 3.013 / 38.5 * 100) < 0.02, last2.dy.toFixed(2));
+const ex16 = s2.find(x => x.d === '2026-01-16');
+T('去平滑：除息日锁定值=除息前 TTM÷价（2.00/38.55=5.19%）', ex16 && Math.abs(ex16.dy - 2.00 / 38.55 * 100) < 0.02, ex16 && ex16.dy.toFixed(2));
+T('去平滑：末点分位非空且 0-100', last2.pct != null && last2.pct >= 0 && last2.pct <= 100, last2.pct);
+
 console.log('\n结果:', pass + '/' + (pass + fail), '通过');
 process.exit(fail === 0 ? 0 : 1);

@@ -653,8 +653,9 @@ function shiftDate(dateStr, days) {
  * v1.9.3（R6-R9 窗口讨论）：默认 500→375——40 只实证 250-500 差异小（6pp），375 均衡+覆盖 A 股中级调整中段（100-800 天）；
  * 预设 250（深熊灵敏型）/375（默认）/500（极简型）可切换。
  * 输入 kline（{date: price}，升序）, divs（已 parse）
- * 返回 [{d, dy(平滑股息率%), pct(滚动分位 0-100)}]
- * 口径：TTM 滚动 366 天分红 ÷ 当日价（366 覆盖闰年）；5日均线平滑；滚动窗口=近 375 交易日；样本<250 天 pct=null */
+ * 返回 [{d, dy(股息率%·滚动366天TTM), pct(滚动分位 0-100)}]
+ * 口径：TTM 滚动 366 天分红 ÷ 当日价（366 覆盖闰年；除息日/次日锁定除息前 TTM）；
+ * v1.9.5：去平滑（真实值直算，无未来函数）；滚动窗口=近 375 交易日；样本<250 天 pct=null */
 const DEFAULT_WINDOW_DAYS = 375;
 const WINDOW_PRESETS = [250, 375, 500];
 function calcRollingPercentile(kline, divs, windowDays) {
@@ -676,20 +677,15 @@ function calcRollingPercentile(kline, divs, windowDays) {
     }
     if (ttm > 0) series.push({ d, dy: ttm / price * 100 });
   });
-  // 5 日均线平滑
-  for (let i = 0; i < series.length; i++) {
-    const lo = Math.max(0, i - 2), hi = Math.min(series.length - 1, i + 2);
-    let s = 0, n = 0;
-    for (let j = lo; j <= hi; j++) { s += series[j].dy; n++; }
-    series[i].dyS = s / n;
-  }
+  // v1.9.5：去掉 5 日均线平滑（大师 A- 裁决）——居中 MA 用未来数据（i±2）违反"无未来函数"声明；
+  // 平滑值≠真实值会误导（主人点名"为什么是平滑的"）；除息锁定已覆盖跳空，平滑多余。分位直接用真实值。
   // 滚动分位
   for (let i = 0; i < series.length; i++) {
     if (i < 250) { series[i].pct = null; continue; }
     const lo = Math.max(0, i - win + 1);
-    const window = series.slice(lo, i + 1).map(x => x.dyS);
+    const window = series.slice(lo, i + 1).map(x => x.dy);
     const sorted = window.slice().sort((a, b) => a - b);
-    const less = sorted.filter(v => v <= series[i].dyS).length;
+    const less = sorted.filter(v => v <= series[i].dy).length;
     series[i].pct = less / window.length * 100;
   }
   return series;

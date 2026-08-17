@@ -358,7 +358,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       return `<div class="wl-card" data-code="${it.code}">
         <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
           <button class="wl-del" data-code="${it.code}">✕</button></div>
-        <div class="wl-main">${dy != null ? `股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>'}
+        <div class="wl-main">${dy != null ? `年化股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>'}
           ${s ? `<span class="wl-price">${fmt(s.price, 2)}元</span>` : ''}</div>
         <div class="wl-sub hint">点击进入诊断</div>
       </div>`;
@@ -457,10 +457,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }
       rows.sort((a, b) => b.yieldPct - a.yieldPct);
       await DL.cacheSet('scan:last', { ts: Date.now(), data: rows.slice(0, 20).map(r => ({ code: r.code, name: r.name })) });
-      el.innerHTML = `<div class="hint">✅ 筛选出 ${rows.length} 只（股息率≥${DL.CALIB.THRESHOLDS.divYield}%、连分≥${DL.CALIB.THRESHOLDS.divYears}年、市值≥50亿、排除ST；⚠️=亏损仍分红，可持续性风险请自行判断）</div>` +
+      el.innerHTML = `<div class="hint">✅ 筛选出 ${rows.length} 只（年化股息率≥${DL.CALIB.THRESHOLDS.divYield}%、连分≥${DL.CALIB.THRESHOLDS.divYears}年、市值≥50亿、排除ST；⚠️=亏损仍分红，可持续性风险请自行判断）</div>` +
         rows.slice(0, 50).map(r => `<div class="scan-row" data-code="${r.code}">
           <b>${r.name}</b> <span class="wl-code">${r.code}</span>
-          <span class="gold">${r.yieldPct.toFixed(2)}%</span>
+          <span class="gold">${r.yieldPct.toFixed(2)}%</span><span class="hint"> 年化</span>
           <span class="hint">连分${r.payYears}年</span>
           ${r.pe != null && r.pe < 0 ? '<span class="risk-badge">⚠️亏损</span>' : ''}
           <span class="hint">${r.industry || ''} · 市值${(r.marketCap / 1e8).toFixed(0)}亿</span>
@@ -498,7 +498,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const ch1 = raw.filter(r => r && r.f9 && r.f9 > 0 && r.f12 && !(r.f14 || '').includes('ST') && (!r.f20 || r.f20 >= 50e8))
         .map(r => ({ code: r.f12, name: r.f14, price: r.f2, dy: r.f9, cap: r.f20 }))
         .sort((a, b) => b.dy - a.dy);
-      el.innerHTML = `<div class="hint">✅ 第一通道（股息率≥3%）：${ch1.length} 只候选。深扫 top ${Math.min(40, ch1.length)} 算 CAGR/生态/置信度…</div>`;
+      el.innerHTML = `<div class="hint">✅ 第一通道（股息率(TTM)≥3%）：${ch1.length} 只候选。深扫 top ${Math.min(40, ch1.length)} 算 CAGR/生态/置信度…</div>`;
       // 深扫 top N（批处理：5 并发 × 8 批，避免东财限流）
       const top = ch1.slice(0, 40);
       const rows = [];
@@ -529,7 +529,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       el.innerHTML = `<div class="hint">✅ 发现器完成：${rows.length} 只深扫（第一通道 ${ch1.length} 只 → top ${top.length}）· 绿色=增长榜（CAGR≥10%）· 低置信=样本不足</div>` +
         rows.slice(0, 40).map(r => `<div class="scan-row" data-code="${r.code}">
           <b>${r.name}</b> <span class="wl-code">${r.code}</span>
-          <span class="gold">${r.dy.toFixed(2)}%</span>
+          <span class="gold">${r.dy.toFixed(2)}%</span><span class="hint"> TTM</span>
           ${r.cagr != null ? `<span class="${r.cagr >= 0.1 ? 'green' : (r.cagr >= 0 ? '' : 'red')}">CAGR ${(r.cagr * 100).toFixed(1)}%</span>` : '<span class="hint">CAGR—</span>'}
           ${r.cagr != null && r.cagr >= 0.1 ? '<span class="green">📈增长榜</span>' : ''}
           <span class="hint">${ecoName[r.ecoType] || ''}</span>
@@ -616,7 +616,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const yearsSpan = dates.length ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / (365 * 86400000) : 0;
       const cagr = (startPrice && lastPrice && yearsSpan > 0) ? Math.pow(lastPrice / startPrice, 1 / yearsSpan) - 1 : null;
       $('#diagStats').innerHTML = `<div class="stats">
-        <div class="stat"><div class="k">当前股息率</div><div class="v gold">${divYield != null ? divYield.toFixed(2) + '%' : '—'}</div></div>
+        <div class="stat"><div class="k">当前股息率(年化)</div><div class="v gold">${divYield != null ? divYield.toFixed(2) + '%' : '—'}</div></div>
         <div class="stat"><div class="k">每股分红(年化${yieldLabel})</div><div class="v">${fmt(dps, 3)} 元</div></div>
         <div class="stat"><div class="k">股息覆盖率</div><div class="v">${cover != null ? cover.toFixed(2) : '—'}</div></div>
         <div class="stat"><div class="k">近${diagYears}年年化</div><div class="v ${cagr >= 0 ? 'green' : 'red'}">${cagr != null ? fmtPct(cagr) : '—'}</div></div>
@@ -684,7 +684,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (note) {
       // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
-      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；口径：逐年滚动——每年用当年到账分红÷当日价；顶部“当前股息率”为滚动 366 天 TTM 口径，与分位信号线一致）`;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；历史曲线=逐年滚动口径（当年到账分红÷当日价），年初当年派息未完成数值偏低、年中跳变后为全年值；顶部"当前股息率"=滚动 366 天 TTM 口径，与分位信号线一致；诊断页关键数据=年化口径（近2报告年度平均），当年报告期未派完末期时偏低）`;
     }
   }
 
@@ -725,7 +725,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         else { for (let t = eco.ecoStart; t < 95; t += 5) tiers.push(t); tiers.push(95); }
         const tierLabels = tiers.map(t => t + (t === tiers[0] ? '建' : (t === tiers[tiers.length - 1] ? '满' : '加')));
         // 第二维度：滚动股息率（同口径）+ CAGR 状态词
-        const rollingDy = last ? last.dyS : null;
+        const rollingDy = last ? last.dy : null;
         const cagr = DL.calcDivCAGR(divs, 3);
         const cagrWord = cagr == null ? '—' : (cagr >= 0.05 ? '增长中' : (cagr > 0 ? '停增' : '缩水'));
         const cagrColor = cagr == null ? '' : (cagr >= 0.05 ? 'green' : (cagr > 0 ? '' : 'red'));
@@ -815,7 +815,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const markAreas = tiers2.slice(0, -1).map((t, i) => [{ yAxis: t, itemStyle: { color: 'rgba(217,164,65,.10)' } }, { yAxis: tiers2[i + 1] }]);
         chart.setOption({
           backgroundColor: 'transparent',
-          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 平滑股息率 ${x.dyS.toFixed(2)}%`; } },
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 股息率 <b>${x.dy.toFixed(2)}%</b>（滚动 366 天 TTM）`; } },
           grid: { left: 44, right: 14, top: 24, bottom: 26 },
           xAxis: { type: 'category', data: valid.map(x => x.d), axisLine: { lineStyle: { color: '#3a4f46' } }, axisLabel: { color: '#8fa69c', fontSize: 10 } },
           yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { lineStyle: { color: '#22322c' } } },

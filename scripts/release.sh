@@ -63,6 +63,15 @@ if [ -f test/e2e-v194.js ]; then
   echo "==> e2e-v194 自选入口闭环（10 断言）…"
   node test/e2e-v194.js || { echo "!! e2e-v194 失败，中止发布"; exit 1; }
 fi
+# v1.9.5：TTM/去平滑单测 + 口径标注 e2e——失败即中止发布
+if [ -f test/unit-v195.js ]; then
+  echo "==> unit-v195 TTM 窗口/去平滑（15 断言）…"
+  node test/unit-v195.js || { echo "!! unit-v195 失败，中止发布"; exit 1; }
+fi
+if [ -f test/e2e-v195.js ]; then
+  echo "==> e2e-v195 口径标注实测（6 断言）…"
+  node test/e2e-v195.js || { echo "!! e2e-v195 失败，中止发布"; exit 1; }
+fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 # v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）
