@@ -79,6 +79,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     renderOpportunities();
     renderWatchlist();
     renderDivCalendar();
+    // v1.9.0：三级到价提醒（自选股分位扫描 → 横幅 + 桌面通知尽力而为）
+    renderZoneBanner(wl);
     // 数据新鲜度徽标（大师补：信任）
     const snapHit = await DL.cacheGet('snap:all');
     const fresh = $('#wlFresh');
@@ -87,6 +89,49 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const mins = Math.max(0, Math.round((Date.now() - snapHit.ts) / 60000));
         fresh.textContent = '行情更新于 ' + mins + ' 分钟前';
       } else { fresh.textContent = '行情待更新'; }
+    }
+  }
+
+  /* v1.9.0：三级到价提醒（80建仓/85加仓/90加满/95+极值）
+   * 推送降频：75-80 预告不推（仅页面展示）；80-85 每日汇总；85+ 实时横幅；95+ 高亮+桌面通知 */
+  async function renderZoneBanner(wl) {
+    const el = $('#zoneBanner');
+    if (!el) return;
+    if (!wl || !wl.length) { el.innerHTML = ''; return; }
+    const today = DL.todayStr();
+    const lastNotified = await DL.cacheGet('zone:notified');
+    const codes = wl.slice(0, 12);
+    const rows = [];
+    for (const c of codes) {
+      try {
+        const kline = await DL.getKline(c.code, '2023-01-01', today);
+        const divs = await DL.fetchDividendsOne(c.code);
+        if (!kline || !divs || !divs.length) continue;
+        const series = DL.calcRollingPercentile(kline, divs, 500);
+        const last = series.filter(x => x.pct != null).pop();
+        if (!last || last.pct < 75) continue;
+        const z = DL.computeZone(last.pct);
+        rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label });
+      } catch (e) { /* 单只失败跳过 */ }
+    }
+    if (!rows.length) { el.innerHTML = ''; return; }
+    const act = rows.filter(r => r.pct >= 85);
+    const watch = rows.filter(r => r.pct >= 75 && r.pct < 85);
+    let html = '';
+    if (act.length) {
+      html += `<div style="background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.4);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔔 <b>建仓区提醒</b>：${act.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位 [${r.label}]`).join(' · ')}</div>`;
+    }
+    if (watch.length) {
+      html += `<div style="background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:10px;padding:10px 14px;margin-bottom:10px">👀 <b>接近建仓区</b>：${watch.map(r => `${r.name}(${r.code}) ${r.pct.toFixed(0)}%`).join(' · ')}</div>`;
+    }
+    el.innerHTML = html;
+    // 桌面通知（尽力而为，仅 95+ 极值；iOS Safari/无权限静默）
+    const extreme = rows.filter(r => r.pct >= 95);
+    if (extreme.length && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification('🔔 红利建仓提醒', { body: extreme.map(r => r.name + ' ' + r.pct.toFixed(0) + '%分位 [95+极值]').join('，') }); } catch (e) {}
+    }
+    if (act.length && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch (e) {}
     }
   }
 
@@ -229,7 +274,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   /* ---------- 诊断页 ---------- */
   let diagCode = null;
   let diagYears = 5;
+  let diagSeq = 0;   // v1.9.0 竞态修复：请求序号，旧请求异步返回时丢弃（防 D3→D4 串台覆盖 etfNote）
   async function openDiagnose(code, years) {
+    const seq = ++diagSeq;
     diagCode = code;
     if (years) diagYears = years;
     switchTab('diagnose');
@@ -257,6 +304,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (yl) yl.textContent = diagYears;
     try {
       const name = await DL.fetchName(code);
+      if (seq !== diagSeq) return;   // v1.9.0 竞态修复：旧请求丢弃
       // v1.7.6 M9：ETF/指数分红标注（防误读：指数ETF分红频率低、不连续）
       const isEtf = /ETF|指数/.test(name) || /^(5|1)/.test(code);
       const etfNoteEl = $('#diagEtfNote');
@@ -269,6 +317,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         DL.fetchDividendsOne(code),
         DL.getKline(code, new Date(Date.now() - diagYears * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
       ]);
+      if (seq !== diagSeq) return;   // v1.9.0 竞态修复
       const snap = homeState.snap || await DL.getStockQuotes([code]);
       homeState.snap = snap;
       const s = snap[code] || {};
@@ -299,6 +348,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>`;
       // 带状图：历史股息率分位（滚动口径：每年用当年分红）
       renderYieldBand(divs, kline, diagYears);
+      // v1.9.0：建仓区状态卡 + 分位信号线（滚动500天） + 分红增长趋势
+      renderZoneAndSignal(divs, kline);
+      renderDivTrend(divs);
+      renderStrategy(divs, kline);
       // 分红节奏
       renderRhythm(divs);
       // v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比）
@@ -344,6 +397,167 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
       note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；口径：逐年滚动——每年用当年到账分红÷当日价；顶部"当前股息率"为近2财年口径）`;
     }
+  }
+
+  /* ===== v1.9.0：建仓区状态卡（J 方案）+ 分位信号线（滚动500天）+ 分红趋势 ===== */
+  let _signalChart = null;
+  function renderZoneAndSignal(divs, kline) {
+    // 建仓区状态卡
+    const zel = $('#diagZone');
+    const series = DL.calcRollingPercentile(kline, divs, 500);
+    const last = series.filter(x => x.pct != null).pop();
+    if (zel) {
+      if (!last) {
+        zel.innerHTML = '<div class="hint">数据不足（需≥250个交易日）</div>';
+      } else {
+        const z = DL.computeZone(last.pct);
+        const zoneColor = { start: '#d9a441', add: '#5aa9e6', full: '#4caf7d', extreme: '#e05a5a', watch: '#8fa69c', wait: '#8fa69c', nodata: '#8fa69c' }[z.zone] || '#8fa69c';
+        const bar = Math.min(100, Math.max(0, last.pct));
+        zel.innerHTML = `<div class="zone-row">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-weight:600;color:${zoneColor}">${z.label}</span>
+            <span>当前分位 <b>${last.pct.toFixed(0)}%</b> · 股息率 ${last.dyS.toFixed(2)}%</span>
+          </div>
+          <div style="height:10px;background:var(--card2);border-radius:5px;overflow:hidden;position:relative">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:${bar}%;background:${zoneColor};border-radius:5px"></div>
+            ${[80,85,90,95].map(p => `<div style="position:absolute;left:${p}%;top:-3px;bottom:-3px;width:1px;background:rgba(255,255,255,.35)" title="${p}分位"></div>`).join('')}
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px">
+            <span>0</span><span>80建</span><span>85加</span><span>90满</span><span>95+极值</span><span>100</span>
+          </div>
+          <div class="hint" style="margin-top:6px">${z.action}${z.zone === 'extreme' ? '（历史 41/43 事件胜率，非买入即涨，浮亏均值 -19%±）' : ''}</div>
+        </div>`;
+      }
+    }
+    // 信号线图（滚动 500 天分位曲线 + 80/85/90/95 阈值线）
+    const el = $('#diagSignalChart');
+    if (el && typeof echarts !== 'undefined') {
+      if (_signalChart) { _signalChart.dispose(); _signalChart = null; }
+      const valid = series.filter(x => x.pct != null);
+      if (valid.length < 30) {
+        el.innerHTML = '<div class="hint">数据不足</div>';
+      } else {
+        const chart = _signalChart = echarts.init(el);
+        const markAreas = [
+          [{ yAxis: 95, itemStyle: { color: 'rgba(224,90,90,.10)' } }, { yAxis: 100 }],
+          [{ yAxis: 90, itemStyle: { color: 'rgba(76,175,125,.10)' } }, { yAxis: 95 }],
+          [{ yAxis: 85, itemStyle: { color: 'rgba(90,169,230,.10)' } }, { yAxis: 90 }],
+          [{ yAxis: 80, itemStyle: { color: 'rgba(217,164,65,.10)' } }, { yAxis: 85 }],
+        ];
+        chart.setOption({
+          backgroundColor: 'transparent',
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 平滑股息率 ${x.dyS.toFixed(2)}%`; } },
+          grid: { left: 44, right: 14, top: 24, bottom: 26 },
+          xAxis: { type: 'category', data: valid.map(x => x.d), axisLine: { lineStyle: { color: '#3a4f46' } }, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+          yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { lineStyle: { color: '#22322c' } } },
+          series: [{
+            name: '滚动分位', type: 'line', showSymbol: false, data: valid.map(x => +x.pct.toFixed(1)),
+            lineStyle: { width: 1.5, color: '#d9a441' }, areaStyle: { color: 'rgba(217,164,65,.12)' },
+            markLine: {
+              silent: true, symbol: 'none',
+              data: [80, 85, 90, 95].map(v => ({ yAxis: v, lineStyle: { type: 'dashed', width: 1, color: 'rgba(255,255,255,.4)' }, label: { formatter: v + '分位', color: '#8fa69c', fontSize: 10, position: 'insideEndTop' } })),
+            },
+            markArea: { silent: true, data: markAreas },
+          }],
+        });
+        const sn = $('#diagSignalNote');
+        if (sn) sn.textContent = '口径：滚动 500 个交易日分位（只用截至当日数据，无未来函数）；80 建1/3、85 加1/3、90 加满、95+ 极值确认。历史 90+ 分位买点胜率 95%（41/43 独立事件），浮亏均值 -19%±，最长套牢 6 年。';
+      }
+    }
+  }
+
+  /* 分红增长趋势（报告期归组柱状图 + CAGR + 停增/下调标红） */
+  function renderDivTrend(divs) {
+    const el = $('#diagDivTrend');
+    if (!el) return;
+    const byYear = {};
+    divs.forEach(d => { if (d.pending || !d.ex || !(d.dps > 0)) return; const y = (d.report || d.ex).slice(0, 4); byYear[y] = (byYear[y] || 0) + d.dps; });
+    const years = Object.keys(byYear).filter(y => byYear[y] > 0).sort();
+    if (years.length < 2) { el.innerHTML = '<div class="hint">暂无分红记录</div>'; return; }
+    const last5 = years.slice(-6);
+    const cagr = DL.calcDivCAGR(divs, 3);
+    // v1.9.0 入池三档（CAGR ≥5% 推荐 / 0-5% 观察 / ≤0 剔除；基数检查防好想你假象）
+    const grade = cagr == null ? null : (cagr >= 0.05 ? { tag: '✅ 推荐', cls: 'green' } : (cagr > 0 ? { tag: '👀 观察', cls: '' } : { tag: '❌ 剔除', cls: 'red' }));
+    let html = `<div class="hint">分红 CAGR（近3年，报告期归组）：${cagr != null ? '<b class="' + (cagr >= 0.05 ? 'green' : (cagr > 0 ? '' : 'red')) + '">' + (cagr * 100).toFixed(1) + '%/年</b>' : '数据不足'}`;
+    if (grade) html += ` · 入池评级 <b class="${grade.cls}">${grade.tag}</b>`;
+    if (cagr == null && years.length >= 4) html += '（基数过低或数据不足，防假象不计）';
+    // 同比检测（近6年）
+    const yoy = [];
+    for (let i = 1; i < last5.length; i++) {
+      const prev = byYear[last5[i-1]], cur = byYear[last5[i]];
+      yoy.push({ y: last5[i], pct: prev > 0 ? (cur - prev) / prev * 100 : null });
+    }
+    const stops = yoy.filter(v => v.pct != null && v.pct <= 0);
+    if (stops.length >= 2) html += '<span class="red"> ⚠️ 连续 ' + stops.length + ' 年分红停增/下调（' + stops.map(s => s.y + ' ' + s.pct.toFixed(1) + '%').join('、') + '）→ 降级观察（基本面卖出信号第1级）</span>';
+    else if (stops.length === 1) html += '<span style="color:#e0a030"> ⚠️ ' + stops[0].y + ' 分红' + (stops[0].pct < 0 ? '下调' : '停增') + ' ' + stops[0].pct.toFixed(1) + '%（第1年关注，连续2年触发降级观察）</span>';
+    html += '</div><table style="width:100%;font-size:12px;margin-top:6px;border-collapse:collapse"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">报告期</th><th>每股分红</th><th>同比</th><th>趋势</th></tr>';
+    last5.forEach((y, i) => {
+      const v = byYear[y];
+      const yv = i > 0 ? yoy[i-1] : null;
+      const cls = yv && yv.pct != null && yv.pct <= 0 ? 'red' : (yv && yv.pct != null && yv.pct > 0 ? 'green' : '');
+      const arrow = yv && yv.pct != null ? (yv.pct > 0 ? '▲' : (yv.pct < 0 ? '▼' : '—')) : '';
+      html += `<tr><td style="padding:3px">${y}</td><td style="text-align:center">${v.toFixed(3)} 元</td><td style="text-align:center" class="${cls}">${yv ? arrow + ' ' + (yv.pct != null ? yv.pct.toFixed(1) + '%' : '—') : '—'}</td><td style="text-align:center">${yv ? '<span style="color:' + (yv.pct > 0 ? '#4caf7d' : (yv.pct < 0 ? '#e05a5a' : '#8fa69c')) + '">' + (yv.pct > 0 ? '增长' : (yv.pct < 0 ? '下调' : '持平')) + '</span>' : '—'}</td></tr>`;
+    });
+    html += '</table><div class="hint" style="margin-top:4px">口径：报告期归组（含中期+末期）；连续2年停增/下调 → 降级观察（卖出第1级信号）</div>';
+    el.innerHTML = html;
+  }
+
+  /* 策略对比表（三列：收益+浮亏+风险效率，默认风险效率排序+三行导读）
+   * 近5年回测：闭眼全仓 / 金字塔分位(80/85/90) / 等90分位 / 等95分位 */
+  function renderStrategy(divs, kline) {
+    const el = $('#diagStrategy');
+    if (!el) return;
+    const dates = Object.keys(kline).sort();
+    const startD = dates[0];
+    const endD = dates[dates.length - 1];
+    const series = DL.calcRollingPercentile(kline, divs, 500);
+    if (series.length < 60) { el.innerHTML = '<div class="hint">数据不足</div>'; return; }
+    const priceOf = d => kline[d];
+    const retOf = (buyD) => priceOf(endD) / priceOf(buyD) - 1;
+    const mddOf = (buyD) => {
+      let peak = -Infinity, mdd = 0;
+      dates.forEach(d => { if (d < buyD) return; const p = kline[d]; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > mdd) mdd = dd; });
+      return mdd;
+    };
+    const strat = [];
+    // A 闭眼全仓
+    strat.push({ name: '闭眼全仓', ret: retOf(startD), mdd: mddOf(startD) });
+    // B 金字塔分位 80/85/90 各1/3（无间隔/无超额）
+    const p80 = series.find(x => x.pct != null && x.pct >= 80);
+    const p85 = series.find(x => x.pct != null && x.pct >= 85);
+    const p90 = series.find(x => x.pct != null && x.pct >= 90);
+    if (p80) {
+      const buys = [p80];
+      if (p85) buys.push(p85);
+      if (p90) buys.push(p90);
+      const w = 1 / buys.length;
+      let ret = 0, mdd = 0;
+      buys.forEach(b => { ret += w * retOf(b.d); mdd += w * mddOf(b.d); });
+      strat.push({ name: '金字塔 80/85/90', ret, mdd, note: '首档触发 ' + p80.d });
+    }
+    // C 等 90 分位全仓
+    if (p90) {
+      strat.push({ name: '等90分位全仓', ret: retOf(p90.d), mdd: mddOf(p90.d), note: '触发 ' + p90.d });
+    }
+    // D 等 95+ 全仓
+    const p95 = series.find(x => x.pct != null && x.pct >= 95);
+    if (p95) {
+      strat.push({ name: '等95+全仓', ret: retOf(p95.d), mdd: mddOf(p95.d), note: '触发 ' + p95.d });
+    }
+    // 风险效率 = 收益/|浮亏|（收益为负=0.3以下标灰）
+    strat.forEach(s => { s.riskEff = Math.abs(s.ret) / Math.max(0.0001, Math.abs(s.mdd)); });
+    strat.sort((a, b) => b.riskEff - a.riskEff);   // 默认风险效率排序
+    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">策略</th><th>收益</th><th>最大浮亏</th><th>风险效率</th></tr>';
+    strat.forEach(s => {
+      html += `<tr><td style="padding:4px">${s.name}${s.note ? '<div style="font-size:10px;color:var(--muted)">' + s.note + '</div>' : ''}</td>
+        <td style="text-align:center" class="${s.ret >= 0 ? 'green' : 'red'}">${(s.ret * 100).toFixed(1)}%</td>
+        <td style="text-align:center" class="red">${(s.mdd * 100).toFixed(1)}%</td>
+        <td style="text-align:center"><b>${s.riskEff.toFixed(2)}</b></td></tr>`;
+    });
+    html += '</table>';
+    el.innerHTML = html;
+    const g = $('#diagStrategyGuide');
+    if (g) g.innerHTML = '<span>① 收益最高≠最优：浮亏深度决定拿不拿得住；② 金字塔浮亏最浅，且 90 分位永不出现也能建仓；③ 风险效率=收益÷浮亏，1.9 以上=赚得多亏得少，1.0 以下=赚得少亏得多。</span>';
   }
 
   /* 分红节奏：每年几月派息 */

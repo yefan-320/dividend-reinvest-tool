@@ -566,6 +566,114 @@ function calcAnnualDivYield(divs, price) {
   return { annualDps, yieldPct: annualDps / price * 100, years: recent, count: recent.length };
 }
 
+/* ---------- v1.9.0 核心计算函数（22轮红利讨论落地） ---------- */
+
+/* 报告期归组：按 REPORT_DATE 年份汇总每股分红（含中期+末期），返回 {year: dps} 排序升序 */
+function calcReportYearDivs(divs) {
+  const years = {};
+  divs.forEach(d => {
+    if (d.pending || !d.ex) return;
+    const y = (d.report || d.ex).slice(0, 4);
+    if (!y || !(d.dps > 0)) return;
+    years[y] = (years[y] || 0) + d.dps;
+  });
+  return Object.keys(years).filter(y => years[y] > 0).sort();
+}
+
+/* 分红 CAGR（报告期归组）：近 N 年（默认3年）复合增长率。返回百分比小数（0.095=9.5%）或 null
+ * 口径：首年/末年都用报告期归组；基数检查：首年 <0.1 元视为低基数，返回 null 防高基数假象（好想你案例） */
+function calcDivCAGR(divs, yearsN) {
+  const n = yearsN || 3;
+  const ys = calcReportYearDivs(divs);
+  if (ys.length < n + 1) return null;
+  const firstY = ys[ys.length - 1 - n];
+  const lastY = ys[ys.length - 1];
+  const v0 = ys.reduce((s, y) => s + (y === firstY ? divs.filter(d => (d.report || d.ex).slice(0,4) === firstY && !d.pending && d.dps > 0).reduce((t,d)=>t+d.dps,0) : 0), 0);
+  const v1 = ys.reduce((s, y) => s + (y === lastY ? divs.filter(d => (d.report || d.ex).slice(0,4) === lastY && !d.pending && d.dps > 0).reduce((t,d)=>t+d.dps,0) : 0), 0);
+  if (!v0 || v0 < 0.1) return null;   // 低基数防假象
+  return Math.pow(v1 / v0, 1 / n) - 1;
+}
+
+/* 除息锁定 TTM：除息日当天/次日用除息前 TTM（防 10.24% 假高点误触发）
+ * 输入 divs（已 parse），返回 { exDate -> { lockedDps, ttmBefore } } 映射 */
+function calcLockedTTM(divs) {
+  const exDates = divs.filter(d => d.ex && d.dps > 0).map(d => d.ex).sort();
+  const map = {};
+  exDates.forEach((ex, i) => {
+    // 除息前 TTM：ex 往前 366 天内（不含当天；366 覆盖闰年，防年度派息被挤出窗口）
+    const before = divs.filter(d => d.ex && d.dps > 0 && d.ex < ex && d.ex >= shiftDate(ex, -366));
+    const ttm = before.reduce((s, d) => s + d.dps, 0);
+    map[ex] = { lockedDps: ttm, exDate: ex };
+    // 次日也算锁定（市场未完全消化）
+    const next = shiftDate(ex, 1);
+    map[next] = { lockedDps: ttm, exDate: ex };
+  });
+  return map;
+}
+function shiftDate(dateStr, days) {
+  // 本地时区组件构造，避免 UTC 偏移（曾致 +1 天被 -8h 抵消成同日，除息次日锁定失效）
+  const p = dateStr.split('-').map(Number);
+  const d = new Date(p[0], p[1] - 1, p[2]);
+  d.setDate(d.getDate() + days);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* 滚动分位（500天窗口，无未来函数）：
+ * 输入 kline（{date: price}，升序）, divs（已 parse）
+ * 返回 [{d, dy(平滑股息率%), pct(滚动分位 0-100)}]
+ * 口径：TTM 滚动 366 天分红 ÷ 当日价（366 覆盖闰年）；5日均线平滑；滚动窗口=近 500 交易日；样本<250 天 pct=null */
+function calcRollingPercentile(kline, divs, windowDays) {
+  const win = windowDays || 500;
+  const dates = Object.keys(kline).sort();
+  if (!dates.length) return [];
+  // 除息锁定表
+  const locked = calcLockedTTM(divs);
+  // TTM 序列
+  const series = [];
+  dates.forEach(d => {
+    const price = kline[d];
+    if (!(price > 0)) return;
+    let ttm = 0;
+    if (locked[d]) {
+      ttm = locked[d].lockedDps;   // 除息日/次日锁定：用除息前 TTM
+    } else {
+      const start = shiftDate(d, -366);
+      divs.forEach(x => { if (x.ex && x.dps > 0 && x.ex < d && x.ex >= start) ttm += x.dps; });
+    }
+    if (ttm > 0) series.push({ d, dy: ttm / price * 100 });
+  });
+  // 5 日均线平滑
+  for (let i = 0; i < series.length; i++) {
+    const lo = Math.max(0, i - 2), hi = Math.min(series.length - 1, i + 2);
+    let s = 0, n = 0;
+    for (let j = lo; j <= hi; j++) { s += series[j].dy; n++; }
+    series[i].dyS = s / n;
+  }
+  // 滚动分位
+  for (let i = 0; i < series.length; i++) {
+    if (i < 250) { series[i].pct = null; continue; }
+    const lo = Math.max(0, i - win + 1);
+    const window = series.slice(lo, i + 1).map(x => x.dyS);
+    const sorted = window.slice().sort((a, b) => a - b);
+    const less = sorted.filter(v => v <= series[i].dyS).length;
+    series[i].pct = less / window.length * 100;
+  }
+  return series;
+}
+
+/* 建仓区判定（J 方案）：
+ * 输入 pct（当前滚动分位），返回 { zone, label, action }
+ * 80 建1/3 / 85 加1/3 / 90 加满 / 95+ 极值确认；<80 未到建仓区 */
+function computeZone(pct) {
+  if (pct == null) return { zone: 'nodata', label: '数据不足', action: '' };
+  if (pct >= 95) return { zone: 'extreme', label: '95+ 极值确认', action: '历史 95% 胜率（41/43），可自决追加' };
+  if (pct >= 90) return { zone: 'full', label: '90 加满', action: '建仓计划已完成（J 方案第三档）' };
+  if (pct >= 85) return { zone: 'add', label: '85 加仓', action: '加 1/3（第二档）' };
+  if (pct >= 80) return { zone: 'start', label: '80 建仓', action: '建 1/3（第一档）' };
+  if (pct >= 75) return { zone: 'watch', label: '75-80 预告', action: '接近建仓区，关注' };
+  return { zone: 'wait', label: '未到建仓区', action: '等待分位回落至 75+' };
+}
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
@@ -574,5 +682,7 @@ window.DL = {
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
+  /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, computeZone,
 }
 })();
