@@ -51,7 +51,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   const fmt = DL.fmt, fmtPct = DL.fmtPct;
 
   /* ---------- tab 导航 ---------- */
-  const TABS = ['home', 'diagnose', 'compare', 'backtest'];
+  const TABS = ['home', 'diagnose', 'compare', 'backtest', 'pfbt'];   // v1.9.2 加组合回测 tab
   let curTab = 'home';
   function switchTab(name) {
     curTab = name;
@@ -146,7 +146,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* v1.9.1 P2：组合建仓总览卡（默认折叠零请求，展开懒加载 + 缓存 30min）
    * 内容：每只标的进度条（已建/上限）+ 生态 + 二维排序 + 质量警示 + 资金分配模拟（截断不缩放）+ 轻量组合参考 */
-  let _pfLoaded = false, _pfCache = null;
+  let _pfLoaded = false, _pfCache = null, _pfLoading = false;   // v1.9.2 O2：展开加载锁（防重复点击并发）
   async function renderPortfolio(wl) {
     const card = $('#portfolioCard');
     const body = $('#portfolioBody');
@@ -165,9 +165,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (ps) ps.textContent = summary;
     card.onclick = async () => {
       if (body.style.display !== 'none') { body.style.display = 'none'; return; }
+      if (_pfLoading) return;   // v1.9.2 O2：加载锁
       body.style.display = 'block';
       // 缓存 30min：展开不重拉
       if (_pfCache && Date.now() - _pfCache.ts < 30 * 60000) { renderPfBody(_pfCache); return; }
+      _pfLoading = true;
       body.innerHTML = '<div class="hint">展开加载中…</div>';
       const items = [];
       for (const c of wl.slice(0, 20)) {
@@ -193,6 +195,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const triggered = items.filter(it => it.pos > 0).length;
       _pfCache = { ts: Date.now(), items, totalPos, triggeredCount: triggered, mode };
       try { localStorage.setItem('divtool_pf_summary', JSON.stringify({ ts: Date.now(), txt: `组合总仓位 ${totalPos}% · ${triggered}/${items.length} 已触发` })); } catch (e) {}
+      _pfLoading = false;
       renderPfBody(_pfCache);
     };
   }
@@ -372,7 +375,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   /* 扫描入口：决策台底部按钮 → 打开扫描子页（简单内嵌） */
+  let _scanRunning = false;   // v1.9.2 O2：扫描器运行锁（防重复点击并发覆盖）
   async function runScanner() {
+    if (_scanRunning) return;
+    _scanRunning = true;
+    const btn = $('#btnScan');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 扫描中…'; }
+    try {
     const el = $('#scanPanel');
     el.style.display = 'block';
     el.innerHTML = '<div class="hint">⏳ 扫描中：拉取全市场分红数据…</div>';
@@ -420,13 +429,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     } catch (e) {
       el.innerHTML = `<div class="hint err">扫描失败：${e.message}，请稍后重试</div>`;
     }
+    } finally {
+      _scanRunning = false;
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 扫描新机会（全市场高股息）'; }
+    }
   }
 
   /* v1.9.1 P5：发现器 MVP（三层动态池第一层粗筛的双通道落地）
    * 第一通道：股息率 ≥3%（clist 接口 f9 直接全市场排序，快）
    * 第二通道：增长榜（股息率 ≥2% + 分红 CAGR ≥10%）——对第一通道 top N 深扫补 CAGR
    * 输出：候选列表（股息率/CAGR/生态色标/样本年数/置信度）+ 点击加自选 */
+  let _discRunning = false;   // v1.9.2 O2：发现器运行锁
   async function runDiscoverer() {
+    if (_discRunning) return;
+    _discRunning = true;
+    const btnD = $('#btnDiscover');
+    if (btnD) { btnD.disabled = true; btnD.textContent = '⏳ 发现中…'; }
+    try {
     const el = $('#scanPanel');
     el.style.display = 'block';
     el.innerHTML = '<div class="hint">⏳ 发现器：拉取全市场股息率排序…</div>';
@@ -481,6 +500,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       el.querySelectorAll('.scan-row').forEach(r => r.onclick = () => { addToWatchlist(r.dataset.code); openDiagnose(r.dataset.code); });
     } catch (e) {
       el.innerHTML = `<div class="hint err">发现器失败：${e.message}，请稍后重试</div>`;
+    }
+    } finally {
+      _discRunning = false;
+      if (btnD) { btnD.disabled = false; btnD.textContent = '🔭 发现器（双通道：股息率≥3% ∪ 增长榜 CAGR≥10%）'; }
     }
   }
 
@@ -973,19 +996,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     });
   });
 
+    let _cmpSeq = 0;   // v1.9.2 O2：搜索解析序号（防连续输入晚返回覆盖）
   async function cmpResolveCode(v) {
     v = (v || '').trim();
     if (!v) return null;
+    const seq = ++_cmpSeq;
     // C2：显式后缀 000300.SH / 000001.SZ（指数/股票不靠猜）
     const parsed = DL.parseSecInput(v);
     if (/^\d{6}$/.test(parsed.code)) {
       let name = parsed.code;
       try { name = await DL.fetchName(parsed.code, parsed.market); } catch (e) { }
+      if (seq !== _cmpSeq) return null;   // 已被新输入取代
       return { code: parsed.code, name, market: parsed.market };
     }
     // 名称搜索
     try {
       const d = await DL.jsonp('https://searchapi.eastmoney.com/api/suggest/get?input=' + encodeURIComponent(v) + '&type=14&count=3', 'cb');
+      if (seq !== _cmpSeq) return null;
       const list = d && d.QuotationCodeTable && d.QuotationCodeTable.Data || [];
       if (list.length) return { code: list[0].Code, name: list[0].Name, market: null };
     } catch (e) { }
@@ -1417,6 +1444,63 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   /* ---------- 初始化 ---------- */
+  /* v1.9.2 组合级回测 tab：拉取自选池 → 算 series → calcPortfolioBacktest → 策略对比表 */
+  let _pfbtRunning = false;
+  async function runPortfolioBacktest() {
+    const el = $('#pfbtResult');
+    if (!el || _pfbtRunning) return;
+    const wl = (homeState.watchlist && homeState.watchlist.length) ? homeState.watchlist : await DL.Watchlist.list();
+    if (!wl.length) { el.innerHTML = '<div class="hint err">自选为空：先在决策台添加自选股</div>'; return; }
+    _pfbtRunning = true;
+    const btn = $('#pfbtRun');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 回测中…'; }
+    // 区间
+    const y = parseInt((document.querySelector('.pfbt-y.on') || {}).dataset && document.querySelector('.pfbt-y.on').dataset.y || '5', 10);
+    try {
+      el.innerHTML = `<div class="hint">⏳ 拉取 ${wl.length} 只自选 K线+分红（批处理 5 并发）…</div>`;
+      const from = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+      const pool = [];
+      for (let i = 0; i < wl.length; i += 5) {
+        const batch = wl.slice(i, i + 5);
+        await Promise.all(batch.map(async (c) => {
+          try {
+            const [divs, kline] = await Promise.all([DL.fetchDividendsOne(c.code), DL.getKline(c.code, from, DL.todayStr())]);
+            if (!divs || !divs.length || !kline || !Object.keys(kline).length) return;
+            const series = DL.calcRollingPercentile(kline, divs, 500);
+            pool.push({ code: c.code, name: c.name || c.code, series, kline, divs });
+          } catch (e) { /* 跳过 */ }
+        }));
+        el.innerHTML = `<div class="hint">⏳ 拉取进度：${Math.min(i + 5, wl.length)}/${wl.length}…</div>`;
+      }
+      if (!pool.length) { el.innerHTML = '<div class="hint err">无有效数据</div>'; return; }
+      el.innerHTML = `<div class="hint">⏳ 回测计算中（${pool.length} 只）…</div>`;
+      await new Promise(r => setTimeout(r, 50));   // 让 UI 刷新
+      const res = DL.calcPortfolioBacktest(pool, { years: y });
+      let html = `<div class="hint">✅ 组合回测完成：${pool.length} 只自选 · 近 ${y} 年 · 标的等权 · 含分红（近似再投）</div>`;
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">策略</th><th>总收益</th><th>年化</th><th>最大浮亏</th><th>事件胜率</th><th>触发事件</th></tr>';
+      res.forEach(r => {
+        const retC = r.ret != null ? (r.ret >= 0 ? 'green' : 'red') : '';
+        html += `<tr><td style="padding:4px"><b>${r.name}</b><div style="font-size:10px;color:var(--muted)">${r.desc}</div></td>
+          <td style="text-align:center" class="${retC}">${r.ret != null ? r.ret.toFixed(1) + '%' : '—'}</td>
+          <td style="text-align:center">${r.annual != null ? r.annual.toFixed(1) + '%' : '—'}</td>
+          <td style="text-align:center" class="red">${r.mdd != null ? '-' + Math.abs(r.mdd).toFixed(1) + '%' : '—'}</td>
+          <td style="text-align:center">${r.winRate != null ? r.winRate.toFixed(0) + '%' : '—'}</td>
+          <td style="text-align:center">${r.events}</td></tr>`;
+      });
+      html += '</table>';
+      // 结论行：推荐风险效率最高（收益/|浮亏|）的策略
+      const best = res.filter(r => r.ret != null && r.mdd != null).sort((a, b) => (a.ret / Math.max(0.01, Math.abs(a.mdd))) - (b.ret / Math.max(0.01, Math.abs(b.mdd))))[res.filter(r => r.ret != null).length - 1];
+      if (best) html += `<div class="hint" style="margin-top:6px">📌 风险效率最优：<b>${best.name}</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}% · 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%）。历史回测不代表未来，仅验证规则方向。</div>`;
+      html += '<div class="hint">口径：事件首日买入（分位≥档位的连续区间）→ 持有至今；收益=期末价+期间分红÷买入价；组合=各标等权平均。策略规则没变就不用重跑。</div>';
+      el.innerHTML = html;
+    } catch (e) {
+      el.innerHTML = `<div class="hint err">组合回测失败：${e.message}</div>`;
+    } finally {
+      _pfbtRunning = false;
+      if (btn) { btn.disabled = false; btn.textContent = '▶ 运行组合回测'; }
+    }
+  }
+
   window.addEventListener('DOMContentLoaded', () => {
     bindTabs();
     renderCompare();
@@ -1442,6 +1526,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (btnScan) btnScan.onclick = runScanner;
     const btnDiscover = $('#btnDiscover');
     if (btnDiscover) btnDiscover.onclick = runDiscoverer;
+    // v1.9.2：组合回测 tab 绑定（区间 chips + 运行按钮）
+    const pfbtRun = $('#pfbtRun');
+    if (pfbtRun) pfbtRun.onclick = runPortfolioBacktest;
+    document.querySelectorAll('.pfbt-y').forEach(b => b.onclick = () => {
+      document.querySelectorAll('.pfbt-y').forEach(x => x.classList.toggle('on', x === b));
+    });
     const btnDiagBacktest = $('#btnDiagBacktest');
     if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; const bd = $('#buyDate'); if (bd) bd.value = new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10); switchTab('backtest'); $('#btnRun').click(); } };
     switchTab('home');

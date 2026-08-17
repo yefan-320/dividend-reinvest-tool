@@ -783,6 +783,97 @@ function findZoneEvents(series, tierPct) {
   return events;
 }
 
+/* v1.9.2 组合级回测引擎（纯函数，可单测）：
+ * 输入 pool = [{ code, name, series, kline, divs }]，opts = { years }
+ * 策略：闭眼全仓 / 保守金字塔(80/85/90各1/3) / 柔性金字塔(70/80/90/95→20/40/60/80%) / 等90分位
+ * 买入规则：档位独立事件首日买入该档份额（findZoneEvents）；收益=价格+期间分红÷买入价；组合=标的等权
+ * 输出：每策略 { key, name, desc, ret(总收益%), annual(年化%), mdd(最大回撤%), winRate(事件胜率-买后1年正收益比例), events } */
+function calcPortfolioBacktest(pool, opts) {
+  opts = opts || {};
+  const strategies = [
+    { key: 'lump', name: '闭眼全仓', desc: '期初一次买入持有', tiers: null },
+    { key: 'consv', name: '保守金字塔', desc: '80/85/90 分位各 1/3', tiers: [{ pct: 80, frac: 1 / 3 }, { pct: 85, frac: 1 / 3 }, { pct: 90, frac: 1 / 3 }] },
+    { key: 'flex', name: '柔性金字塔', desc: '70/80/90/95 → 20/40/60/80%', tiers: [{ pct: 70, frac: 0.2 }, { pct: 80, frac: 0.2 }, { pct: 90, frac: 0.2 }, { pct: 95, frac: 0.2 }] },
+    { key: 'wait90', name: '等 90 分位', desc: '90+ 一次性全仓', tiers: [{ pct: 90, frac: 1 }] },
+  ];
+  const out = [];
+  for (const st of strategies) {
+    let totRet = 0, totMdd = 0, totWin = 0, totEv = 0, totAnnual = 0, n = 0;
+    for (const it of pool) {
+      if (!it.series || !it.kline) continue;
+      const dates = Object.keys(it.kline).sort();
+      if (dates.length < 250) continue;   // 样本不足
+      const endD = dates[dates.length - 1];
+      const endP = it.kline[endD];
+      const divsByYear = {};
+      (it.divs || []).forEach(d => { if (d.ex && d.dps > 0) { const y = d.ex.slice(0, 4); divsByYear[y] = (divsByYear[y] || 0) + d.dps; } });
+      let ret = 0, mdd = 0, winCnt = 0, evCnt = 0;
+      const buys = [];
+      if (st.tiers) {
+        // 金字塔：各档独立事件首日买入
+        for (const t of st.tiers) {
+          const evs = DL.findZoneEvents(it.series, t.pct);
+          for (const ev of evs) {
+            const idx = dates.indexOf(ev.start);
+            if (idx < 0) continue;
+            const buyP = it.kline[ev.start];
+            if (!(buyP > 0)) continue;
+            buys.push({ d: ev.start, price: buyP, frac: t.frac });
+            evCnt++;
+            // 买后 1 年正收益（胜率）
+            const y1 = dates[idx + 250];
+            if (y1 && it.kline[y1] > buyP) winCnt++;
+          }
+        }
+        if (!buys.length) continue;   // 未触发
+        // 各批收益加权
+        let wSum = 0;
+        for (const b of buys) {
+          const endY = (b.d || '').slice(0, 4);
+          let divSum = 0;
+          Object.keys(divsByYear).forEach(y => { if (y >= endY) divSum += divsByYear[y]; });
+          const r = (endP + divSum) / b.price - 1;
+          ret += r * b.frac;
+          wSum += b.frac;
+        }
+        if (wSum > 0) ret /= wSum;
+        // 回撤：各批买入后最大回撤加权
+        for (const b of buys) {
+          let peak = -Infinity, md = 0;
+          const si = dates.indexOf(b.d);
+          for (let j = si; j < dates.length; j++) { const p = it.kline[dates[j]]; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > md) md = dd; }
+          mdd += md * b.frac;
+        }
+        if (wSum > 0) mdd /= wSum;
+      } else {
+        // 闭眼全仓：期初买入
+        const buyP = it.kline[dates[0]];
+        if (!(buyP > 0)) continue;
+        let divSum = 0;
+        Object.keys(divsByYear).forEach(y => { if (y >= dates[0].slice(0, 4)) divSum += divsByYear[y]; });
+        ret = (endP + divSum) / buyP - 1;
+        let peak = -Infinity, md = 0;
+        for (let j = 0; j < dates.length; j++) { const p = it.kline[dates[j]]; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > md) md = dd; }
+        mdd = md;
+        evCnt = 1;
+        const y1 = dates[250];
+        if (y1 && it.kline[y1] > buyP) winCnt = 1;
+      }
+      // 年化（按回测区间跨度）
+      const span = (new Date(endD) - new Date(dates[0])) / (365 * 86400000);
+      totRet += ret; totMdd += mdd; totWin += winCnt; totEv += evCnt; n++;
+      if (span > 0 && (1 + ret) > 0) totAnnual += Math.pow(1 + ret, 1 / span) - 1;
+    }
+    if (!n) { out.push({ key: st.key, name: st.name, desc: st.desc, ret: null, annual: null, mdd: null, winRate: null, events: 0, n: 0 }); continue; }
+    out.push({
+      key: st.key, name: st.name, desc: st.desc,
+      ret: totRet / n * 100, annual: totAnnual / n * 100, mdd: totMdd / n * 100,
+      winRate: totEv ? totWin / totEv * 100 : null, events: totEv, n,
+    });
+  }
+  return out;
+}
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
@@ -795,5 +886,7 @@ window.DL = {
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, computeZone,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
+  /* v1.9.2 新增：组合级回测 */
+  calcPortfolioBacktest,
 }
 })();
