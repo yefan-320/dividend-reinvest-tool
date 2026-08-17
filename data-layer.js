@@ -595,14 +595,25 @@ function calcDivCAGR(divs, yearsN) {
 }
 
 /* 除息锁定 TTM：除息日当天/次日用除息前 TTM（防 10.24% 假高点误触发）
- * 输入 divs（已 parse），返回 { exDate -> { lockedDps, ttmBefore } } 映射 */
+ * v1.9.0-O1 修复：固定 365/366 天窗口会因派息日漂移+闰年漏掉上次派息（2021-07-13→2022-07-15 间隔 367 天）
+ * 改为派息次数自适应：按最近派息间隔中位数估算一年应含几次，按次数取（天然容忍漂移） */
+function ttmDivsAt(divs, dateStr) {
+  const past = divs.filter(d => d.ex && d.dps > 0 && d.ex < dateStr)
+    .sort((a, b) => a.ex < b.ex ? 1 : -1);   // 倒序（最近在前）
+  if (!past.length) return 0;
+  const sorted = past.slice().reverse();     // 升序用于算间隔
+  const gaps = [];
+  for (let i = 1; i < sorted.length && i <= 6; i++) gaps.push((new Date(sorted[i].ex) - new Date(sorted[i - 1].ex)) / 86400000);
+  const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor((gaps.length - 1) / 2)] : 365;
+  const perYear = Math.max(1, Math.min(12, Math.round(365 / Math.max(30, med))));
+  return past.slice(0, perYear).reduce((s, d) => s + d.dps, 0);
+}
 function calcLockedTTM(divs) {
   const exDates = divs.filter(d => d.ex && d.dps > 0).map(d => d.ex).sort();
   const map = {};
-  exDates.forEach((ex, i) => {
-    // 除息前 TTM：ex 往前 366 天内（不含当天；366 覆盖闰年，防年度派息被挤出窗口）
-    const before = divs.filter(d => d.ex && d.dps > 0 && d.ex < ex && d.ex >= shiftDate(ex, -366));
-    const ttm = before.reduce((s, d) => s + d.dps, 0);
+  exDates.forEach(ex => {
+    // 除息前 TTM（不含当天）
+    const ttm = ttmDivsAt(divs, ex);
     map[ex] = { lockedDps: ttm, exDate: ex };
     // 次日也算锁定（市场未完全消化）
     const next = shiftDate(ex, 1);
@@ -637,8 +648,7 @@ function calcRollingPercentile(kline, divs, windowDays) {
     if (locked[d]) {
       ttm = locked[d].lockedDps;   // 除息日/次日锁定：用除息前 TTM
     } else {
-      const start = shiftDate(d, -366);
-      divs.forEach(x => { if (x.ex && x.dps > 0 && x.ex < d && x.ex >= start) ttm += x.dps; });
+      ttm = ttmDivsAt(divs, d);
     }
     if (ttm > 0) series.push({ d, dy: ttm / price * 100 });
   });
