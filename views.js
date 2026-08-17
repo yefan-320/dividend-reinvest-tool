@@ -640,38 +640,45 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     // 每年分红对比（v1.8.10 大师 M1-M3：分组柱状，到账年口径；空分红年=0柱+tooltip标注；
     // M6：x 轴抽稀只动刻度标签，数据全量保留）
     const chA = cmpEnsureChart('cmpChartAnnual');
-    const yrsAll = [...new Set(results.flatMap(r => (r.res.years || []).map(y => y.year)))].sort();
-    const yearLabelStep = yrsAll.length > 10 ? Math.ceil(yrsAll.length / 8) : 1;
-    chA.setOption({
-      backgroundColor: 'transparent',
-      tooltip: Object.assign({}, TOOLTIP, {
-        trigger: 'axis', confine: true,
-        formatter: ps => {
-          const yr = ps[0].axisValue;
-          let s = '<b>' + yr + ' 年</b><br/>';
-          ps.forEach(p => {
-            const r = results[p.seriesIndex];
-            const rec = (r.res.years || []).find(y => y.year === yr);
-            s += p.marker + p.seriesName + '：<b>' + (p.value != null ? fmt(p.value, 0) : '—') + '</b> 元' + (rec ? '' : '<span style="color:var(--sub)">（该年无分红）</span>') + '<br/>';
-          });
-          return s;
-        },
-      }),
-      legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 18, itemHeight: 10, formatter: shortName },
-      grid: { left: 54, right: 14, top: 34, bottom: 24 },
-      xAxis: Object.assign({ type: 'category', data: yrsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yearLabelStep > 1 ? yearLabelStep : 'auto' }) }),   // M6: 只抽刻度标签，数据全量
-      yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
-      series: results.map((r, i) => {
-        const m = {};
-        (r.res.years || []).forEach(y => { m[y.year] = y.divTotal; });
-        return {
-          name: r.it.name, type: 'bar', barGap: '10%',
-          data: yrsAll.map(yr => m[yr] != null ? Math.round(m[yr]) : 0),   // M2: 空分红年=0柱（同起点买入，没分=真没分）
-          itemStyle: { color: CMP_COLORS[i % 5], borderRadius: [3, 3, 0, 0] },
-        };
-      }),
-    });
-    window.fitLegendTop(chA, $('#cmpChartAnnual'), 34);
+    // v1.8.12 主人令：与回测页同款口径开关（到账年/报告期），渲染抽函数供 radio 切换
+    const renderCmpAnnual = (mode) => {
+      const srcYears = r => mode === 'report' ? (r.res.reportYears || []) : (r.res.years || []);
+      const yrsAll = [...new Set(results.flatMap(r => srcYears(r).map(y => y.year)))].sort();
+      const yearLabelStep = yrsAll.length > 10 ? Math.ceil(yrsAll.length / 8) : 1;
+      chA.setOption({
+        backgroundColor: 'transparent',
+        tooltip: Object.assign({}, TOOLTIP, {
+          trigger: 'axis', confine: true,
+          formatter: ps => {
+            const yr = ps[0].axisValue;
+            let s = '<b>' + yr + ' 年</b><br/>';
+            ps.forEach(p => {
+              const r = results[p.seriesIndex];
+              const rec = srcYears(r).find(y => y.year === yr);
+              s += p.marker + p.seriesName + '：<b>' + (p.value != null ? fmt(p.value, 0) : '—') + '</b> 元' + (rec ? '' : '<span style="color:var(--sub)">（该年无分红）</span>') + '<br/>';
+            });
+            return s;
+          },
+        }),
+        legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 18, itemHeight: 10, formatter: shortName },
+        grid: { left: 54, right: 14, top: 34, bottom: 24 },
+        xAxis: Object.assign({ type: 'category', data: yrsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yearLabelStep > 1 ? yearLabelStep : 'auto' }) }),   // M6: 只抽刻度标签，数据全量
+        yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
+        series: results.map((r, i) => {
+          const m = {};
+          srcYears(r).forEach(y => { m[y.year] = y.divTotal; });
+          return {
+            name: r.it.name, type: 'bar', barGap: '10%',
+            data: yrsAll.map(yr => m[yr] != null ? Math.round(m[yr]) : 0),   // M2: 空分红年=0柱（同起点买入，没分=真没分）
+            itemStyle: { color: CMP_COLORS[i % 5], borderRadius: [3, 3, 0, 0] },
+          };
+        }),
+      });
+      const tEl = $('#cmpAnnualModeTitle'); if (tEl) tEl.textContent = mode === 'report' ? '报告期' : '到账年';
+      window.fitLegendTop(chA, $('#cmpChartAnnual'), 34);
+    };
+    renderCmpAnnual('pay');
+    document.querySelectorAll('input[name=cmpAnnualMode]').forEach(el => el.onchange = () => renderCmpAnnual(el.value));   // 口径开关（与回测页 divMode 同款）
     // B3：股息率逐年折线（报告期归组 ÷ 年末价，替代单值柱状；多标的多线）
     const ch2 = cmpEnsureChart('cmpChartYield');
     const yieldYearsAll = [...new Set(results.flatMap(r => (r.yieldSeries || []).map(p => p.y)))].sort();

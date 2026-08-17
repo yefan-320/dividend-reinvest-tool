@@ -241,7 +241,12 @@ body{padding-bottom:64px}
     <div class="chart" id="cmpChartAsset"></div>
     <h2>累计分红（复投/现金累计）</h2>
     <div class="chart" id="cmpChartDiv" style="height:240px"></div>
-    <h2>每年分红对比（到账年口径，与累计分红同口径）</h2>
+    <h2>每年分红对比（<span id="cmpAnnualModeTitle">到账年</span>口径）
+      <span style="font-size:12px;font-weight:400;color:var(--sub);margin-left:8px">
+        <label style="margin-right:10px"><input type="radio" name="cmpAnnualMode" value="pay" checked style="width:auto;accent-color:var(--gold)"> 到账年</label>
+        <label><input type="radio" name="cmpAnnualMode" value="report" style="width:auto;accent-color:var(--gold)"> 报告期</label>
+      </span>
+    </h2>
     <div class="chart" id="cmpChartAnnual" style="height:240px"></div>
     <h2>股息率对比（逐年 · 报告期归组 ÷ 年末价）</h2>
     <div class="chart" id="cmpChartYield"></div>
@@ -332,11 +337,11 @@ body{padding-bottom:64px}
 </div>
 </section></div>
 
-<script src="demo-data.js?v=v1.8.11"></script>
-<script src="data-layer.js?v=v1.8.11"></script>
+<script src="demo-data.js?v=v1.8.12"></script>
+<script src="data-layer.js?v=v1.8.12"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.8.11';
+const APP_VERSION = 'v1.8.12';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -986,6 +991,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="compare">📈 对比</button>
   <button data-tab="backtest">📊 回测</button>
 </nav>
-<script src="views.js?v=v1.8.11"></script>
+<script src="views.js?v=v1.8.12"></script>
 </body>
 </html>
