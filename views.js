@@ -380,10 +380,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
       list.map((r, i) => `<tr>
         <td>${i+1}. ${r.it.name}<br><span style="color:var(--sub);font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
-          <div style="font-size:10px;color:#3fbf7f;margin-top:3px;line-height:1.5">逐年分红：${(r.res.years || []).map(y => y.year + '年 ' + fmt(y.divTotal, 0) + '元').join(' · ') || '—'}</div></td>
+          <details style="margin-top:4px;font-size:11px;color:var(--sub)"><summary style="cursor:pointer;color:#3fbf7f">逐年分红明细 ▾</summary>
+            <div style="margin-top:3px;line-height:1.7">${(r.res.years || []).slice().reverse().map(y => y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : '')).join('<br>') || '—'}</div>
+          </details></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
         <td>${fmt(r.res.final.finalInvested, 0)} 元</td>   <!-- v1.8.8: 口径与回测页一致（本金+追加+复投），曾只算本金致两边数字对不上 -->
-        <td>${fmt(r.res.final.totalDiv, 0)} 元</td>
+        <td>${fmt(r.res.final.totalDiv, 0)} 元<br><span style="color:var(--sub);font-size:11px">年均 ${fmt(r.res.final.totalDiv / Math.max(1, (r.res.years || []).length), 0)} 元</span></td>
         <td>${r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' : '—'}</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
         <td class="red">${fmtPct(-r.maxDD)}</td>
@@ -608,10 +610,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
       series: results.map((r, i) => {
-        // 按日期累计分红（对齐主轴 allDates，缺=null）
-        let cum = 0; const evMap = {};
-        r.res.divEvents.forEach(e => { evMap[e.date] = (evMap[e.date] || 0) + e.cash; });
-        const data = allDates.map(d => { if (evMap[d]) cum += evMap[d]; return cum > 0 ? Math.round(cum) : null; });
+        // 按日期累计分红（v1.8.10 修复：主轴 allDates 是抽样轴（5年≈1215天 step=2 跳日），
+        // 旧版依赖 evMap[d] 恰好命中 → 除息日在被抽样跳过的日期时该笔分红永远进不了曲线，
+        // 实测曲线终点 84,038 vs 表格 201,715。改为指针式：累计所有除息日 <= 当前轴日期的分红）
+        const evs = r.res.divEvents.slice().sort((a, b) => a.date < b.date ? -1 : 1);
+        let ei = 0, cum = 0;
+        const data = allDates.map(d => {
+          while (ei < evs.length && evs[ei].date <= d) { cum += evs[ei].cash; ei++; }
+          return cum > 0 ? Math.round(cum) : null;
+        });
         return {
           name: r.it.name, type: 'line', showSymbol: false, data,
           lineStyle: { width: 1.8, color: CMP_COLORS[i % 5], type: 'solid' },
@@ -620,6 +627,41 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }),
     });
     window.fitLegendTop(chDiv, $('#cmpChartDiv'), 34);   // v1.8.4 大师 M2：统一全局实现（旧同步读内联已删，同步读=0 无效）
+    // 每年分红对比（v1.8.10 大师 M1-M3：分组柱状，到账年口径；空分红年=0柱+tooltip标注；
+    // M6：x 轴抽稀只动刻度标签，数据全量保留）
+    const chA = cmpEnsureChart('cmpChartAnnual');
+    const yrsAll = [...new Set(results.flatMap(r => (r.res.years || []).map(y => y.year)))].sort();
+    const yearLabelStep = yrsAll.length > 10 ? Math.ceil(yrsAll.length / 8) : 1;
+    chA.setOption({
+      backgroundColor: 'transparent',
+      tooltip: Object.assign({}, TOOLTIP, {
+        trigger: 'axis', confine: true,
+        formatter: ps => {
+          const yr = ps[0].axisValue;
+          let s = '<b>' + yr + ' 年</b><br/>';
+          ps.forEach(p => {
+            const r = results[p.seriesIndex];
+            const rec = (r.res.years || []).find(y => y.year === yr);
+            s += p.marker + p.seriesName + '：<b>' + (p.value != null ? fmt(p.value, 0) : '—') + '</b> 元' + (rec ? '' : '<span style="color:var(--sub)">（该年无分红）</span>') + '<br/>';
+          });
+          return s;
+        },
+      }),
+      legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 18, itemHeight: 10, formatter: shortName },
+      grid: { left: 54, right: 14, top: 34, bottom: 24 },
+      xAxis: Object.assign({ type: 'category', data: yrsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yearLabelStep > 1 ? yearLabelStep : 'auto' }) }),   // M6: 只抽刻度标签，数据全量
+      yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
+      series: results.map((r, i) => {
+        const m = {};
+        (r.res.years || []).forEach(y => { m[y.year] = y.divTotal; });
+        return {
+          name: r.it.name, type: 'bar', barGap: '10%',
+          data: yrsAll.map(yr => m[yr] != null ? Math.round(m[yr]) : 0),   // M2: 空分红年=0柱（同起点买入，没分=真没分）
+          itemStyle: { color: CMP_COLORS[i % 5], borderRadius: [3, 3, 0, 0] },
+        };
+      }),
+    });
+    window.fitLegendTop(chA, $('#cmpChartAnnual'), 34);
     // B3：股息率逐年折线（报告期归组 ÷ 年末价，替代单值柱状；多标的多线）
     const ch2 = cmpEnsureChart('cmpChartYield');
     const yieldYearsAll = [...new Set(results.flatMap(r => (r.yieldSeries || []).map(p => p.y)))].sort();
@@ -640,7 +682,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     // 表格（B4：股息率两列=近2财年+逐年；B8：表头排序；B10：存续年限；C8：类型标签）
     cmpResults = results;
     renderCmpTable();
-    $('#cmpNote').textContent = '本金 ' + fmt(principal, 0) + ' 元 · ' + (reinvest ? '复投' : '不复投') + ' · ' + (monthly > 0 ? '月供 ' + fmt(monthly, 0) + ' 元/月（每月首交易日追加，首月不追）' : '零月供') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源）' : '') + '｜股息率口径：报告期归组÷年末价（逐年），2026 年数据截至 ' + results[0].res.final.lastDate;
+    $('#cmpNote').textContent = '本金 ' + fmt(principal, 0) + ' 元 · ' + (reinvest ? '复投' : '不复投') + ' · ' + (monthly > 0 ? '月供 ' + fmt(monthly, 0) + ' 元/月（每月首交易日追加，首月不追）' : '零月供') + (results.some(r => /ETF|指数|红利/.test(r.it.name)) ? '｜⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源）' : '') + '｜每年分红=到账年口径（与累计分红一致）；股息率=报告期归组÷年末价（逐年），2026 年数据截至 ' + results[0].res.final.lastDate;
     // URL 记忆（B2/B1：本金进 p、复投进 r；v1.7.3 月供进 m；v1.7.4 严格同期进 s）
     const q = new URLSearchParams(location.search);
     q.set('cmp', cmpState.list.map(x => x.market ? x.code + '.' + x.market.toUpperCase() : x.code).join(','));   // C2: 指数带后缀进 URL

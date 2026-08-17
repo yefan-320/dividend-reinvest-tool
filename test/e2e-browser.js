@@ -73,7 +73,11 @@ function cdpConnect() {
 
 async function evalIn(cdp, expr) {
   const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
-  if (r.result && r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.text || 'eval error');
+  if (r.result && r.result.exceptionDetails) {
+    const ed = r.result.exceptionDetails;
+    const desc = (ed.exception && ed.exception.description) || ed.text || 'unknown';
+    throw new Error('eval: ' + String(desc).slice(0, 300));
+  }
   return r.result && r.result.result ? r.result.result.value : undefined;
 }
 
@@ -217,6 +221,53 @@ async function main() {
   const oldFn = await evalIn(cdp, `['fetchDividends','fetchName'].filter(k => typeof window[k] === 'function').join(',') || '(无)'`);
   if (oldFn !== '(无)') die('R5: 旧全局函数残留: ' + oldFn);
   ok('R5 旧全局函数已删');
+
+  // R6 对比页累计分红曲线末点 = 表格累计分红（v1.8.10 大师 M5 关系断言：
+  // 主人抓“累计分红几年同一个数据”——旧 bug 曲线终点 84,038 vs 表格 201,715；
+  // 断言语义关系而非具体数值，数据更新不脆）
+  const cmpUrl = 'http://localhost:' + PORT + '/?cmp=600036,515080&y=5&p=1000000&r=1&m=0&s=0&v=' + verStr;
+  await cdp.send('Page.navigate', { url: cmpUrl });   // CDP 层导航（页面内 location.href 会销毁执行上下文→Uncaught）
+  let cmpReady = 0, cmpPrev = '', cmpWaited = 0;
+  while (cmpWaited < 90000) {
+    await new Promise(r => setTimeout(r, 2000));
+    cmpWaited += 2000;
+    const t = await evalIn(cdp, `document.getElementById('cmpTbl') ? document.getElementById('cmpTbl').innerText.slice(0, 200) : ''`);
+    if (t && t === cmpPrev) { cmpReady++; if (cmpReady >= 2) break; }
+    else { cmpReady = 0; cmpPrev = t; }
+  }
+  if (cmpReady < 2) die('R6: 对比页渲染超时（90s）');
+  const cmpProbe = await evalIn(cdp, String.raw`(() => {
+    const ch = echarts.getInstanceByDom(document.getElementById('cmpChartDiv'));
+    if (!ch) return { err: 'cmpChartDiv 无实例' };
+    const o = ch.getOption();
+    const out = {};
+    o.series.forEach((s, i) => {
+      const nonNull = s.data.map((v, idx) => v != null ? v : null).filter(v => v != null);
+      out[s.name] = { last: nonNull.length ? nonNull[nonNull.length - 1] : null };
+    });
+    const tbl = document.getElementById('cmpTbl');
+    const rows = tbl ? tbl.querySelectorAll('tr') : [];
+    out.rows = [];
+    for (let i = 1; i < rows.length; i++) {
+      const tds = rows[i].querySelectorAll('td');
+      if (tds.length >= 4) {
+        const name = ((tds[0].innerText.match(/\d+\.\s*([^\n]+)/) || [])[1] || '').replace(/\d{6}.*$/, '').trim();   // 去代码后缀：'招商银行600036 · ' → '招商银行'（与曲线 series.name 对齐）
+        const div = parseInt((tds[3].innerText.match(/[\d,]+/) || ['0'])[0].replace(/,/g, ''), 10);
+        out.rows.push({ name, div });
+      }
+    }
+    return out;
+  })()`);
+  if (!cmpProbe || cmpProbe.err) die('R6: ' + (cmpProbe && cmpProbe.err || '对比页数据读不到'));
+  const bad = [];
+  (cmpProbe.rows || []).forEach(r => {
+    const curveLast = cmpProbe[r.name] ? cmpProbe[r.name].last : null;
+    if (curveLast == null || Math.abs(curveLast - r.div) > Math.max(100, r.div * 0.01)) {
+      bad.push(r.name + ' 曲线末点 ' + curveLast + ' vs 表格 ' + r.div);
+    }
+  });
+  if (bad.length) die('R6: 累计分红曲线末点 ≠ 表格累计分红: ' + bad.join('；'));
+  ok('R6 对比页累计分红曲线末点 = 表格累计分红（' + (cmpProbe.rows || []).map(r => r.name + ' ' + r.div).join(' / ') + '）');
 
   console.log('\n===== e2e 全部通过 =====');
   cdp.close();
