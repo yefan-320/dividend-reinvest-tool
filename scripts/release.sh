@@ -72,6 +72,10 @@ if [ -f test/e2e-v195.js ]; then
   echo "==> e2e-v195 口径标注实测（6 断言）…"
   node test/e2e-v195.js || { echo "!! e2e-v195 失败，中止发布"; exit 1; }
 fi
+if [ -f test/e2e-v196.js ]; then
+  echo "==> e2e-v196 用户视角回归（搜索框/真实输入/扫描mock/结论行/回本进度 10 断言）…"
+  node test/e2e-v196.js || { echo "!! e2e-v196 失败，中止发布"; exit 1; }
+fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 # v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）

@@ -16,6 +16,10 @@
 | 2026-08-17 | 首次打开页面图表半渲染，状态卡住（BUG-3） | 内联脚本在 views.js 前同步跑 demo→fitLegendTop 未定义；catch 无限递归 | R10: e2e-full G1 首屏全渲染+无错误（load 延迟+递归封顶） | v1.8.13 |
 | 2026-08-17 | 预设 ETF 512890/588000/159915 分红静默 0（BUG-4） | 东财 FHGG 数据源无这 3 只分红记录；JSON 仅 6 只 | R11: e2e-full C4 行显示"数据暂缺（未纳入对比）"而非 0 | v1.8.13 |
 | 2026-08-17 | 对比表"标的"列默认显示排序箭头 ▲（BUG-5） | cmpSort.key 初始 null 使 arrow(null) 恒真 | R12: e2e-full C5 旁验（默认无箭头） | v1.8.13 |
+| 2026-08-18 | 搜索框无法输入（主人截图：金色按钮盖住搜索行） | .btn{width:100%} 在 flex 容器内撑满→input 被挤到 4px（v1.9.4 引入） | R13: 布局几何断言（input 宽≥100 且与按钮不重叠） | v1.9.6 |
+| 2026-08-18 | 扫描器恒"筛选出 0 只"（确定性 bug） | fetchDividendsAll 只拉 365 天→连分≥3年永远不满足（365 天最多含 2 个自然年） | R14: 扫描逻辑层 mock 断言筛选输出>0 + UI 层数量>0 或警告 | v1.9.6 |
+| 2026-08-18 | 发现器"Failed to fetch"英文报错 | clist 限流未翻译无重试 | R15: 限流 mock 断言中文提示+重试按钮 | v1.9.6 |
+| 2026-08-18 | 页面白屏 8+ 秒（CDN 同步阻塞） | echarts CDN 同步 script 阻塞 HTML 解析（staticfile 实测 8s） | R16: 首屏 5s 内 APP_VERSION 就绪 | v1.9.6 |
 
 ## e2e 断言索引（test/e2e-browser.js）
 - **R1** 版本号：页面 APP_VERSION = git describe（机械防漏）
