@@ -116,7 +116,7 @@ async function main() {
   check('tooltip 无"平滑"字样', !tip.includes('平滑'), tip.replace(/<[^>]+>/g, ''));
 
   // 2. 带状图 note 口径标注
-  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('滚动 366 天 TTM')`);
+  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('逐年滚动')`);
   const noteTxt = await evalJS(`document.getElementById('diagYieldNote').textContent`);
   check('带状图 note 含口径标注（逐年滚动+TTM）', note && noteTxt.includes('逐年滚动') && noteTxt.includes('TTM'), noteTxt.slice(0, 80));
   check('带状图 note 含逐年滚动标注', noteTxt.includes('逐年滚动'), noteTxt.slice(0, 80));
