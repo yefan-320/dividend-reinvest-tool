@@ -70,6 +70,10 @@ async function main() {
   await cdp('Runtime.enable', {});
   await cdp('Page.navigate', { url: BASE });
   await sleep(8000);
+  // v1.9.5：连续跑多个 Chrome 实例时启动可能慢，改为等 DL 就绪（防 window.DL undefined）
+  if (!(await waitFor(`typeof window.DL !== 'undefined' && typeof window.DL.fetchName === 'function'`, 30000))) {
+    console.error('页面 DL 未就绪'); process.exit(2);
+  }
 
   // 清空自选 + stub 网络（确定性测试）
   await evalJS(`localStorage.removeItem('divtool_watchlist_v1'); 1`);
