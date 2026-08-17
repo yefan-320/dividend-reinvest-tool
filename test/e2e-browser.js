@@ -91,11 +91,15 @@ async function main() {
   let cdp;
   try { cdp = await cdpConnect(); } catch (e) { die('CDP 连接失败: ' + e.message); }
 
-  // 等页面加载完成
-  await new Promise(r => setTimeout(r, 5000));
+  // 等页面加载完成（v1.8.11：冷启动 Chrome 5 秒不够——R1 前轮询等待 APP_VERSION，最多 30s）
+  let verStr = null;
+  for (let i = 0; i < 15; i++) {
+    verStr = await evalIn(cdp, 'typeof APP_VERSION !== "undefined" ? APP_VERSION : null').catch(() => null);
+    if (verStr) break;
+    await new Promise(r => setTimeout(r, 2000));
+  }
 
   // R1 版本号（大师 P0-③：不一致=失败；P1-1：裸跑 fallback=最近提交消息提取，不依赖 tag）
-  const verStr = await evalIn(cdp, 'typeof APP_VERSION !== "undefined" ? APP_VERSION : null');
   if (!verStr) die('R1: 页面无 APP_VERSION（脚本未加载？）');
   let expectVer = process.env.EXPECT_VER;
   if (!expectVer) {
@@ -268,6 +272,43 @@ async function main() {
   });
   if (bad.length) die('R6: 累计分红曲线末点 ≠ 表格累计分红: ' + bad.join('；'));
   ok('R6 对比页累计分红曲线末点 = 表格累计分红（' + (cmpProbe.rows || []).map(r => r.name + ' ' + r.div).join(' / ') + '）');
+
+  // R7 URL 往返（v1.8.11 大师 M6：分享链接回归重灾区）
+  // ① 旧 y=20 链接：周期=20年、无按钮点亮、日期输入回填计算出的起点
+  const oldUrl = 'http://localhost:' + PORT + '/?cmp=600036&y=20&m=0&p=1000000&r=1&s=0&v=' + verStr;
+  await cdp.send('Page.navigate', { url: oldUrl });
+  let r7a = null;
+  for (let i = 0; i < 30; i++) {   // v1.8.11：y=20 链接自动拉 20 年数据，轮询等日期回填（最多 60s）
+    await new Promise(r => setTimeout(r, 2000));
+    r7a = await evalIn(cdp, `(() => {
+      const di = document.getElementById('cmpStartDate');
+      return { onBtns: [...document.querySelectorAll('#cmpYears button.on')].length, startDate: di ? di.value : null };
+    })()`);
+    if (r7a && r7a.startDate) break;
+  }
+  if (!r7a || !r7a.startDate) die('R7-①: 老链接 y=20 日期未回填（' + (r7a && r7a.startDate || 'null') + '）');
+  ok('R7-① 老链接 y=20：按钮全不亮 + 日期回填 ' + r7a.startDate + '（约20年前）');
+  // ② 新 d 链接：日期回填 + 图起点 = d
+  const dUrl = 'http://localhost:' + PORT + '/?cmp=600036&d=2020-01-02&m=0&p=1000000&r=1&s=0&v=' + verStr;
+  await cdp.send('Page.navigate', { url: dUrl });
+  let r7bWaited = 0, r7bReady = 0, r7bPrev = '';
+  while (r7bWaited < 60000) {
+    await new Promise(r => setTimeout(r, 2000));
+    r7bWaited += 2000;
+    const t = await evalIn(cdp, `document.getElementById('cmpTbl') ? document.getElementById('cmpTbl').innerText.slice(0, 60) : ''`);
+    if (t && t === r7bPrev) { r7bReady++; if (r7bReady >= 2) break; }
+    else { r7bReady = 0; r7bPrev = t; }
+  }
+  if (r7bReady < 2) die('R7-②: d 链接对比渲染超时');
+  const r7b = await evalIn(cdp, `(() => {
+    const di = document.getElementById('cmpStartDate');
+    const ch = echarts.getInstanceByDom(document.getElementById('cmpChartAsset'));
+    const x0 = ch ? ch.getOption().xAxis[0].data[0] : null;
+    return { startDate: di ? di.value : null, x0 };
+  })()`);
+  if (r7b.startDate !== '2020-01-02') die('R7-②: d 链接日期未回填（' + r7b.startDate + '）');
+  if (!r7b.x0 || r7b.x0 < '2020-01-02' || r7b.x0 > '2020-01-15') die('R7-②: 图起点异常（x0=' + r7b.x0 + '，应≈2020-01-02 首个交易日）');
+  ok('R7-② 新 d 链接：日期回填 ' + r7b.startDate + '，图起点 ' + r7b.x0);
 
   console.log('\n===== e2e 全部通过 =====');
   cdp.close();

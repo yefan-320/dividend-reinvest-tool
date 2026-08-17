@@ -27,7 +27,7 @@ s2 = re.sub(r"APP_VERSION \+ ' · [0-9-]+ ·", f"APP_VERSION + ' · {today} ·",
 # cache-busting：三个本地 JS 加 ?v=版本（强制浏览器拉新，否则旧 JS 缓存让修复不生效）
 s2 = re.sub(r"(src=\"(?:demo-data|data-layer|views)\.js)(\?v=[^\"]*)?\"", lambda m: m.group(1) + f"?v={ver}\"", s2)
 if s2 == s:
-    print('!! 版本号未找到匹配（检查 index.html APP_VERSION 格式）'); sys.exit(1)
+    print(f'==> 版本号已是 {ver}（无变更，继续）')   # v1.8.11 幂等修复：重复发布不再误报退出
 open(p, 'w').write(s2)
 print(f'==> index.html 版本号+JS版本参数已更新: {ver} · {today}')
 PY
