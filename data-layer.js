@@ -237,8 +237,13 @@ async function fetchDividendsAll(fromDate) {
 async function fetchDividendsOne(code) {
   // 单股全历史分红（回测用，保留全部历史）
   // 2026-08-17 C1：ETF/基金代码（5xx 沪ETF/LOF、159/16x 深ETF/LOF）直接走基金公告源（股票接口无 ETF 数据）
+  // v1.8.13 BUG-4：数据暂缺（获取失败）返回带 _missing 标记的空数组——调用方区分"暂缺≠0"
   if (/^(5|159|16)/.test(code)) {
-    try { return await fetchEtfDividends(code); } catch (e) { return []; }
+    try {
+      const r = await fetchEtfDividends(code);
+      if (r == null) { const out = []; out._missing = true; return out; }
+      return r;
+    } catch (e) { const out = []; out._missing = true; return out; }
   }
   const filter = `(SECURITY_CODE="${code}")`;
   const d = await emQueue.push(() => jsonp(
@@ -306,6 +311,7 @@ async function fetchEtfAnnouncement(artCode) {
 }
 async function fetchEtfDividends(code) {
   const cacheKey = 'dv:' + code;
+  let jsonHad = false;   // v1.8.13 BUG-4：JSON 有该码（即使 0 条）= 权威"确实无分红"；JSON 无码且实时抓不到 = 数据暂缺
   // 2026-08-17：静态 JSON 优先（GitHub Actions/本机 cron 每日更新，同源零 CORS，最权威）——排在缓存前，避免旧缓存挡住新数据
   try {
     const stat = await fetchJson('data/etf-dividends.json');
@@ -315,6 +321,7 @@ async function fetchEtfDividends(code) {
       try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }
       return out;
     }
+    if (list) jsonHad = true;   // JSON 有码但空记录：视为权威无分红（不再走实时）
   } catch (e) { /* 静态文件缺失（首次部署前）→ 走缓存/实时 */ }
   try {
     const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
@@ -338,8 +345,9 @@ async function fetchEtfDividends(code) {
     parsed.forEach(r => { if (r) out.push(r); });
   }
   out.sort((x, y) => x.ex < y.ex ? 1 : -1);   // 与股票通道一致：除息日倒序
-  try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { }
-  return out;
+  if (out.length) { try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { } return out; }
+  // v1.8.13 BUG-4：实时抓取结束仍 0 条 → JSON 权威=空数组（确实无分红）；JSON 无此码=数据暂缺（null）
+  return jsonHad ? [] : null;
 }
 
 /* ---------- K线（腾讯主源分段 / 新浪备源；缓存走 IndexedDB） ---------- */

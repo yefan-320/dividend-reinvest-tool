@@ -184,6 +184,10 @@ body{padding-bottom:64px}
       <h2>🗓 分红节奏</h2>
       <div id="diagRhythm"></div>
     </div>
+    <div class="card">
+      <h2>⏱ 多起点敏感度（现在买划不划算？）</h2>
+      <div id="diagMultiStart"></div>
+    </div>
     <button class="btn" id="btnDiagBacktest">📊 回测验证这只股票</button>
   </div>
 </section>
@@ -276,6 +280,14 @@ body{padding-bottom:64px}
     </div>
   </div>
   <div class="switch"><input type="checkbox" id="reinvest" checked><label for="reinvest">红利再投资（分红按除息日收盘价买入，碎股模型）</label></div>
+  <div class="switch" style="flex-wrap:wrap"><span style="font-size:12px;color:var(--sub)">红利税档位</span>
+    <select id="taxRate" style="background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 8px;font-size:12px">
+      <option value="0">免（持有超1年，A股默认）</option>
+      <option value="0.1">10%（持有1月~1年）</option>
+      <option value="0.2">20%（持有不足1月）</option>
+    </select>
+    <span style="font-size:11px;color:var(--sub)">分红现金按税率扣税后再复投/累计（口径与对比页免税基准区分）</span>
+  </div>
   <div class="btnrow">
     <button class="btn" id="btnRun">▶ 回测（联网拉最新数据）</button>
     <button class="btn ghost" id="btnDemo">用招行演示数据</button>
@@ -337,11 +349,11 @@ body{padding-bottom:64px}
 </div>
 </section></div>
 
-<script src="demo-data.js?v=v1.8.12"></script>
-<script src="data-layer.js?v=v1.8.12"></script>
+<script src="demo-data.js?v=v1.8.13"></script>
+<script src="data-layer.js?v=v1.8.13"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.8.12';
+const APP_VERSION = 'v1.8.13';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -383,11 +395,14 @@ const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼�
 
 /* K线总入口：腾讯 → 新浪 → 失败返回空（上层自动回退演示数据） */
 
+let _demoRetry = 0;   // v1.8.13 BUG-3：自动回退演示数据的递归重试计数（封顶2次，防栈溢出）
+
 /* ================= 回测核心 =================
    输入: principal 本金, buyDate, reinvest 是否复投, closes {date:close}, dividends [{ex,dps,song,zhuan}]
    输出: {daily:[{date,value,valueNo,invested,shares}], years:[...], divs:[...], final:{...}}
    分红率口径: 当年分红 ÷ (初始本金 + 截至当年首笔分红前累计复投金额) */
-function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
+function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0, taxRate = 0){
+  // v1.8.13 功能C：taxRate 红利税档位（0免/0.1持1月-1年/0.2不足1月）——分红现金按税率扣税
   const dates = Object.keys(closes).sort();
   if(!dates.length) throw new Error('无行情数据');
   // 买入日：>= buyDate 的首个交易日
@@ -425,14 +440,14 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0){
       if(y !== curYear){ finalizeYear(); curYear = y; divYearTotal = 0; divCountYear = 0; divYearDps = 0; rateDenom = principal + reinvested; }
       let cash = 0;
       ev.forEach(x => {
-        cash += shares * x.dps;
+        cash += shares * x.dps * (1 - taxRate);   // v1.8.13 功能C：税后分红现金
         divYearDps += x.dps;                           // 名义每股分红累计（不含送转摊薄，纯现金派息口径）
         const bonus = x.bonus;                          // 送转股（v1.7.0 口径：送转合计，修复旧版翻倍 bug）
         if(bonus > 0) shares += shares * bonus;
       });
       divYearTotal += cash; divCountYear++;
       // v1.7.5: reportYear=报告期年份（一年两派合并用）；无 report 字段时回退到账年
-      divEvents.push({date:d, cash, year:y, reportYear:(ev[0] && ev[0].report || '').slice(0,4) || y, sharesBefore:shares, rateAtDiv: rateDenom>0? cash/rateDenom : 0});
+      divEvents.push({date:d, cash, dps: ev.reduce((s0,x)=>s0+x.dps,0), year:y, reportYear:(ev[0] && ev[0].report || '').slice(0,4) || y, sharesBefore:shares, rateAtDiv: rateDenom>0? cash/rateDenom : 0});
       cashPool += cash;                                  // 分红先入现金池
       // A1: 报告期归组聚合（分母=该报告期首笔到账时的基数，rateAtDiv 反推）
       const _ry = divEvents[divEvents.length-1].reportYear;
@@ -578,6 +593,8 @@ function renderAll(res, name, res2){
   renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2);
 }
 function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
+  // v1.8.13 BUG-3：echarts CDN 未就绪时的降级渲染——记录补图钩子，onload 后自动补全图表
+  window.__pendingFull = () => { try { renderAllFull(res, name, null, showY, showY0, rateNote1, rateNote2); } catch (e) { setStatus('⚠️ 图表渲染失败：' + e.message, true); } };
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const f = res.final;
   const yrs = res.years || [];
@@ -668,7 +685,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       {name:'累计投入', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#3fbf7f'}},
     ]
   });
-  window.fitLegendTop(ch1, $('#chartAsset'), 36);   // v1.8.4 大师 M2/M4：统一全局实现（旧内联 rAF 已删）
+  // v1.8.13 BUG-3 防御：views.js 未就绪时跳过测量不崩（主修=自动运行延迟到 load）
+  if (typeof window.fitLegendTop === 'function') window.fitLegendTop(ch1, $('#chartAsset'), 36);
 
   // 2+3. 分红图/率/表 口径切换（A1/A2：radio 到账年/报告期，默认到账年·主人拍板；动态标题+跨年注释+时点标注）
   const divModeEls = document.querySelectorAll('input[name=divMode]');
@@ -761,23 +779,31 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   $('headerInfo').textContent = name + ' · ' + fmt(res.principal,0) + '元 · ' + res.buyDateReal + '买入' + ($('reinvest').checked ? ' · 复投' : ' · 不复投');
 
   // 5. 明细表（A1: 口径跟随 radio，报告期模式无持股/资产列）
+  // v1.8.13 功能G：每行加"分红明细"details（每笔除息日/金额/每股）；功能B：当年分红同比上一年 -20% 标红预警
   function renderYearTable(srcYears, mode) {
-    const rows = srcYears.map(y => `
+    const evByYear = {};
+    res.divEvents.forEach(e => { const k = mode === 'report' ? (e.reportYear || e.year) : e.year; (evByYear[k] = evByYear[k] || []).push(e); });
+    const rows = srcYears.map((y, i) => {
+      const prev = i > 0 ? srcYears[i-1].divTotal : null;
+      const yoy = (prev > 0 && y.divTotal != null) ? (y.divTotal - prev) / prev : null;
+      const evs = evByYear[y.year] || [];
+      return `
       <tr>
         <td>${y.year}${mode==='report' ? ' (报告期)' : ''}</td>
-        <td>${fmt(y.divTotal,0)}</td>
+        <td>${fmt(y.divTotal,0)}${yoy != null && yoy <= -0.2 ? ` <span style="color:var(--red)" title="较${srcYears[i-1].year}年下降">⚠️${(yoy*100).toFixed(0)}%</span>` : ''}</td>
         <td>${y.dps!=null?fmt(y.dps,3):'—'}</td>
         <td style="color:#d9a441">${fmtPct(y.rate)}</td>
         <td style="color:#3fbf7f">${fmtPct(y.rate0)}</td>
+        <td>${evs.length ? `<details style="font-size:11px"><summary style="cursor:pointer;color:#3fbf7f">${evs.length}笔</summary><div style="margin-top:3px;line-height:1.7">${evs.slice().reverse().map(e => e.date + ' 派' + fmt(e.cash,0) + '元（每股' + fmt(e.dps,3) + '）').join('<br>')}</div></details>` : '—'}</td>
         ${mode==='pay' ? `
         <td>${y.sharesStart!=null?fmt(y.sharesStart,0):'—'}</td>
         <td>${y.sharesEnd!=null?fmt(y.sharesEnd,0):'—'}</td>
         <td>${y.valueEnd!=null?fmt(y.valueEnd,0):'—'}</td>
         <td>${y.cashEnd!=null?fmt(y.cashEnd,0):'—'}</td>
         <td>${y.investedEnd!=null?fmt(y.investedEnd,0):'—'}</td>` : ''}
-      </tr>`).join('');
+      </tr>`;}).join('');
     $('tbl').innerHTML = `
-      <thead><tr><th>年份</th><th>当年分红(元)</th><th>每股分红(元)</th><th>分红率(相对投入)</th><th>分红率(相对本金)</th>${mode==='pay' ? '<th>年初持股</th><th>年末持股</th><th>年末总资产(元)</th><th>现金池(元)</th><th>累计投入(元)</th>' : ''}</tr></thead>
+      <thead><tr><th>年份</th><th>当年分红(元)</th><th>每股分红(元)</th><th>分红率(相对投入)</th><th>分红率(相对本金)</th><th>分红明细</th>${mode==='pay' ? '<th>年初持股</th><th>年末持股</th><th>年末总资产(元)</th><th>现金池(元)</th><th>累计投入(元)</th>' : ''}</tr></thead>
       <tbody>${rows}</tbody>`;
   }
   renderYearTable(yrs, 'pay');
@@ -786,7 +812,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
 
 /* ================= 主流程 ================= */
 async function run(sim, note){
-  const code = $('code').value.trim();
+  let code = $('code').value.trim();   // v1.8.13 BUG-2：名称解析需重赋值（原 const 抛 Assignment to constant variable）
   const principal = parseFloat($('principal').value);
   const buyDate = $('buyDate').value;
   const reinvest = $('reinvest').checked;
@@ -814,14 +840,16 @@ async function run(sim, note){
 
   const btn = $('btnRun');
   btn.disabled = true; btn.textContent = '⏳ 回测中…';
+  const taxRate = parseFloat(($('taxRate') && $('taxRate').value) || 0) || 0;   // v1.8.13 功能C：红利税档位
   try{
     if(sim==='demo'){
       setStatus('使用内置招行演示数据…');
       const d = window.DEMO_DATA;
       const closes = {}; d.closes.forEach(x=>closes[x[0]]=x[1]);
-      const res = simulate(principal, buyDate, reinvest, closes, d.dividends, monthly);
-      const res2 = simulate(principal, buyDate, false, closes, d.dividends, monthly);   // 不复投对比
+      const res = simulate(principal, buyDate, reinvest, closes, d.dividends, monthly, taxRate);
+      const res2 = simulate(principal, buyDate, false, closes, d.dividends, monthly, taxRate);   // 不复投对比
       renderAll(res, d.name, res2);
+      _demoRetry = 0;
       setStatus((note||'✅ ') + '演示数据（截至 '+res.final.lastDate+'，收盘 '+fmt(res.final.lastClose,2)+' 元）');
       return;
     }
@@ -837,19 +865,34 @@ async function run(sim, note){
       const closes = await DL.getKline(code, buyDate, DL.todayStr());   // v1.7.0：走缓存层（IndexedDB + qfq + 新浪备源）
     const cnt = Object.keys(closes).length;
     if(!cnt){
-      setStatus('⚠️ 实时行情获取失败（腾讯/新浪接口均不可用），已自动回退招行演示数据，可稍后重试', true);
-      return run('demo', '⚠️ 实时行情获取失败，已回退：');
+      if (_demoRetry < 2) {
+        _demoRetry++;
+        setStatus('⚠️ 实时行情获取失败（腾讯/新浪接口均不可用），已自动回退招行演示数据，可稍后重试', true);
+        return run('demo', '⚠️ 实时行情获取失败，已回退：');
+      }
+      _demoRetry = 0;
+      return setStatus('⚠️ 实时行情获取失败（已重试 2 次），请检查网络后重试', true);
     }
     if(divErr && !divs.length){
       setStatus('⚠️ 分红数据获取失败，本次仅展示股价收益（分红图表为空）', true);
     }
-    const res = simulate(principal, buyDate, reinvest, closes, divs, monthly);
-    const res2 = simulate(principal, buyDate, false, closes, divs, monthly);
+    if(divs && divs._missing){   // v1.8.13 BUG-4：数据暂缺≠0，明确提示不静默
+      setStatus('⚠️ 分红数据暂缺（数据源获取失败），本次仅展示股价收益（分红图表为空）', true);
+    }
+    const res = simulate(principal, buyDate, reinvest, closes, divs, monthly, taxRate);
+    const res2 = simulate(principal, buyDate, false, closes, divs, monthly, taxRate);
     renderAll(res, name, res2);
+    _demoRetry = 0;
     setStatus('✅ 完成：'+name+' ｜ K线 '+cnt+' 条 ｜ 分红 '+divs.filter(x=>x.ex>=buyDate).length+' 次 ｜ 数据截至 '+res.final.lastDate);
   }catch(e){
-    setStatus('⚠️ 回测出错：'+e.message+'，已自动回退招行演示数据', true);
-    return run('demo', '⚠️ 回测出错已回退：');
+    // v1.8.13 BUG-3：递归重试封顶（原 return run('demo') 无限递归，首屏崩溃时会栈溢出）
+    if (_demoRetry < 2) {
+      _demoRetry++;
+      setStatus('⚠️ 回测出错：'+e.message+'，已自动回退招行演示数据', true);
+      return run('demo', '⚠️ 回测出错已回退：');
+    }
+    _demoRetry = 0;
+    setStatus('⚠️ 回测出错：'+e.message+'（已重试 2 次仍失败，请刷新后重试）', true);
   }
   }finally{
     btn.disabled = false; btn.textContent = '▶ 回测（联网拉最新数据）';
@@ -981,8 +1024,12 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   const ver = $('appVer');
   if(ver) ver.textContent = APP_VERSION + ' · 2026-08-17 · 若页面异常请强制刷新（下拉或清除缓存）';
 
-  // URL 带 code → 自动联网回测该股票；否则离线演示
-  if(params.get('code')) run('live'); else run('demo');
+  // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
+  // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
+  window.addEventListener('load', () => {
+    if (params.get('code')) run('live');
+    else if (![...params.keys()].length) run('demo');   // 完全无参数=纯首屏才演示；分享链接（d/y/cmp/p/...）不跑，防覆盖链接警告/对比状态
+  });
 })();
 </script>
 <nav class="tabbar">
@@ -991,6 +1038,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="compare">📈 对比</button>
   <button data-tab="backtest">📊 回测</button>
 </nav>
-<script src="views.js?v=v1.8.12"></script>
+<script src="views.js?v=v1.8.13"></script>
 </body>
 </html>

@@ -301,11 +301,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       renderYieldBand(divs, kline, diagYears);
       // 分红节奏
       renderRhythm(divs);
-      $('#btnDiagBacktest').onclick = () => {
-        const input = $('#code'); if (input) input.value = code;
-        const bd = $('#buyDate'); if (bd) bd.value = new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10);
-        $('#btnRun').click();
-      };
+      // v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比）
+      renderMultiStart(code, divs);
+      // v1.8.13 BUG-1：btnDiagBacktest 绑定统一在 DOMContentLoaded（此处整体覆盖 onclick 会丢失 switchTab，曾致"点了不跳转"）
     } catch (e) {
       $('#diagStats').innerHTML = `<div class="hint err">诊断失败：${e.message}</div>`;
     }
@@ -341,7 +339,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       ],
     });
     const note = $('#diagYieldNote');
-    if (note) note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · ${years||5}年区间 25%~75% 分位：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%（口径：逐年滚动——每年用当年到账分红÷当日价；顶部"当前股息率"为近2财年口径）`;
+    if (note) {
+      // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
+      const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 处于近 ${years||5} 年历史 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（区间 25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%；口径：逐年滚动——每年用当年到账分红÷当日价；顶部"当前股息率"为近2财年口径）`;
+    }
   }
 
   /* 分红节奏：每年几月派息 */
@@ -357,15 +359,39 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }).join('') : '<div class="hint">暂无分红记录</div>';
   }
 
+  /* v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比，回答"现在买划不划算"） */
+  async function renderMultiStart(code, divs) {
+    const el = $('#diagMultiStart');
+    if (!el) return;
+    el.innerHTML = '<div class="hint">加载中…</div>';
+    try {
+      const end = DL.todayStr();
+      const start10 = new Date(Date.now() - 10 * 366 * 86400000).toISOString().slice(0, 10);
+      const kline = await DL.getKline(code, start10, end);
+      const dates = Object.keys(kline).sort();
+      if (!dates.length || typeof window.simulate !== 'function') { el.innerHTML = '<div class="hint">数据不足</div>'; return; }
+      const rows = [1, 3, 5, 10].map(y => {
+        const buyDate = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+        const res = window.simulate(1000000, buyDate, true, kline, divs, 0, 0);
+        return { y, res };
+      });
+      el.innerHTML = '<div class="scroll"><table class="tbl"><thead><tr><th>买入起点</th><th>买入价</th><th>期末总资产</th><th>累计分红</th><th>年化(XIRR)</th><th>总收益率</th></tr></thead><tbody>' +
+        rows.map(r => { const f = r.res.final; return `<tr><td>${r.y}年前（${r.res.buyDateReal}）</td><td>${fmt(r.res.buyPrice, 2)}</td><td>${fmt(f.finalValue, 0)}</td><td>${fmt(f.totalDiv, 0)}</td><td class="${f.xirr != null && f.xirr >= 0 ? 'green' : 'red'}">${fmtPct(f.xirr)}</td><td class="${f.totalReturn >= 0 ? 'green' : 'red'}">${fmtPct(f.totalReturn)}</td></tr>`; }).join('') +
+        '</tbody></table><div class="hint">口径：100万本金 · 红利再投资 · 免红利税 · XIRR 含分红再投——"现在买划不划算"参考（起点不同勿直接横比）</div></div>';
+    } catch (e) { el.innerHTML = `<div class="hint err">敏感度分析失败：${e.message}</div>`; }
+  }
+
   /* ---------- 对比页占位（第二批） ---------- */
   /* ================= 对比页（v1.7.2 大师 P1-26/27/28 落地） ================= */
   const cmpState = { list: [], years: 5, startDate: null };   // list: [{code,name}]；startDate: 精确起始日期（null=用 years 快捷）
   let cmpCharts = {};
   let cmpResults = [];   // B8: 表格排序数据源（cmpRun 填充）
-  let cmpSort = { key: null, dir: 1 };
+  let cmpSort = { key: '', dir: 1 };   // v1.8.13 BUG-5：初始空串（原 null 使 arrow(null) 恒真，标的列一直显示 ▲）
 
   // B8: 表格渲染（可排序）
   const yieldSeriesStr = r => (r.yieldSeries || []).filter(p => p.v != null).slice(-4).map(p => p.y + ' ' + p.v.toFixed(1) + '%').join(' · ') || '—';
+  // v1.8.13 功能B：逐年分红明细行（同比上一年 -20% 标红预警）
+  const yearsLine = r => { const ys = (r.res.years || []).slice().sort((a, b) => a.year < b.year ? -1 : 1); return ys.slice().reverse().map((y, i) => { const prev = (i + 1 < ys.length) ? ys[ys.length - 2 - i] : null; const yoy = (prev && prev.divTotal > 0 && y.divTotal != null) ? (y.divTotal - prev.divTotal) / prev.divTotal : null; return y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (yoy != null && yoy <= -0.2 ? ' <span style="color:var(--red)">⚠️' + (yoy * 100).toFixed(0) + '%</span>' : '') + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : ''); }).join('<br>') || '—'; };
   function renderCmpTable() {
     const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.final.finalInvested, div: r.res.final.totalDiv, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
     const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
@@ -375,22 +401,22 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (vb == null) return -1;
       return (va - vb) * cmpSort.dir;
     }) : cmpResults;
-    const arrow = k => cmpSort.key === k ? (cmpSort.dir > 0 ? ' ▲' : ' ▼') : '';
+    const arrow = k => (k && cmpSort.key === k) ? (cmpSort.dir > 0 ? ' ▲' : ' ▼') : '';   // v1.8.13 BUG-5：k 非空才显示箭头
     const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['最新报告期分红', 'lastRepDiv'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
     $('#cmpTbl').innerHTML = `<table class="tbl cmp-tbl"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
-      list.map((r, i) => `<tr>
-        <td>${i+1}. ${r.it.name}<br><span style="color:${r.actualStart ? 'var(--red)' : 'var(--sub)'};font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
+      list.map((r, i) => `<tr style="${r.divMissing ? 'opacity:.55' : ''}">
+        <td>${i+1}. ${r.it.name}${r.divMissing ? ' <span class="risk-badge">数据暂缺</span>' : ''}<br><span style="color:${r.actualStart ? 'var(--red)' : 'var(--sub)'};font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
           <details style="margin-top:4px;font-size:11px;color:var(--sub)"><summary style="cursor:pointer;color:#3fbf7f">逐年分红明细 ▾</summary>
-            <div style="margin-top:3px;line-height:1.7">${(r.res.years || []).slice().reverse().map(y => y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : '')).join('<br>') || '—'}</div>
+            <div style="margin-top:3px;line-height:1.7">${r.divMissing ? '<span style="color:var(--red)">分红数据暂缺（未纳入对比）</span>' : yearsLine(r)}</div>
           </details></td>
         <td>${fmt(r.res.final.finalValue, 0)} 元</td>
         <td>${fmt(r.res.final.finalInvested, 0)} 元</td>   <!-- v1.8.8: 口径与回测页一致（本金+追加+复投），曾只算本金致两边数字对不上 -->
-        <td>${fmt(r.res.final.totalDiv, 0)} 元<br><span style="color:var(--sub);font-size:11px">年均 ${fmt(r.res.final.totalDiv / Math.max(1, (r.res.years || []).length), 0)} 元</span></td>
-        <td>${r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' : '—'}</td>
+        <td>${r.divMissing ? '<span style="color:var(--red)">数据暂缺</span><br><span style="color:var(--sub);font-size:11px">未纳入对比</span>' : fmt(r.res.final.totalDiv, 0) + ' 元<br><span style="color:var(--sub);font-size:11px">年均 ' + fmt(r.res.final.totalDiv / Math.max(1, (r.res.years || []).length), 0) + ' 元</span>'}</td>
+        <td>${r.divMissing ? '—' : (r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' : '—')}</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) : '—'}</td>
         <td class="red">${fmtPct(-r.maxDD)}</td>
-        <td>${r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—'}</td>
-        <td style="font-size:11px;color:var(--sub)">${yieldSeriesStr(r)}</td>
+        <td>${r.divMissing ? '—' : (r.yield12 != null ? r.yield12.toFixed(2) + '%' : '—')}</td>
+        <td style="font-size:11px;color:var(--sub)">${r.divMissing ? '—' : yieldSeriesStr(r)}</td>
       </tr>`).join('') + '</table>';
     $('#cmpTbl').querySelectorAll('th[data-sort]').forEach(th => {
       const k = th.dataset.sort;
@@ -518,6 +544,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }
       const actualStart = dates[0] > start ? dates[0] : start;   // 实际起算日（上市日晚于所选周期起点）
       const divs = await DL.fetchDividendsOne(it.code);
+      const divMissing = !!(divs && divs._missing);   // v1.8.13 BUG-4：数据暂缺（≠分红为0）
       const res = simulate(principal, actualStart, reinvest, kline, divs, monthly);   // B2/B1: 本金/复投可调
       // 最大回撤 + 股息率（v1.7.4 P7：改用按报告期归组的年化股息率，替代365天窗口）
       let maxDD = 0, peak = -Infinity;
@@ -554,7 +581,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const lastRepDiv = repCashYrs.length ? { year: repCashYrs[repCashYrs.length-1], cash: annualCash[repCashYrs[repCashYrs.length-1]] } : null;
       const divByDate = {};
       divs.forEach(d => { if (d.ex) (divByDate[d.ex] = divByDate[d.ex] || []).push(d); });
-      return { it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate, lastRepDiv };
+      return { it, res, maxDD, yield12: dy ? dy.yieldPct : null, yieldYears: dy ? dy.years : null, actualStart: dates[0] > start ? dates[0] : null, liveYears, yieldSeries, divByDate, lastRepDiv, divMissing };
     })());
     const settled = await Promise.all(tasks);
     settled.forEach(r => { if (r) results.push(r); });
@@ -563,6 +590,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.style.display = 'block';   // v1.8.4c：先显示容器再绘三图+fitLegendTop（曾致 clientWidth=0 守卫拦截测量）
     if (errors.length || skipped.length) {
       const note = $('#cmpNote'); if (note) note.textContent = '⚠️ ' + [...skipped, ...errors].join('；');
+    }
+    const missingOnes = results.filter(r => r.divMissing);
+    if (missingOnes.length) {   // v1.8.13 BUG-4：数据暂缺≠0，明示未纳入分红对比
+      const note = $('#cmpNote'); if (note) note.textContent = (note.textContent ? note.textContent + '；' : '') + '⚠️ ' + missingOnes.map(r => r.it.name + '(' + r.it.code + ')').join('、') + ' 分红数据暂缺（未纳入分红对比）';
     }
     // P3 + v1.8.11 大师 M2：不足周期标的存在时，图区顶部显式警告（旧版仅 status 小字，日期输入模式下起点非标变常态）
     const shortOnes = results.filter(r => r.actualStart);
@@ -599,7 +630,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ scale: true, axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
-      series: results.map((r, i) => {
+      series: results.filter(r => !r.divMissing).map((r, i) =>   {   // v1.8.13 BUG-4: 数据暂缺标的曲线不画（表格仍灰显展示）
         const vmap = {};
         r.res.daily.forEach(x => { vmap[x.date] = x.value; });   // 各标的按日期对齐（缺=null 断点）
         return {
@@ -619,7 +650,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
       yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
-      series: results.map((r, i) => {
+      series: results.filter(r => !r.divMissing).map((r, i) =>   {   // v1.8.13 BUG-4: 数据暂缺标的曲线不画（表格仍灰显展示）
         // 按日期累计分红（v1.8.10 修复：主轴 allDates 是抽样轴（5年≈1215天 step=2 跳日），
         // 旧版依赖 evMap[d] 恰好命中 → 除息日在被抽样跳过的日期时该笔分红永远进不了曲线，
         // 实测曲线终点 84,038 vs 表格 201,715。改为指针式：累计所有除息日 <= 当前轴日期的分红）
@@ -664,7 +695,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         grid: { left: 54, right: 14, top: 34, bottom: 24 },
         xAxis: Object.assign({ type: 'category', data: yrsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yearLabelStep > 1 ? yearLabelStep : 'auto' }) }),   // M6: 只抽刻度标签，数据全量
         yAxis: axY({ axisLabel: { formatter: v => v >= 1e4 ? (v / 1e4).toFixed(0) + '万' : v } }),
-        series: results.map((r, i) => {
+        series: results.filter(r => !r.divMissing).map((r, i) =>   {   // v1.8.13 BUG-4: 数据暂缺标的曲线不画（表格仍灰显展示）
           const m = {};
           srcYears(r).forEach(y => { m[y.year] = y.divTotal; });
           return {
@@ -688,7 +719,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       grid: { left: 54, right: 14, top: 34, bottom: 24 },
       xAxis: Object.assign({ type: 'category', data: yieldYearsAll }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, { interval: yieldYearsAll.length > 10 ? Math.ceil(yieldYearsAll.length / 8) : 'auto' }) }),   // v1.8.4 大师 M5：25 年份(2002-2026)窄屏必重叠，显式抽稀兜底
       yAxis: axY({ axisLabel: { formatter: v => v + '%' } }),
-      series: results.map((r, i) => ({
+      series: results.filter(r => !r.divMissing).map((r, i) =>   ({   // v1.8.13 BUG-4: 数据暂缺标的曲线不画（表格仍灰显展示）
         name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5,
         data: yieldYearsAll.map(yy => { const p = (r.yieldSeries || []).find(p => p.y === yy); return p ? (p.v != null ? +p.v.toFixed(2) : null) : null; }),
         lineStyle: { width: 2, color: CMP_COLORS[i % 5], type: 'solid' },
@@ -880,7 +911,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const btnScan = $('#btnScan');
     if (btnScan) btnScan.onclick = runScanner;
     const btnDiagBacktest = $('#btnDiagBacktest');
-    if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; switchTab('backtest'); $('#btnRun').click(); } };
+    if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; const bd = $('#buyDate'); if (bd) bd.value = new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10); switchTab('backtest'); $('#btnRun').click(); } };
     switchTab('home');
   });
 })();
+// v1.8.13 BUG-3：views.js 就绪标志（index.html 自动运行等此标志，不再等 window load——load 依赖 echarts CDN 速度）
+window.__viewsReady = true;
+(window.__viewsReadyCallbacks || []).forEach(function (f) { try { f(); } catch (e) { } });
