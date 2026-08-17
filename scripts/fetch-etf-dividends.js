@@ -75,6 +75,14 @@ async function main() {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(out, null, 1));
   console.log('✅ 写入', file, '| 覆盖', Object.keys(out.data).length, '只');
+  // v1.8.13 BUG-4 硬闸门：预设 ETF 码必须全覆盖（缺码=数据源缺失，明示不静默）
+  const PRESET_ETF = ['512890', '515080', '510300', '510500', '588000', '159915'];
+  const missing = PRESET_ETF.filter(c => !(out.data[c] && out.data[c].length));
+  if (missing.length) {
+    console.log('⚠️ 预设 ETF 缺码（东财 FHGG 数据源无分红记录，前端将显示"数据暂缺"而非 0）: ' + missing.join(', '));
+  } else {
+    console.log('✅ 预设 6 只 ETF 全覆盖');
+  }
 }
 
 main().catch(e => { console.error('FATAL:', e.message); process.exit(1); });

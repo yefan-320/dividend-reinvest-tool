@@ -32,15 +32,31 @@ open(p, 'w').write(s2)
 print(f'==> index.html 版本号+JS版本参数已更新: {ver} · {today}')
 PY
 
-# 3. 语法检查
+# 3. 语法检查（v1.8.13：加 index.html 内联 JS 提取检查——HTML 里写错的 JS 语法曾多次漏网）
 node --check data-layer.js
 node --check views.js
-echo "==> 语法 OK"
+python3 - <<'PY2'
+import re, subprocess, sys
+s = open('index.html', encoding='utf-8').read()
+scripts = re.findall(r'<script>(.*?)</script>', s, re.S)
+for i, sc in enumerate(scripts):
+    open('/tmp/inline-%d.js' % i, 'w', encoding='utf-8').write(sc)
+    r = subprocess.run(['node', '--check', '/tmp/inline-%d.js' % i])
+    if r.returncode != 0:
+        print('!! index.html 内联 JS 语法错误（块 %d）' % i)
+        sys.exit(1)
+print('==> 语法 OK（data-layer/views/index.html 内联）')
+PY2
 
 # 4. e2e 浏览器实测（大师 P0-3：发布前必过；失败即中止；EXPECT_VER=本次版本号强制比对）
 if command -v node >/dev/null && [ -f test/e2e-browser.js ]; then
-  echo "==> e2e 浏览器实测（期望版本 $VER）…"
+  echo "==> e2e 浏览器实测 R1-R7（期望版本 $VER）…"
   EXPECT_VER="$VER" node test/e2e-browser.js || { echo "!! e2e 失败，中止发布"; exit 1; }
+fi
+# v1.8.13：全功能实测（27 场景，修复回归全覆盖）——失败即中止发布
+if [ -f test/e2e-full.js ]; then
+  echo "==> e2e 全功能实测（27 场景）…"
+  node test/e2e-full.js || { echo "!! e2e-full 失败，中止发布"; exit 1; }
 fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
