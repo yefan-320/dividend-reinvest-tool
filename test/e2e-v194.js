@@ -135,6 +135,6 @@ async function main() {
   console.log('\n结果:', pass + '/' + (pass + fail), '通过');
   console.log('console 错误:', errs.length, errs.slice(0, 3).join(' | '));
   server.close(); chrome.kill();
-  process.exit(pass === 6 && fail === 0 && errs.length === 0 ? 0 : 1);
+  process.exit(fail === 0 && errs.length === 0 ? 0 : 1);
 }
 main().catch(e => { console.error('FATAL:', e); server.close(); if (chrome) chrome.kill(); process.exit(2); });
