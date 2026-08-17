@@ -473,7 +473,7 @@ async function main() {
     await evalIn(cdp, `document.querySelector('#homeWatchlist .chip').click()`);
     await waitFor(cdp, `document.querySelectorAll('#homeWatchlist .wl-card').length === 1`, 60000, '自选添加');
     const card = await evalIn(cdp, `document.querySelector('#homeWatchlist .wl-card').innerText`);
-    assert(card.includes(${JSON.stringify('')}) || card.length > 5, '自选卡片异常: ' + card.slice(0, 50));
+    assert(card.length > 5, '自选卡片异常: ' + card.slice(0, 50));
     assert(card.includes(chipCode), '自选卡片缺代码 ' + chipCode + ': ' + card.slice(0, 50));
     const fresh = await evalIn(cdp, `document.getElementById('wlFresh').innerText`);
     assert(fresh.includes('行情更新') || fresh.includes('待更新'), '新鲜度徽标异常: ' + fresh);
