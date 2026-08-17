@@ -344,7 +344,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         if (divs && divs.data && divs.data.length) recs = divs.data.slice(0, 4);
       } catch (e) { }
       if (!recs) recs = ETF_PRESETS().filter(x => x.type === 'etf').slice(0, 4).map(x => ({ code: x.code, name: x.name }));
-      el.innerHTML = `<div class="hint">还没有自选。搜索代码添加，或试试：<br>` +
+      el.innerHTML = `<div class="hint">还没有自选。搜索代码 → 点➕ 添加，或试试：<br>` +
         recs.map(x => `<button class="chip" data-code="${x.code}">${x.name}</button>`).join(' ') +
         `</div>`;
       el.querySelectorAll('.chip').forEach(b => b.onclick = () => addToWatchlist(b.dataset.code));
@@ -560,6 +560,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     $('#diagContent').style.display = 'block';
     $('#diagTitle').textContent = '🔬 ' + code + ' 诊断中…';
     $('#diagStats').innerHTML = '<div class="hint">加载中…</div>';
+    updateDiagWlBtn(code, diagSeq);   // v1.9.4 B 入口：诊断页 ⭐ 加自选按钮（异步检测已自选态）
     // 时间 chips 高亮 + 绑定（P1-28：chips + 自定义输入联动，同一状态）
     const yq = $('#diagYieldQuick');
     if (yq) {
@@ -1548,9 +1549,55 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       } catch (e) { }
       await DL.Watchlist.add(code, name, { divYield, price, dps: divYield != null ? divYield * price / 100 : null, at: Date.now() });
       renderHome();
+      return true;
     } catch (e) {
       alert('添加失败：' + e.message);
+      return false;
     }
+  }
+
+  /* v1.9.4 统一加自选入口（A/B/C 三处共用）：去重检测 + 统一 toast 反馈 */
+  let _toastTimer = null;
+  function toast(msg) {
+    let el = document.getElementById('toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toast';
+      el.style.cssText = 'position:fixed;left:50%;bottom:32px;transform:translateX(-50%);background:rgba(20,20,26,.95);color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:80vw;transition:opacity .3s';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.opacity = '1';
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2200);
+  }
+  async function addToWatchlistUI(code, goDiag) {
+    const wl = await DL.Watchlist.list();
+    if (wl.some(x => x.code === code)) { toast('已在自选中：' + code); if (goDiag) openDiagnose(code); return; }
+    const ok = await addToWatchlist(code);
+    if (ok) { toast('已加入自选：' + code); if (goDiag) openDiagnose(code); }
+  }
+  /* B 入口：诊断页标题 ⭐ 加自选 / ✓ 已自选 切换（已自选态可取消，取消需 confirm） */
+  async function updateDiagWlBtn(code, seq) {
+    const b = document.getElementById('diagWlBtn');
+    if (!b) return;
+    const wl = await DL.Watchlist.list();
+    if (seq !== diagSeq) return;   // 竞态：旧请求丢弃
+    const inWl = wl.some(x => x.code === code);
+    b.textContent = inWl ? '✓ 已自选' : '⭐ 加自选';
+    b.style.display = 'inline-block';
+    b.onclick = async () => {
+      if (inWl) {
+        if (!confirm('取消自选：' + code + '？')) return;
+        await DL.Watchlist.remove(code);
+        toast('已取消自选：' + code);
+        renderHome();
+        updateDiagWlBtn(code, seq);
+      } else {
+        await addToWatchlistUI(code, false);
+        updateDiagWlBtn(code, seq);
+      }
+    };
   }
 
   /* ---------- 初始化 ---------- */
@@ -1583,7 +1630,34 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const el = $('#pfbtResult');
     if (!el || _pfbtRunning) return;
     const wl = (homeState.watchlist && homeState.watchlist.length) ? homeState.watchlist : await DL.Watchlist.list();
-    if (!wl.length) { el.innerHTML = '<div class="hint err">自选为空：先在决策台添加自选股</div>'; return; }
+    if (!wl.length) {
+      // v1.9.4 C 入口：空态升级——错误文案 + 内联快捷添加 + 去决策台按钮
+      el.innerHTML = `<div class="hint err" style="margin-bottom:8px">自选为空：搜索代码 → 点➕ 加自选，或使用下方快捷添加</div>` +
+        `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">` +
+        `<input id="pfbtQuickCode" type="text" placeholder="输入 6 位股票代码" maxlength="6" style="width:150px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt)">` +
+        `<button type="button" class="btn" id="pfbtQuickAdd">➕ 加自选</button>` +
+        `<button type="button" class="btn" id="pfbtGoHome">🏠 去决策台添加</button>` +
+        `</div>`;
+      const qc = document.getElementById('pfbtQuickCode');
+      const qa = document.getElementById('pfbtQuickAdd');
+      const gh = document.getElementById('pfbtGoHome');
+      const quickAdd = async () => {
+        const v = (qc.value || '').trim();
+        if (!/^\d{6}$/.test(v)) { toast('请先输入 6 位股票代码'); return; }
+        await addToWatchlistUI(v, false);
+        const wl2 = await DL.Watchlist.list();
+        if (wl2.length) {
+          el.innerHTML = `<div class="hint" style="color:#7ec699">✅ 已加入自选：${v}（当前 ${wl2.length} 只）。点上方“▶ 运行组合回测”开始。</div>` +
+            `<div style="margin-top:8px"><button type="button" class="btn" id="pfbtGoHome">🏠 去决策台添加更多</button></div>`;
+          const gh2 = document.getElementById('pfbtGoHome');
+          if (gh2) gh2.onclick = () => { switchTab('home'); const s = document.getElementById('homeSearch'); if (s) s.focus(); };
+        }
+      };
+      if (qa) qa.onclick = quickAdd;
+      if (qc) qc.addEventListener('keydown', e => { if (e.key === 'Enter') quickAdd(); });
+      if (gh) gh.onclick = () => { switchTab('home'); const s = document.getElementById('homeSearch'); if (s) s.focus(); };
+      return;
+    }
     _pfbtRunning = true;
     const btn = $('#pfbtRun');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ 回测中…'; }
@@ -1655,6 +1729,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
       });
     }
+    // v1.9.4 A 入口：决策台搜索框 ➕ 加自选（输入代码直接加，加了就进诊断）
+    const homeSearchAdd = $('#homeSearchAdd');
+    if (homeSearchAdd) homeSearchAdd.onclick = async () => {
+      const v = ($('#homeSearch') || {}).value ? $('#homeSearch').value.trim() : '';
+      if (!/^\d{6}$/.test(v)) { toast('请先输入 6 位股票代码'); return; }
+      await addToWatchlistUI(v, true);
+    };
     const btnScan = $('#btnScan');
     if (btnScan) btnScan.onclick = runScanner;
     const btnDiscover = $('#btnDiscover');
