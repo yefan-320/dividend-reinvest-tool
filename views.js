@@ -1426,7 +1426,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (ec) {
       ec.innerHTML = DL.ETF_PRESETS.slice(0, 8).map(p =>
         `<button type="button" class="chip" data-c="${p.code}${p.market ? '.' + p.market.toUpperCase() : ''}">${p.name}</button>`).join('');   // C2: 指数 chip 带 .SH
-      ec.querySelectorAll('[data-c]').forEach(b => b.onclick = () => cmpAdd(b.dataset.c));
+      // v1.9.5：chips 点击直接传对象（本地预设零网络）——原传字符串走 cmpResolveCode 网络+_cmpSeq 竞态，
+      // 快速连点多个时慢请求被丢弃（东财限流时实测 3 连点只加 1 个）；对象直传同步渲染无此问题
+      ec.querySelectorAll('[data-c]').forEach(b => b.onclick = () => {
+        const p = DL.ETF_PRESETS.find(x => (x.code + (x.market ? '.' + x.market.toUpperCase() : '')) === b.dataset.c);
+        if (p) cmpAdd(p);
+      });
     }
     // 周期 chips + 起始日期输入联动（v1.8.11 大师 M1/M3/M5：日期输入替代自定义年；实时反馈行；min/max 约束）
     const cy = $('#cmpYears');

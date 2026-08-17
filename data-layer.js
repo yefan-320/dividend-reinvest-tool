@@ -58,11 +58,15 @@ function jsonp(url, paramName, timeout = 15000) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
     const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+    let done = false;
     const timer = setTimeout(() => { cleanup(); reject(new Error('请求超时')); }, timeout);
-    function cleanup() { clearTimeout(timer); script.remove(); try { delete window[cb]; } catch (e) { window[cb] = undefined; } }
-    window[cb] = data => { cleanup(); resolve(data); };
+    // v1.9.5：cleanup 不再 delete 回调——东财限流时深分页响应可能 >15s 迟到，
+    // 删掉回调后迟到响应执行未定义函数 → Uncaught ReferenceError 污染控制台（e2e-full 实测 2 条）
+    // 改为替换为 no-op：迟到响应安全吞掉，防双回调（done 标志）
+    function cleanup() { clearTimeout(timer); script.remove(); window[cb] = () => {}; }
+    window[cb] = data => { if (done) return; done = true; cleanup(); resolve(data); };
     script.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + paramName + '=' + cb;   // 2026-08-17：URL 无 query 时用 ?（曾写死 &，无 query 的 URL 会拼出裸 & 被拒）
-    script.onerror = () => { cleanup(); reject(new Error('网络错误')); };
+    script.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error('网络错误')); };
     document.head.appendChild(script);
   });
 }

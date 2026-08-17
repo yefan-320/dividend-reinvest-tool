@@ -338,9 +338,9 @@ async function main() {
     const chips = await evalIn(cdp, `document.querySelectorAll('#cmpEtfChips .chip').length`);
     assert(chips >= 8, 'ETF chips<8: ' + chips);
     await evalIn(cdp, `document.querySelector('#cmpEtfChips [data-c="512890"]').click()`);
-    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 1`, 30000, 'chip添加');
+    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 1`, 90000, 'chip添加');
     await evalIn(cdp, `(() => { const i = document.getElementById('cmpInput'); i.value='600036'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
-    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 2`, 30000, '代码添加');
+    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 2`, 90000, '代码添加');
     dialogs.length = 0;
     await evalIn(cdp, `(() => { const i = document.getElementById('cmpInput'); i.value='600036'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
     const dupMsg = await waitDlg(20000, '去重弹窗');
@@ -349,7 +349,7 @@ async function main() {
       await evalIn(cdp, `document.querySelector('#cmpEtfChips [data-c="${c}"]').click()`);
       await new Promise(r => setTimeout(r, 400));
     }
-    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 5`, 15000, '加满5个');
+    await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 5`, 90000, '加满5个');
     dialogs.length = 0;
     await evalIn(cdp, `document.querySelector('#cmpEtfChips [data-c="159915"]').click()`);
     const capMsg = await waitDlg(20000, '上限弹窗');
@@ -425,6 +425,7 @@ async function main() {
   });
 
   await S('C6 每年分红图口径开关', async () => {
+    await waitFor(cdp, `(() => { const c = echarts.getInstanceByDom(document.getElementById('cmpChartAnnual')); return c && c.getOption().xAxis[0].data.length > 0; })()`, 90000, '对比图数据就绪');
     const t0 = await evalIn(cdp, `document.getElementById('cmpAnnualModeTitle').innerText`);
     assert(t0 === '到账年', '默认口径错: ' + t0);
     const payData = await evalIn(cdp, `JSON.stringify(echarts.getInstanceByDom(document.getElementById('cmpChartAnnual')).getOption().xAxis[0].data)`);
