@@ -1554,8 +1554,31 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   /* ---------- 初始化 ---------- */
-  /* v1.9.2 组合级回测 tab：拉取自选池 → 算 series → calcPortfolioBacktest → 策略对比表 */
+  /* v1.9.2 组合级回测 tab：拉取自选池 → 算 series → calcPortfolioBacktest → 策略对比表
+   * v1.9.3-D：金字塔模拟器升级——自定义档位方案（档位:权重% 输入）加入对比 */
   let _pfbtRunning = false;
+  let _pfbtCustom = [];   // 自定义方案列表 [{ name, desc, tiers }]
+  function parseCustomTiers(str) {
+    const parts = (str || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    const tiers = [];
+    for (const p of parts) {
+      const m = p.match(/^(\d{2,3})\s*[:：]\s*(\d{1,3})$/);
+      if (!m) return null;
+      const pct = parseInt(m[1], 10), w = parseInt(m[2], 10);
+      if (pct < 60 || pct > 100 || w <= 0) return null;
+      tiers.push({ pct, frac: w / 100 });
+    }
+    if (!tiers.length) return null;
+    return tiers;
+  }
+  function renderCustomList() {
+    const el = $('#pfbtCustomList');
+    if (!el) return;
+    el.innerHTML = _pfbtCustom.length
+      ? '已加入：' + _pfbtCustom.map((c, i) => `<span style="margin-right:8px">${c.name}（${c.desc}）<a href="javascript:void(0)" data-rm="${i}" style="color:#e05a5a">✕</a></span>`).join('')
+      : '未加入自定义方案（只用内置 4 策略）';
+    el.querySelectorAll('[data-rm]').forEach(a => a.onclick = () => { _pfbtCustom.splice(parseInt(a.dataset.rm, 10), 1); renderCustomList(); });
+  }
   async function runPortfolioBacktest() {
     const el = $('#pfbtResult');
     if (!el || _pfbtRunning) return;
@@ -1585,8 +1608,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (!pool.length) { el.innerHTML = '<div class="hint err">无有效数据</div>'; return; }
       el.innerHTML = `<div class="hint">⏳ 回测计算中（${pool.length} 只）…</div>`;
       await new Promise(r => setTimeout(r, 50));   // 让 UI 刷新
-      const res = DL.calcPortfolioBacktest(pool, { years: y });
-      let html = `<div class="hint">✅ 组合回测完成：${pool.length} 只自选 · 近 ${y} 年 · 标的等权 · 含分红（近似再投）</div>`;
+      const res = DL.calcPortfolioBacktest(pool, { years: y, customTiers: _pfbtCustom });
+      let html = `<div class="hint">✅ 组合回测完成：${pool.length} 只自选 · 近 ${y} 年 · 标的等权 · 含分红（近似再投）${_pfbtCustom.length ? ' · 含 ' + _pfbtCustom.length + ' 个自定义方案' : ''}</div>`;
       html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">策略</th><th>总收益</th><th>年化</th><th>最大浮亏</th><th>事件胜率</th><th>触发事件</th></tr>';
       res.forEach(r => {
         const retC = r.ret != null ? (r.ret >= 0 ? 'green' : 'red') : '';
@@ -1639,6 +1662,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     // v1.9.2：组合回测 tab 绑定（区间 chips + 运行按钮）
     const pfbtRun = $('#pfbtRun');
     if (pfbtRun) pfbtRun.onclick = runPortfolioBacktest;
+    const pfbtAdd = $('#pfbtCustomAdd');
+    if (pfbtAdd) pfbtAdd.onclick = () => {
+      const v = ($('#pfbtCustom') || {}).value || '';
+      const tiers = parseCustomTiers(v);
+      if (!tiers) { alert('格式：档位:权重%，逗号分隔，如 80:33,85:33,90:34（档位 60-100，权重 1-100）'); return; }
+      _pfbtCustom.push({ name: '自定义' + (_pfbtCustom.length + 1), desc: tiers.map(t => t.pct + '档 ' + Math.round(t.frac * 100) + '%').join(' / '), tiers });
+      $('#pfbtCustom').value = '';
+      renderCustomList();
+    };
+    document.querySelectorAll('.pfbt-preset').forEach(b => b.onclick = () => {
+      const tiers = parseCustomTiers(b.dataset.p);
+      if (!tiers) return;
+      _pfbtCustom.push({ name: b.textContent, desc: tiers.map(t => t.pct + '档 ' + Math.round(t.frac * 100) + '%').join(' / '), tiers });
+      renderCustomList();
+    });
     document.querySelectorAll('.pfbt-y').forEach(b => b.onclick = () => {
       document.querySelectorAll('.pfbt-y').forEach(x => x.classList.toggle('on', x === b));
     });

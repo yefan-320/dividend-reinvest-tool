@@ -900,6 +900,12 @@ function calcPortfolioBacktest(pool, opts) {
     { key: 'flex', name: '柔性金字塔', desc: '70/80/90/95 → 20/40/60/80%', tiers: [{ pct: 70, frac: 0.2 }, { pct: 80, frac: 0.2 }, { pct: 90, frac: 0.2 }, { pct: 95, frac: 0.2 }] },
     { key: 'wait90', name: '等 90 分位', desc: '90+ 一次性全仓', tiers: [{ pct: 90, frac: 1 }] },
   ];
+  // v1.9.3-D：自定义档位方案（金字塔模拟器）——{ name, desc, tiers: [{pct, frac}] } 数组
+  if (opts.customTiers && opts.customTiers.length) {
+    opts.customTiers.forEach((cs, i) => {
+      strategies.push({ key: 'custom' + i, name: cs.name || '自定义方案', desc: cs.desc || cs.tiers.map(t => t.pct + '档 ' + Math.round(t.frac * 100) + '%').join(' / '), tiers: cs.tiers });
+    });
+  }
   const out = [];
   for (const st of strategies) {
     let totRet = 0, totMdd = 0, totWin = 0, totEv = 0, totAnnual = 0, n = 0;
