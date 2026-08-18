@@ -74,20 +74,12 @@ function buyAfterNDiv(klines, divs, buyD, years) {
 }
 
 /* ---------- 规则树 ---------- */
-function divTrendBad(divs, asOfYear) {
-  const byRep = {};
-  divs.forEach(d => { if (d.pending || !d.report) return; const y = parseInt(d.report.slice(0, 4), 10); if (!y || y >= asOfYear) return; byRep[y] = (byRep[y] || 0) + (d.dps || 0); });
-  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a);
-  if (ys.length < 3) return false;
-  return byRep[ys[0]] < byRep[ys[1]] * 0.99 && byRep[ys[1]] < byRep[ys[2]] * 0.99;
-}
-function coverageRatio(divs, asOfYear) {
-  const byRep = {};
-  divs.forEach(d => { if (d.pending || !d.report) return; const y = parseInt(d.report.slice(0, 4), 10); if (!y || y >= asOfYear) return; if (!byRep[y]) byRep[y] = { dps: 0, eps: 0 }; byRep[y].dps += d.dps || 0; byRep[y].eps = Math.max(byRep[y].eps, d.eps || 0); });
-  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a).slice(0, 2);
-  if (ys.length < 2 || !byRep[ys[0]].eps || !byRep[ys[1]].eps) return null;
-  return (byRep[ys[0]].dps + byRep[ys[1]].dps) / (byRep[ys[0]].eps + byRep[ys[1]].eps);
-}
+/* P0-E 修复（2026-08-18）：本地复制版 → DL 修复版
+ * 旧：divTrendBad/coverageRatio 是脚本内复制旧逻辑（Math.max EPS 无年度终值口径）
+ *  → P0-B 修复后覆盖率口径变化，重跑仍用旧逻辑=脏输入（大师 M30 Q4：重跑前先清污染输入）
+ * 新：直接调用 DL.divTrendBadAt / DL.coverageAt（P0-B/C/A 修复后口径） */
+const divTrendBad = (divs, asOfYear) => DL.divTrendBadAt(divs, asOfYear);
+const coverageRatio = (divs, asOfYear) => DL.coverageAt(divs, asOfYear);
 function ruleFor(pct, cls, trendBad, cov) {
   if (trendBad) return 'avoid';                    // 第1层：分红趋势一票否决
   if (cls === 'trap') return 'avoid_small';        // 第3层：陷阱型分位信号不适用

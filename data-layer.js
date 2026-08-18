@@ -612,35 +612,56 @@ function calcDivCAGR(divs, yearsN) {
  * v1.9.0-O1 修复：固定 365/366 天窗口会因派息日漂移+闰年漏掉上次派息（2021-07-13→2022-07-15 间隔 367 天）
  * 改为派息次数自适应：按最近派息间隔中位数估算一年应含几次，按次数取（天然容忍漂移） */
 const _ttmCache = new WeakMap();   // 按 divs 数组引用缓存（不同标的互不串）
-function ttmDivsAt(divs, dateStr) {
-  // v1.9.5 重写：真 366 天滚动窗口（口径与注释一致：TTM=滚动 366 天分红）
-  // 原实现“按派息次数估算”（N=round(365/中位间隔)，取最近 N 笔）在派息频率突变时失效：
-  // 招行 2026-01 起一年两派，N=1（历史年度派息）→ 2026-01-16 中期分红后 TTM 只算 1.013 丢 2.00，
-  // 信号线股息率 4.9% 腰斩到 2.6%（实际 5.28%）——2026-08-17 主人抓“平滑股息率有问题”实证
-  // 新口径：TTM(date) = 窗口 [date-366, date) 内所有派息之和（366 覆盖闰年；左闭右开，除息日当天不算）
-  // 空窗回退（派息日漂移 >366 天导致 1-3 天窗口为 0）：回退“窗口左边界前最近一笔”
-  //   ——大师边界2：漂移空窗期正确 TTM=旧频率最后一笔，不是“最近一笔”（频率突变期两者差一倍）
+/* Q3（M30）：mode 感知的 TTM 口径——B=财年归组（主）、A=366天滚动（兜底，过渡期标注用）
+ * 返回 { v, mode }；ttmDivsAt 只取 v（保持既有 API 兼容） */
+function ttmDivsAtMode(divs, dateStr) {
   let c = _ttmCache.get(divs);
   if (!c) {
     const sorted = divs.filter(d => d.ex && d.dps > 0).sort((a, b) => a.ex < b.ex ? -1 : 1);
-    c = { sorted };
+    const byRepYear = {};
+    divs.forEach(d => {
+      if (!d.report || d.pending || !(d.dps > 0)) return;
+      const y = d.report.slice(0, 4);
+      if (!byRepYear[y]) byRepYear[y] = { sum: 0, hasAnnual: false };
+      byRepYear[y].sum += d.dps;
+      if (/-12-31$/.test(d.report)) byRepYear[y].hasAnnual = true;
+    });
+    c = { sorted, byRepYear };
     _ttmCache.set(divs, c);
   }
+  const yearNow = parseInt(dateStr.slice(0, 4), 10);
+  const completeYears = Object.keys(c.byRepYear).map(Number)
+    .filter(y => c.byRepYear[y].hasAnnual && y < yearNow)
+    .sort((a, b) => b - a);
+  if (completeYears.length) {
+    const bVal = c.byRepYear[completeYears[0]].sum;
+    if (bVal > 0) return { v: bVal, mode: 'B' };
+  }
   const sorted = c.sorted;
-  if (!sorted.length) return 0;
+  if (!sorted.length) return { v: 0, mode: 'A' };
   const loDate = shiftDate(dateStr, -366);
-  // 窗口右边界：最后一个 ex < dateStr（除息日当天不算）
   let lo = 0, hi = sorted.length - 1, right = -1;
   while (lo <= hi) { const mid = (lo + hi) >> 1; if (sorted[mid].ex < dateStr) { right = mid; lo = mid + 1; } else hi = mid - 1; }
-  if (right < 0) return 0;
-  // 窗口左边界：最后一个 ex < loDate（回退用：窗口左边界前最近一笔）
+  if (right < 0) return { v: 0, mode: 'A' };
   lo = 0; hi = right; let leftBefore = -1;
   while (lo <= hi) { const mid = (lo + hi) >> 1; if (sorted[mid].ex < loDate) { leftBefore = mid; lo = mid + 1; } else hi = mid - 1; }
   let sum = 0;
   for (let i = right; i > leftBefore; i--) sum += sorted[i].dps;
-  if (sum > 0) return sum;
-  // 空窗回退（漂移空窗期正确值=窗口左边界前最近一笔）
-  return leftBefore >= 0 ? sorted[leftBefore].dps : 0;
+  if (sum > 0) return { v: sum, mode: 'A' };
+  return { v: leftBefore >= 0 ? sorted[leftBefore].dps : 0, mode: 'A' };
+}
+function ttmDivsAt(divs, dateStr) {
+  // P0-A v1.9.7（2026-08-18）：B主（财年归组）+ A兜底（366天滚动窗口）
+  // 问题（回源实锤）：366 天窗口在一年两派过渡期混入“2024末期+2025中期”=1.5 个财年
+  //   → 招行 3.013/36.76=8.20% 虚高、分位 100% 是失真产物（钱没变，纯拆分式两派）
+  // B 口径（主）：最近完整财年归属分红合计（按 REPORT_DATE 归属财年）
+  //   ——“最近完整财年”= 有年报(-12-31)报告记录、且财年 < dateStr 年份的最近一年
+  //   —— 计入锚（Q1/Q2 确认）：有除息日（pending=false）——A 股实施公告即定除息日，
+  //      与 M2 定案“实施公告日”数据等价；预案记录（无除息日、金额可能被股东大会改）不计入
+  //   —— 年度分红水平代表值：拆派/频率突变天然稳定，不混跨财年；除息日无跳变
+  //   —— 验证：招行 2026-06-24 B=2.016→5.48%；6-24 与 7-10 无跳变（大师免检）
+  // A 口径（兜底）：366 天滚动窗口（v1.9.5 逻辑，B 不可用时回退）
+  return ttmDivsAtMode(divs, dateStr).v;
 }
 function calcLockedTTM(divs) {
   const exDates = divs.filter(d => d.ex && d.dps > 0).map(d => d.ex).sort();
@@ -828,7 +849,7 @@ function computeZone(pct, opts) {
   // 95+ 极值（两模式统一文案：剩余 20% 可自决追加-不建议）
   if (pct >= 95) {
     const posTxt = mode === 'flexible' ? '80%（封顶）' : '已加满';
-    return { zone: 'extreme', label: '95+ 极值确认', action: '当前仓位 ' + posTxt + ' · 历史 95 分位胜率 41/43 · 剩余 20% 现金可自决追加（不建议常规操作）', mode, pct, currentTier: tiers[tiers.length - 1], nextTier: null };
+    return { zone: 'extreme', label: '95+ 极值确认', action: '当前仓位 ' + posTxt + ' · 历史 95+ 分位 3 年胜率 97/133 · 剩余 20% 现金可自决追加（不建议常规操作）', mode, pct, currentTier: tiers[tiers.length - 1], nextTier: null };
   }
   // 已触发档（当前分位 ≥ 档位线的最高档）
   let current = null;
@@ -1011,11 +1032,31 @@ function divTrendBadAt(divs, asOfYear) {
   return byRep[ys[0]] < byRep[ys[1]] * 0.99 && byRep[ys[1]] < byRep[ys[2]] * 0.99;
 }
 function coverageAt(divs, asOfYear) {
+  /* P0-B 修复（2026-08-18）：EPS 年度终值口径
+   * 旧：同财年 Math.max(eps) —— 若该财年仅有中报记录，半年累计 EPS 被当全年 → 覆盖率虚高（神华 -58% 假象根因）
+   * 新：年报(12-31) EPS 优先=年度终值；无年报记录该财年不参与覆盖率计算（返回 null=数据不足，宁可不说）
+   * 归属财年对齐：分红与 EPS 均按 REPORT_DATE 归属财年（分红 2024 财年÷EPS 2024 财年，到账年不影响）
+   * 覆盖率 = 最近 2 个有年度终值 EPS 的完整财年（分红合计÷EPS合计） */
   const byRep = {};
-  divs.forEach(d => { if (d.pending || !d.report) return; const y = parseInt(d.report.slice(0, 4), 10); if (!y || y >= asOfYear) return; if (!byRep[y]) byRep[y] = { dps: 0, eps: 0 }; byRep[y].dps += d.dps || 0; byRep[y].eps = Math.max(byRep[y].eps, d.eps || 0); });
-  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a).slice(0, 2);
-  if (ys.length < 2 || !byRep[ys[0]].eps || !byRep[ys[1]].eps) return null;
-  return (byRep[ys[0]].dps + byRep[ys[1]].dps) / (byRep[ys[0]].eps + byRep[ys[1]].eps);
+  divs.forEach(d => {
+    if (d.pending || !d.report) return;
+    const y = parseInt(d.report.slice(0, 4), 10);
+    if (!y || y >= asOfYear) return;
+    if (!byRep[y]) byRep[y] = { dps: 0, eps: null, hasAnnual: false };
+    byRep[y].dps += d.dps || 0;
+    if (/-12-31$/.test(d.report)) {
+      // 年报记录：EPS=年度终值（覆盖之前的非年报值）
+      byRep[y].eps = parseFloat(d.eps) || byRep[y].eps;
+      byRep[y].hasAnnual = true;
+    }
+    // 非年报记录不设置 EPS（仅累计 dps；EPS 只认年报终值）
+  });
+  const ys = Object.keys(byRep).map(Number).sort((a, b) => b - a).filter(y => byRep[y].hasAnnual && byRep[y].eps).slice(0, 2);
+  // M31 Q2 实锤：eps 必须为正且有限（负 EPS=亏损年、0=字段缺失 → 覆盖率无意义，返回 null 而非负数/0）
+  if (ys.length < 2 || !(byRep[ys[0]].eps > 0) || !(byRep[ys[1]].eps > 0)) return null;
+  const epsSum = byRep[ys[0]].eps + byRep[ys[1]].eps;
+  if (!(epsSum > 0)) return null;
+  return (byRep[ys[0]].dps + byRep[ys[1]].dps) / epsSum;
 }
 /* 结论规则树：返回 { tier, steps: [{layer, msg}] }——steps 供展开详情 */
 function ruleVerdict(pct, cls, trendBad, cov) {
@@ -1037,12 +1078,192 @@ function ruleVerdict(pct, cls, trendBad, cov) {
   if (tier === 'watch' && cov != null && cov < 0.25) { steps.push({ layer: 2, msg: '覆盖率 < 0.25，观望降级为等待' }); tier = 'wait'; }
   return { tier, steps };
 }
-/* 结论行历史胜率表（由 test/rule-tree-backtest.js 产出，2026-08-18 40只×16年）：[3年收益%, 3年胜率%, 事件数] */
+/* 结论行历史胜率表（由 test/rule-tree-backtest.js 产出）：[3年收益%, 3年胜率%, 事件数]
+ * P0-E 修复（2026-08-18）：重跑规则树（40只×16年）——本地复制版 divTrendBad/coverageRatio 改用 DL 修复版
+ * （P0-B 年度终值 EPS + P0-A 财年归组 TTM），旧表（44.8/41.8/39.1）为 P0 修复前脏输入产物 */
 const RULE_STATS = {
-  strong: [44.8, 72, 2155], buy: [41.8, 72, 4508], watch: [39.1, 73, 3145],
-  avoid: [33.2, 67, 95], avoid_small: [14.1, 55, 32], wait: [null, null, 1050],
+  strong: [40.7, 70, 2205], buy: [37.6, 69, 4545], watch: [39.6, 74, 3225],
+  avoid: [33.2, 67, 95], avoid_small: [17.4, 55, 32], wait: [null, null, 976],
 };
 const RULE_TIER_LABEL = { strong: '强烈建仓', buy: '可建仓', watch: '观望', wait: '等待', avoid: '回避', avoid_small: '回避/小仓' };
+
+/* ---------- O1：行业基准表（初始版·2026-08-18 已回源样本） ----------
+ * 用途：报告卡③质量趋势对比（ROE vs 行业）、买点目标股息率标定（M24 Q4 行业标定前初始版）
+ * 来源：6 只持仓 2025 年报实测 + 公开行业常识区间；样本 N 标注，禁止当权威阈值
+ * 覆盖率口径（M23 定稿）：倍数 = EPS÷派息（>1 健康），全站唯一；比率=派息÷EPS 仅公式注脚 */
+const BENCH = {
+  /* 来源标注（Q1 纪律）：初始版=6 只持仓样本实测 + 行业常识区间；样本≥5 只后再定权威区间（M21 Q4）
+   * 买点线 = yieldMid + yieldUp（M24 Q4：行业基准中位数上浮 1-2pp，禁止全局 6%/7%） */
+  // 银行：样本 招行5.26/工行4.05 股息率，中位≈4.5%，上浮 1.5pp → 买点线 6.0%
+  // M45 权威化（10 样本实测：股息率中位 5.27%、范围 3.73~5.97；ROE 4.9~13.4）——三档 5.0/6.0/7.0
+  bank:    { roe: [7, 9, 11],     yieldMid: 5.0, yieldUp: 1.0, note: '银行 10 样本实测（2026-08-18）：中位 5.27%；资本约束分红率 30-35%；三档 5.0/6.0/7.0' },
+  // 消费：样本 伊利5.49/美的5.16，中位≈4.0%，上浮 1.5pp → 买点线 5.5%
+  // M45 权威化（9 样本实测：中位 5.36%；重仓线 7.5% 历史 0 触发 → 降 7.0）——⚠️ 弱依据：持仓样本 2 只+触发 0 次，待扩充
+  consumer:{ roe: [15, 20, 24],  yieldMid: 5.0, yieldUp: 1.0, note: '消费 9 样本实测（2026-08-18）：中位 5.36%；高分红率 70%+ 常见；三档 5.0/6.0/7.0（弱依据·样本2持仓·待扩充）' },
+  // 电信：样本 移动4.91，中位≈5.0%，上浮 1.0pp → 买点线 6.0%
+  // M45：样本 3 只（移动/电信/联通，A 股仅 3 家）未达权威线（≥5）→ 维持初始值 + 标注
+  telecom: { roe: [8, 10, 13],   yieldMid: 5.0, yieldUp: 1.0, note: '电信实测（3 样本·未达权威线）：中位 4.14%；三档 5.0/6.0/7.0（维持初始值）' },
+  // 保险：样本 平安5.27，中位≈4.5%，上浮 1.0pp → 买点线 5.5%（Q2 修正：与"45加仓"自洽，2.70/0.055≈49 元）
+  // M45 权威化（5 样本实测：中位 3.84%；NBV 年度概念禁季度判趋势）——三档 4.0/5.5/6.5（平安 49.1 已核）
+  insurer: { roe: [14, 18, 28],   yieldMid: 4.0, yieldUp: 1.5, note: '保险 5 样本实测（2026-08-18）：中位 3.84%；平安 5.26 特例拉高；三档 4.0/5.5/6.5' },
+  // 公用：初始标定（样本待补≥5 只）
+  // M45 权威化（6 样本实测：中位 3.70%；现金流稳、分红率高）——三档 4.0/5.5/6.5（长电 5.5 已核）
+  utility: { roe: [11, 12, 16],   yieldMid: 4.0, yieldUp: 1.5, note: '公用事业 6 样本实测（2026-08-18）：中位 3.70%；三档 4.0/5.5/6.5' },
+  // 能源：初始标定（样本待补≥5 只）——⚠️ M40 Q1：持仓无能源标的，7.0% 未经验证
+  // M45：周期行业·中位数法不适用（6 样本中位 3.95% 但周期底部/顶部差异大）→ 维持临时线 + 标注，待周期样本扩充（含 2015 底/2021 顶）
+  energy:  { roe: [10, 11, 13],   yieldMid: 5.5, yieldUp: 1.5, note: '能源 6 样本实测（2026-08-18）：中位 3.95%；⚠️ 周期行业·中位数法不适用·临时线 7.0%（待周期样本扩充）' },
+};
+function roeBand(industry) {
+  const b = BENCH[industry];
+  if (!b) return null;
+  return { lo: b.roe[0], mid: b.roe[1], hi: b.roe[2], note: b.note };
+}
+
+/* ---------- O1：报告卡引擎（数据层/结论层分离，M22 三问模板） ---------- */
+function reportPeriodLabel(divs) {
+  /* 返回最近完整财年标注：'2025年报' / '2025三季报' 等 */
+  const reports = divs.filter(d => d.report).map(d => d.report).sort();
+  const last = reports[reports.length - 1];
+  if (!last) return null;
+  const y = last.slice(0, 4);
+  const md = last.slice(5);
+  const map = { '03-31': '一季报', '06-30': '中报', '09-30': '三季报', '12-31': '年报' };
+  return y + (map[md] ? map[md] : last);
+}
+/* ---------- O2：F10 年报数据接入（2026-08-18，M35 Q3/Q4/Q5） ----------
+ * fetchF10Annual(code)：拉最近完整年报（REPORT_DATE 以 12-31 结尾）
+ * 字段：ROEJQ（加权ROE%）、MGWFPLR（每股未分配·元）、PARENTNETPROFIT（归母净利·元）
+ * 单位锚定（Q3 CI）：PARENTNETPROFIT=元（招行 150181000000=1501.81亿）、MGWFPLR=元/股（26.9551）、ROEJQ=%
+ * 缓存：TTL 7 天（年报+CSRC 行业均年频静态，Q3）；缓存命中标 cachedAt（卡面血缘脚注 Q5）
+ * 报告期：动态找最近完整年报（接口按 REPORT_DATE 降序，取第一条 12-31 结尾） */
+const _f10Cache = new Map();
+async function fetchF10Annual(code, tryN = 1) {
+  const key = 'f10:' + code;
+  const hit = _f10Cache.get(key);
+  // Q3（M37）：年报+CSRC 行业均年频静态 → TTL 7 天（原 24h 过保守）
+  if (hit && Date.now() - hit.ts < 7 * 24 * 3600 * 1000) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
+  // pageSize=5：覆盖"中报+一季报+年报"并存场景（移动 3 条记录，pageSize=2 拿不到年报）
+  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
+  try {
+    const [r, r2] = await Promise.all([
+      fetch(url, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
+      fetch(`https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_ORG_BASICINFO&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=1&source=HSF10&client=PC`, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
+    ]);
+    const j = await r.json();
+    let csrc = '';
+    try { const j2 = await r2.json(); const b = (j2 && j2.result && j2.result.data) || []; csrc = (b[0] && b[0].CSRC_INDUSTRY_NAME) || ''; } catch (e2) {}
+    const rows = (j && j.result && j.result.data) || [];
+    // 取最近一条 12-31 结尾的（完整年报）
+    const annual = rows.find(x => /12-31/.test(x.REPORT_DATE || ''));
+    if (!annual) return null;
+    const out = {
+      roe: parseFloat(annual.ROEJQ) || null,
+      mgwfplr: parseFloat(annual.MGWFPLR) || null,
+      netProfit: annual.PARENTNETPROFIT != null ? parseFloat(annual.PARENTNETPROFIT) / 1e8 : null,   // 元→亿
+      orgType: annual.ORG_TYPE || '',
+      csrcIndustry: csrc,   // 证监会行业（第二判据，Q1）
+      reportDate: (annual.REPORT_DATE || '').slice(0, 10),
+    };
+    _f10Cache.set(key, { ts: Date.now(), data: out });
+    return Object.assign({ cached: false }, out);
+  } catch (e) {
+    if (tryN < 3) { await new Promise(r2 => setTimeout(r2, tryN * 2000)); return fetchF10Annual(code, tryN + 1); }
+    return null;
+  }
+}
+
+function industryOf(secuType) {
+  /* 行业识别（M36 Q1：双判据）
+   * 判据1：CSRC 证监会行业名（RPT_F10_ORG_BASICINFO，可靠）
+   * 判据2：ORG_TYPE / 英文名（兜底，实测大量"通用"不可靠） */
+  const t = (secuType || '').toLowerCase();
+  // 判据1：CSRC 证监会行业
+  if (t.includes('货币金融') || t.includes('银行') || t.includes('bank')) return 'bank';
+  if (t.includes('保险') || t.includes('insur')) return 'insurer';
+  if (t.includes('电信') || t.includes('广播') || t.includes('卫星') || t.includes('telecom')) return 'telecom';
+  if (t.includes('食品') || t.includes('饮料') || t.includes('酒') || t.includes('农副') || t.includes('医药')) return 'consumer';
+  if (t.includes('电气机械') || t.includes('家电') || t.includes('家用电器') || t.includes('汽车')) return 'consumer';
+  if (t.includes('电力') || t.includes('燃气') || t.includes('水生产') || t.includes('公用')) return 'utility';
+  if (t.includes('煤炭') || t.includes('石油') || t.includes('开采') || t.includes('有色') || t.includes('能源')) return 'energy';
+  // 判据2：ORG_TYPE / 英文兜底
+  if (t.includes('银行') || t.includes('bank')) return 'bank';
+  if (t.includes('保险') || t.includes('insur')) return 'insurer';
+  if (t.includes('电信') || t.includes('telecom')) return 'telecom';
+  if (t.includes('食品') || t.includes('消费')) return 'consumer';
+  if (t.includes('电力') || t.includes('公用')) return 'utility';
+  if (t.includes('煤炭') || t.includes('能源')) return 'energy';
+  return null;   // 未知 → 报告卡只显示通用三问核心，不挂行业维度（M22 Q2：挂错比不挂更糟）
+}
+function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, price, dy, pct, industry, roe, roeTrend, dividendCagr }) {
+  const out = { q1: null, q2: null, q3: null, summary: null };
+  /* Q1 这笔分红可靠吗？ */
+  if (coverage == null) {
+    // null 分支（M28 Q5）：覆盖数据不足 → 以储备年数为准
+    if (reserveYears != null) out.q1 = { verdict: '覆盖数据不足', msg: `覆盖率数据不足，以储备年数为准：${reserveYears.toFixed(1)} 年储备` };
+    else out.q1 = { verdict: '数据不足', msg: '分红可靠性数据不足，不可决策' };
+  } else if (coverage < 1) {
+    out.q1 = { verdict: '🔴 吃老本', msg: `利润仅覆盖分红 ${coverage.toFixed(2)} 倍（分红率 ${(payoutRate * 100).toFixed(0)}%），吃老本信号` };
+  } else if (coverage < 1.5) {
+    out.q1 = { verdict: '🟡 偏紧', msg: `利润覆盖分红 ${coverage.toFixed(2)} 倍（分红率 ${(payoutRate * 100).toFixed(0)}%），增长空间受限` };
+  } else {
+    out.q1 = { verdict: '✅ 安全', msg: `利润覆盖分红 ${coverage.toFixed(2)} 倍（分红率 ${(payoutRate * 100).toFixed(0)}%），储备 ${reserveYears != null ? reserveYears.toFixed(1) + ' 年' : '—'}` };
+  }
+  /* Q2 现在这个价格值不值？ */
+  const yieldBand = BENCH[industry] || null;
+  if (dy == null) out.q2 = { verdict: '数据不足', msg: '股息率数据不足' };
+  else if (yieldBand) {
+    const mid = yieldBand.yieldMid, up = yieldBand.yieldUp;
+    const buyLine = mid + up;   // 行业买点线 = 基准中位 + 上浮 pp（M24 Q4：不许全局 6%/7%）
+    const buyPrice = dps != null && dps > 0 ? (dps / (buyLine / 100)).toFixed(1) : null;
+    if (dy >= buyLine) out.q2 = { verdict: '✅ 可买', msg: `股息率 ${dy.toFixed(2)}% ≥ 行业买点线 ${buyLine.toFixed(1)}%（${industry} 中位 ${mid}%+${up}pp），可买${buyPrice ? '，买点 ' + buyPrice + ' 元' : ''}` };
+    else if (dy >= mid) out.q2 = { verdict: '✅ 可买', msg: `股息率 ${dy.toFixed(2)}% ≥ 行业基准 ${mid.toFixed(1)}%（${industry}）可小仓，加仓线 ${buyLine.toFixed(1)}%（${buyPrice ? buyPrice + ' 元' : '—'}）` };
+    else out.q2 = { verdict: '🟡 等更低', msg: `股息率 ${dy.toFixed(2)}% 低于行业基准 ${mid.toFixed(1)}%（${industry}），等更低，买点线 ${buyLine.toFixed(1)}%（${buyPrice ? buyPrice + ' 元' : '—'}）` };
+  } else {
+    // 无行业基准 → 通用：用分位辅助
+    if (pct != null && pct >= 80) out.q2 = { verdict: '🟡 等更低', msg: `股息率 ${dy.toFixed(2)}%，分位 ${pct.toFixed(0)}% 高位，等更低` };
+    else if (dy >= 5) out.q2 = { verdict: '✅ 可买', msg: `股息率 ${dy.toFixed(2)}% ≥5%，分位 ${pct != null ? pct.toFixed(0) + '%' : '—'}` };
+    else out.q2 = { verdict: '🟡 等更低', msg: `股息率 ${dy.toFixed(2)}% <5%，等更低（买点=派息÷目标股息率）` };
+  }
+  /* Q3 最坏情况我扛得住吗？ */
+  const risks = [];
+  if (roe != null && roeBand(industry)) {
+    const b = roeBand(industry);
+    if (roe < b.lo) risks.push(`ROE ${roe.toFixed(1)}% 低于行业低档 ${b.lo}%`);
+  }
+  if (roeTrend != null && roeTrend < 0) risks.push(`ROE 连降（${Math.abs(roeTrend)} 年）`);
+  if (dividendCagr != null && dividendCagr < 0) risks.push(`分红 CAGR ${dividendCagr.toFixed(1)}% 负增长`);
+  if (payoutRate != null && payoutRate > 0.7) risks.push(`分红率 ${(payoutRate * 100).toFixed(0)}% 高企，增长空间受限`);
+  if (!risks.length) out.q3 = { verdict: '✅ 无明显风险', msg: '未见显著风险' };
+  else out.q3 = { verdict: '⚠️ ' + risks.length + ' 项风险', msg: risks.join('；') };
+  /* 综合句（三问拼接 + 三档买点，O3：全部来自 BENCH 零硬编码）
+   * 三档：现价小仓（现价股息率 vs 行业中位）/ 加仓线（标定线=中位+上浮pp）/ 重仓线（标定线+1pp）
+   * 仓位语义（Q2）：小仓=计划仓位的 1/3、加仓=2/3、重仓=满——示例值，主人可调
+   * 重仓线 +1pp 为初始规则，标注"待回测验证"（Q3：6 只历史低点 vs 重仓线命中率，回测 backlog） */
+  const parts = [out.q1.verdict, out.q2.verdict, out.q3.verdict];
+  const yb = BENCH[industry] || null;
+  const midLine = yb ? yb.yieldMid : null;
+  const line = yb ? yb.yieldMid + yb.yieldUp : null;
+  const heavyLine = line != null ? line + 1 : null;
+  const bp = (r) => dps != null && dps > 0 && r != null ? (dps / (r / 100)).toFixed(1) : null;
+  const buyP = bp(line), heavyP = bp(heavyLine);
+  /* Q1（M38）：当前档位指示——现价股息率落在哪个区 */
+  let curTier = null;
+  if (dy != null && midLine != null) {
+    if (dy >= heavyLine) curTier = { name: '重仓区', note: '已到重仓线 ' + heavyLine.toFixed(1) + '%' };
+    else if (dy >= line) curTier = { name: '加仓区', note: '已到加仓线 ' + line.toFixed(1) + '%' };
+    else if (dy >= midLine) curTier = { name: '小仓区', note: '已可小仓（≥' + midLine.toFixed(1) + '%），未到加仓线 ' + line.toFixed(1) + '%' };
+    else curTier = { name: '等待区', note: '未达小仓线 ' + midLine.toFixed(1) + '%' };
+  }
+  const tiers = [];
+  if (curTier) tiers.push('📍 当前：' + curTier.name + '（' + curTier.note + '）');
+  if (midLine != null) tiers.push('小仓=' + midLine.toFixed(1) + '%·' + bp(midLine) + ' 元' + (dy != null && dy >= midLine ? ' ✅' : ''));
+  if (buyP) tiers.push('加仓=' + line.toFixed(1) + '%·' + buyP + ' 元' + (dy != null && dy >= line ? ' ✅' : ''));
+  if (heavyP) tiers.push('重仓=' + heavyLine.toFixed(1) + '%·' + heavyP + ' 元' + (dy != null && dy >= heavyLine ? ' ✅' : ''));
+  out.tiers = tiers;
+  out.curTier = curTier;
+  out.summary = `${parts.join(' · ')}` + (tiers.length ? '；' + tiers.join(' / ') : '');
+  return out;
+}
 
 /* ---------- 对外导出 ---------- */
 window.DL = {
@@ -1053,7 +1274,8 @@ window.DL = {
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
-  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, computeZone,
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
+  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */

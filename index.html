@@ -5,7 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>红利复投工具</title>
 <script src="vendor/echarts.min.js"></script>
-<script>
+<script><script>
+/* O1：报告卡研究数据（2026-08-18 东财F10 2025年报 + 腾讯实时价）——F10 自动接入后删除 */
+window.REPORT_CARD_EXTRA = {
+  '600036': { industry: 'bank', roe: 13.44, roeTrend: -3, netProfit: 1501.81, eps: 5.70, reserve: 26.9551, period: '2025年报' },
+  '601398': { industry: 'bank', roe: 9.45, roeTrend: -1, netProfit: 3685.6, eps: 1.00, reserve: 6.1170, period: '2025年报' },
+  '600887': { industry: 'consumer', roe: 20.87, roeTrend: 0, netProfit: 115.7, eps: 1.83, reserve: 5.2236, period: '2025年报' },
+  '600941': { industry: 'telecom', roe: 9.90, roeTrend: -1, netProfit: 1371.0, eps: 6.35, reserve: 56.4700, period: '2025年报' },
+  '000333': { industry: 'consumer', roe: 19.70, roeTrend: 0, netProfit: 439.5, eps: 5.80, reserve: 22.0120, period: '2025年报' },
+  '601318': { industry: 'insurer', roe: 14.00, roeTrend: 0, netProfit: 1347.8, eps: 7.68, reserve: 42.3522, period: '2025年报' },
+};
+</script>
+
 if (typeof echarts === 'undefined') {
   document.write('<script src="vendor/echarts.min.js"><\/script>');
 }
@@ -156,6 +167,7 @@ body{padding-bottom:64px}
     <h2>📅 分红到账日历（未来12个月，估=上年同期推算）</h2>
     <div id="homeDivCalendar"></div>
   </div>
+  <div class="card" id="pfSample"></div>
   <div class="card" id="portfolioCard">
     <h2>🧺 组合建仓总览 <span class="hint" style="float:right" id="pfSummary">…</span></h2>
     <div id="portfolioBody" style="display:none">
@@ -183,6 +195,7 @@ body{padding-bottom:64px}
         <button type="button" class="btn flexbtn" id="diagWlBtn" style="display:none">⭐ 加自选</button>
       </div>
     </div>
+    <div class="card" id="diagReportCard" style="display:none"></div>
     <div class="card" id="diagSummary" style="display:none">
       <h2>🎯 决策摘要 <span class="hint" style="font-weight:400">基于历史数据 · 非投资建议</span></h2>
       <div id="diagSummaryBody"></div>
