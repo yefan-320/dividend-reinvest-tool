@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v1.9.11（2026-08-18）—— 访问密码锁 + 重新部署（主人要求：只能自己用+免费+国内访问）
+
+### 访问密码锁
+- 打开工具先输密码（SHA-256 校验，密码不出现在源码明文）→ 30 天免密（localStorage 时间戳）
+- 密码由主人设定；错误密码锁定重试
+- 修复 index.html 历史遗留 `<script><script>` 双开标签
+
+### 部署路线（免费 + 国内可访问 + Mac 关机可用）
+- **GitHub Pages**（github.io 国内实测 0.38s 可达）：仓库转公开（Free 计划私有仓库不支持 Pages）+ 密码锁 → https://yefan-320.github.io/dividend-reinvest-tool/
+- **Cloudflare Workers 备用**（海外/VPN 通道）：dividend-tool.dividend-tool.workers.dev（国内被 GFW DNS 污染，实测打不开）
+- 本地 8123 通道保留（最快最稳）
+
+### 安全
+- .wrangler 缓存误提交 → 已移除+gitignore（内容仅账号 ID 无 token）
+- 私有数据（持仓录入）始终在浏览器 localStorage，不上传
+
 ## v1.9.10（2026-08-18）—— 三档语义修正（主人质疑 → 大师 M47 裁决）
 
 ### 主人质疑
@@ -123,6 +139,22 @@
 - 移动端 390px：搜索 222px 可输入/诊断按钮不重叠
 
 # CHANGELOG
+
+## v1.9.11（2026-08-18）—— 访问密码锁 + 重新部署（主人要求：只能自己用+免费+国内访问）
+
+### 访问密码锁
+- 打开工具先输密码（SHA-256 校验，密码不出现在源码明文）→ 30 天免密（localStorage 时间戳）
+- 密码由主人设定；错误密码锁定重试
+- 修复 index.html 历史遗留 `<script><script>` 双开标签
+
+### 部署路线（免费 + 国内可访问 + Mac 关机可用）
+- **GitHub Pages**（github.io 国内实测 0.38s 可达）：仓库转公开（Free 计划私有仓库不支持 Pages）+ 密码锁 → https://yefan-320.github.io/dividend-reinvest-tool/
+- **Cloudflare Workers 备用**（海外/VPN 通道）：dividend-tool.dividend-tool.workers.dev（国内被 GFW DNS 污染，实测打不开）
+- 本地 8123 通道保留（最快最稳）
+
+### 安全
+- .wrangler 缓存误提交 → 已移除+gitignore（内容仅账号 ID 无 token）
+- 私有数据（持仓录入）始终在浏览器 localStorage，不上传
 
 ## v1.9.10（2026-08-18）—— 三档语义修正（主人质疑 → 大师 M47 裁决）
 
