@@ -319,11 +319,24 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     })();
   }
 
-  /* 行业提示（P2 机会雷达用）：snap:all 缓存里取行业（零额外网络），无缓存/未识别 → null（雷达降级为仅股息率） */
+  /* 行业提示（P2 机会雷达用）：三级查找，零多余网络（大师 P1 限频纪律）
+   * ① snap:all 缓存（扫描器建立过）② sessionStorage 缓存（每会话每标的 1 次）③ 东财单股 f127（push2 CORS 实测通） */
   async function industryHint(code) {
     try {
       const snapAll = await DL.cacheGet('snap:all');
       if (snapAll && snapAll[code] && snapAll[code].industry) return DL.industryOf(snapAll[code].industry);
+    } catch (e) { }
+    try {
+      const sess = JSON.parse(sessionStorage.getItem('ind_hint') || '{}');
+      if (sess[code]) return DL.industryOf(sess[code]);
+    } catch (e) { }
+    try {
+      const d = await DL.fetchJson('https://push2.eastmoney.com/api/qt/stock/get?secid=' + DL.emSecidOf(code) + '&fields=f57,f127');
+      const ind = d && d.data && d.data.f127;
+      if (ind) {
+        try { const sess = JSON.parse(sessionStorage.getItem('ind_hint') || '{}'); sess[code] = ind; sessionStorage.setItem('ind_hint', JSON.stringify(sess)); } catch (e) { }
+        return DL.industryOf(ind);
+      }
     } catch (e) { }
     return null;
   }
