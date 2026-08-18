@@ -319,15 +319,38 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     })();
   }
 
-  /* 机会速览：自选股股息率阈值突破提醒（打开时对比快照） */
+  /* 行业提示（P2 机会雷达用）：snap:all 缓存里取行业（零额外网络），无缓存/未识别 → null（雷达降级为仅股息率） */
+  async function industryHint(code) {
+    try {
+      const snapAll = await DL.cacheGet('snap:all');
+      if (snapAll && snapAll[code] && snapAll[code].industry) return DL.industryOf(snapAll[code].industry);
+    } catch (e) { }
+    return null;
+  }
+
+  /* 机会速览（P2 重构 2026-08-18 大师裁决）：机会雷达（三档线位置）+ 变化提醒（事件）并存不互替
+   * 雷达=当前股息率 vs 行业三档线（小仓/加仓/重仓），变化提醒=股息率+0.5pp/价格-15%（原逻辑保留） */
   async function renderOpportunities() {
     const el = $('#homeOpportunities');
     if (!el) return;
     const wl = homeState.watchlist;
-    if (!wl.length) { el.innerHTML = '<div class="hint">暂无自选股。添加自选后，这里会显示股息率/估值的变化提醒。</div>'; return; }
+    if (!wl.length) { el.innerHTML = '<div class="hint">暂无自选股。添加自选后，这里显示三档机会雷达+股息率/估值变化提醒。</div>'; return; }
     el.innerHTML = '<div class="hint">加载中…</div>';
     const snap = await DL.getStockQuotes(wl.map(x => x.code));
     homeState.snap = snap;
+    const radar = { heavy: [], add: [], small: [], wait: [] };
+    const nearAdd = [];
+    for (const it of wl) {
+      const s = snap[it.code];
+      if (!s) continue;
+      const dyNew = (it.snapshot && it.snapshot.dps && s.price) ? (it.snapshot.dps / s.price) * 100 : null;
+      const ind = await industryHint(it.code);
+      const spot = (dyNew != null && ind) ? DL.tierSpot(dyNew, ind) : null;
+      if (spot) {
+        radar[spot.cur].push({ name: it.name, dy: dyNew, line: spot.line });
+        if (spot.cur === 'wait' || spot.cur === 'small') nearAdd.push({ name: it.name, gap: spot.line - dyNew, dy: dyNew });
+      }
+    }
     const alerts = [];
     for (const it of wl) {
       const s = snap[it.code];
@@ -338,9 +361,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         if (it.snapshot.price && s.price && (s.price / it.snapshot.price - 1) <= -0.15) alerts.push(`${it.name} 较加入时下跌 ${Math.abs((s.price / it.snapshot.price - 1) * 100).toFixed(1)}%`);
       }
     }
-    el.innerHTML = alerts.length
+    const radarLines = [];
+    if (radar.heavy.length) radarLines.push(`<b style="color:#e05a5a">🔴 ${radar.heavy.length} 只重仓区</b> ${radar.heavy.map(x => x.name + ' ' + x.dy.toFixed(2) + '%').join('、')}`);
+    if (radar.add.length) radarLines.push(`<b style="color:var(--gold)">🟠 ${radar.add.length} 只加仓区</b> ${radar.add.map(x => x.name + ' ' + x.dy.toFixed(2) + '%').join('、')}`);
+    if (radar.small.length) radarLines.push(`🟡 ${radar.small.length} 只小仓区 ${radar.small.map(x => x.name).join('、')}`);
+    if (radar.wait.length) radarLines.push(`⚪ ${radar.wait.length} 只等待区 ${radar.wait.map(x => x.name).join('、')}`);
+    nearAdd.sort((a, b) => a.gap - b.gap);
+    let html = '';
+    if (radarLines.length) html += `<div style="margin-bottom:6px;font-size:12px">🔍 <b>机会雷达</b>：${radarLines.join('；')}</div>`;
+    if (nearAdd.length) html += `<div class="hint">距加仓线最近：${nearAdd.slice(0, 3).map(x => `${x.name} 差 <b>${x.gap.toFixed(2)}pp</b>`).join(' · ')}（现价股息率 vs 行业加仓线）</div>`;
+    html += alerts.length
       ? alerts.map(a => `<div class="alert-item">🔔 ${a}</div>`).join('')
-      : '<div class="hint">✅ 暂无新机会（自选股状态稳定）</div>';
+      : '<div class="hint">✅ 变化提醒：自选股状态稳定（股息率/价格无显著变化）</div>';
+    el.innerHTML = html;
   }
 
   /* 自选卡片：默认3指标（股息率+分位、估值分位、年化/回撤合并）+ 展开态 */
@@ -365,20 +398,60 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
     const snap = homeState.snap || await DL.getStockQuotes(wl.map(x => x.code));
     homeState.snap = snap;
+    /* P1（2026-08-18 大师裁决）：快照缺失自动补拉——每标的每会话限 1 次（sessionStorage 记账），失败不自动死循环，显示"点此重试" */
+    const retried = {};
+    try { JSON.parse(sessionStorage.getItem('wl_retry') || '{}').forEach(c => retried[c] = 1); } catch (e) { }
+    const needRetry = [];
+    for (const it of wl) {
+      if (!(it.snapshot && it.snapshot.divYield != null) && !retried[it.code]) {
+        retried[it.code] = 1;
+        needRetry.push(it.code);
+        try { sessionStorage.setItem('wl_retry', JSON.stringify(Object.keys(retried))); } catch (e) { }
+      }
+    }
+    const snapAllInd = {};
+    try {
+      const snapAll = await DL.cacheGet('snap:all');
+      if (snapAll) wl.forEach(it => { const x = snapAll[it.code]; if (x && x.industry) snapAllInd[it.code] = DL.industryOf(x.industry); });
+    } catch (e) { }
+    for (const code of needRetry) {
+      try {
+        const name = (wl.find(x => x.code === code) || {}).name || code;
+        const price = (snap[code] || {}).price;
+        const divs = await DL.fetchDividendsOne(code);
+        const dy = price ? DL.calcAnnualDivYield(divs, price) : null;
+        if (dy && dy.yieldPct) await DL.Watchlist.updateSnapshot(code, { divYield: dy.yieldPct, dps: dy.yieldPct * price / 100, price, at: Date.now() });
+      } catch (e) { /* 静默：下次"点此重试" */ }
+    }
+    if (needRetry.length) { const wl2 = await DL.Watchlist.list(); homeState.watchlist = wl2; wl.length = 0; wl.push(...wl2); }
     el.innerHTML = wl.map(it => {
       const s = snap[it.code];
       const dy = it.snapshot ? it.snapshot.divYield : null;
+      /* O1（并入 P2）：自选卡三档联动——距加仓线差（股息率差口径，大师 Q3 确认；行业未识别降级） */
+      const ind = snapAllInd[it.code];
+      const spot = (dy != null && ind) ? DL.tierSpot(dy, ind) : null;
+      const gapTxt = spot ? (spot.cur === 'add' ? '<span style="color:var(--gold)">已到加仓线</span>' : spot.cur === 'heavy' ? '<span style="color:#e05a5a">已到重仓线</span>' : spot.cur === 'small' ? `距加仓线差 <b>${spot.gapAdd.toFixed(2)}pp</b>` : `距小仓线差 ${(spot.mid - dy).toFixed(2)}pp`) : '';
+      const missTxt = (dy == null && retried[it.code]) ? ' · <a href="javascript:void(0)" class="wl-retry" data-code="' + it.code + '" style="color:var(--gold)">点此重试</a>' : '';
       return `<div class="wl-card" data-code="${it.code}">
         <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
           <button class="wl-del" data-code="${it.code}">✕</button></div>
-        <div class="wl-main">${dy != null ? `年化股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>'}
+        <div class="wl-main">${dy != null ? `年化股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>' + missTxt}
           ${s ? `<span class="wl-price">${fmt(s.price, 2)}元</span>` : ''}</div>
-        <div class="wl-sub hint">点击进入诊断</div>
+        <div class="wl-sub hint">${gapTxt || '点击进入诊断'}${gapTxt ? ' · 点击进入诊断' : ''}</div>
       </div>`;
     }).join('');
     el.querySelectorAll('.wl-card').forEach(c => c.onclick = () => openDiagnose(c.dataset.code));
     el.querySelectorAll('.wl-del').forEach(b => {
       b.onclick = async e => { e.stopPropagation(); await DL.Watchlist.remove(b.dataset.code); renderHome(); };
+    });
+    /* P1 手动重试：清 sessionStorage 标记 → 重新渲染触发补拉 */
+    el.querySelectorAll('.wl-retry').forEach(a => {
+      a.onclick = async e => {
+        e.stopPropagation();
+        const code = a.dataset.code;
+        try { const r = JSON.parse(sessionStorage.getItem('wl_retry') || '[]').filter(c => c !== code); sessionStorage.setItem('wl_retry', JSON.stringify(r)); } catch (err) { }
+        renderHome();
+      };
     });
   }
 
@@ -1930,7 +2003,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       html += '</table>';
       // 结论行：推荐风险效率最高（收益/|浮亏|）的策略
       const best = res.filter(r => r.ret != null && r.mdd != null).sort((a, b) => (a.ret / Math.max(0.01, Math.abs(a.mdd))) - (b.ret / Math.max(0.01, Math.abs(b.mdd))))[res.filter(r => r.ret != null).length - 1];
+      /* P4（2026-08-18 大师裁决）：动态行情语境标注（按行业构成；位置=价格收益结论行）
+       * 治标：结论带语境防"闭眼全仓吊打策略"误导；治本=行情分段回测（backlog） */
+      let ctxNote = '';
+      try {
+        const snapAll = await DL.cacheGet('snap:all');
+        if (snapAll) {
+          let finN = 0;
+          wl.forEach(it => { const x = snapAll[it.code]; if (x && x.industry && (DL.industryOf(x.industry) === 'bank' || DL.industryOf(x.industry) === 'insurer')) finN++; });
+          if (wl.length && finN / wl.length >= 0.5) ctxNote = `🧭 行情语境：标的池金融权重高（银行/保险 ${finN}/${wl.length}）——${y} 年窗口下银行单边行情时买入持有天然占优，策略差异被压缩；建议切 5年/10年 看不同形态`;
+        }
+      } catch (e) { }
       if (best) html += `<div class="hint" style="margin-top:6px">📌 风险效率最优：<b>${best.name}</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}% · 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%）。⚠️ 结论基于“买入持有”口径（策略买入→持有至今，未计卖出/再平衡）；历史回测不代表未来，仅验证规则方向。</div>`;
+      if (ctxNote) html += `<div class="hint" style="margin-top:4px;color:var(--sub)">${ctxNote}</div>`;
       html += '<div class="hint">口径：事件首日买入（分位≥档位的连续区间）→ 持有至今；收益=期末价+期间分红÷买入价；组合=标的<u>等权</u>（与组合总览卡的“档位权重”口径不同）；含分红近似再投。策略规则没变就不用重跑。</div>';
       el.innerHTML = html;
     } catch (e) {

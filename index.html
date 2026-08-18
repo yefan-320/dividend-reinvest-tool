@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>红利复投工具</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
 <script src="vendor/echarts.min.js"></script>
 <script>
 /* O1：报告卡研究数据（2026-08-18 东财F10 2025年报 + 腾讯实时价）——F10 自动接入后删除 */
@@ -414,6 +415,7 @@ body{padding-bottom:64px}
 <div class="card" id="cardSummary" style="display:none">
   <h2>收益概览 <span id="stockName" style="color:var(--txt);font-weight:700"></span></h2>
   <div class="hint err" id="btEtfNote" style="display:none"></div>
+  <div class="hint" id="btPriceNote" style="margin-bottom:6px;font-size:11px"></div>
   <div class="stats" id="stats"></div>
 </div>
 
@@ -729,22 +731,23 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   const f = res.final;
   const yrs = res.years || [];
   const lastY = yrs.length ? yrs[yrs.length-1] : null;
+  // P5（2026-08-18 大师裁决+主人铁律）：主显统一分红视角，价格视角降附注区（与 renderAllFull 同步）
   const stats = [
-    ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
-    ['当前总资产', fmt(f.finalValue,0)+' 元', 'gold'],
-    ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
+    ['累计分红÷投入', fmt(Math.min(999, f.totalDiv / f.finalInvested * 100),1)+'%', 'gold'],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
     ['回本进度', fmt(Math.min(100, f.totalDiv / res.principal * 100),1)+'%'+ (yrs.length ? ' · 按年均分红约'+fmt(Math.max(0, (res.principal - f.totalDiv) / (f.totalDiv / yrs.length)),1)+'年回本' : ''), 'green'],
     ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
     ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
-    ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
-    ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
+    ['初始本金', fmt(res.principal,0)+' 元', ''],
+    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['当前总资产', fmt(f.finalValue,0)+' 元', ''],
+    ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
     ['分红率(相对本金)'+(showY0?' · '+showY0.year:''), fmtPct(showY0? showY0.rate0 : null), 'green'],
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
+  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：总收益率 ${fmtPct(f.totalReturn)} · 年化(XIRR) ${fmtPct(f.xirr)}`;
   $('cardSummary').style.display='block';
   // v1.8.7：降级模式也显示年度明细表（纯 HTML 不依赖 echarts，主人要求"每年分红的钱都要体现"）
   if (yrs.length) { renderYearTable(yrs, 'pay'); $('cardTable').style.display='block'; }
@@ -757,22 +760,24 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
   // 概览卡
   $('stockName').textContent = name + '（' + res.buyDateReal + '买入 @ ' + fmt(res.buyPrice,3) + '元）';
   const lastY = yrs.length ? yrs[yrs.length-1] : null;
+  // P5（2026-08-18 大师裁决+主人铁律）：主显统一分红视角（累计分红÷投入置顶），价格视角降附注区
   const stats = [
-    ['初始本金', fmt(res.principal,0)+' 元', ''],
-    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
-    ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', 'gold'],
-    ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
+    ['累计分红÷投入', fmt(Math.min(999, f.totalDiv / f.finalInvested * 100),1)+'%', 'gold'],
     ['累计分红(税前)', fmt(f.totalDiv,0)+' 元', 'green'],
     ['回本进度', fmt(Math.min(100, f.totalDiv / res.principal * 100),1)+'%'+ (yrs.length ? ' · 按年均分红约'+fmt(Math.max(0, (res.principal - f.totalDiv) / (f.totalDiv / yrs.length)),1)+'年回本' : ''), 'green'],
     ['年均分红', (yrs.length ? fmt(f.totalDiv / yrs.length, 0) : '—') + ' 元/年', 'green'],
     ['最近年度分红', lastY ? lastY.year+'年 '+fmt(lastY.divTotal,0)+' 元' : '—', 'green'],
-    ['总收益率(相对本金)', fmtPct(f.totalReturn), f.totalReturn>=0?'green':'red'],
-    ['年化收益率(XIRR)', fmtPct(f.xirr), f.xirr>=0?'green':'red'],
+    ['初始本金', fmt(res.principal,0)+' 元', ''],
+    ['累计投入(本金'+ (window.CURRENT_MONTHLY>0 ? '+追加' : '') +'+复投)', fmt(f.finalInvested,0)+' 元', ''],
+    ['当前总资产(含现金)', fmt(f.finalValue,0)+' 元', ''],
+    ['期末现金池', fmt(f.cashPool,0)+' 元', ''],
     ['分红率(相对投入)'+(showY?' · '+showY.year:''), fmtPct(showY? showY.rate : f.latestRate), 'gold'],
     ['分红率(相对本金)'+(showY0?' · '+showY0.year:''), fmtPct(showY0? showY0.rate0 : null), 'green'],
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
+  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：总收益率 ${fmtPct(f.totalReturn)} · 年化(XIRR) ${fmtPct(f.xirr)}`;
+  $('cardSummary').style.display='block';
   // v1.8.7：点击"累计分红/年均分红/最近年度"滚动到年度明细表（主人要求"每年分红的钱都要体现"）
   const yt = $('#stats');
   if (yt) yt.querySelectorAll('.stat').forEach((el, i) => {

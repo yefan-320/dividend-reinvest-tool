@@ -1269,11 +1269,26 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
   return out;
 }
 
+/* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——给定当前股息率+行业 → 落档 + 距加仓线差
+ * 与 verdictEngine 同源（BENCH 零硬编码）；雷达展示用，不含价格换算（价格差易误导 M47 教训） */
+function tierSpot(dy, industry) {
+  const yb = BENCH[industry];
+  if (!yb || dy == null) return null;
+  const mid = yb.yieldMid, line = yb.yieldMid + yb.yieldUp, heavy = line + 1;
+  let cur;
+  if (dy >= heavy) cur = 'heavy';
+  else if (dy >= line) cur = 'add';
+  else if (dy >= mid) cur = 'small';
+  else cur = 'wait';
+  return { mid, line, heavy, cur, gapAdd: Math.max(0, line - dy) };
+}
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
+  tierSpot,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
