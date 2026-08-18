@@ -1283,12 +1283,40 @@ function tierSpot(dy, industry) {
   return { mid, line, heavy, cur, gapAdd: Math.max(0, line - dy) };
 }
 
+/* O3 卖出信号轻量判定（2026-08-18）：自选卡角标用——只依赖 divs（1 请求），不依赖 kline（分位放大器属诊断页完整版）
+ * 与 views.js renderSellSignals 的 epsConsec/divConsec 计算逐行同源（改动必须同步） */
+function sellSignalQuick(divs) {
+  const SELL_WINDOW_YEARS = 5;
+  const epsByYear = {};
+  divs.forEach(d => { if (d.eps == null) return; const y = (d.report || '').slice(0, 4); if (y) epsByYear[y] = d.eps; });
+  const years = Object.keys(epsByYear).sort();
+  const epsTrend = [];
+  for (let i = 1; i < years.length; i++) {
+    const prev = epsByYear[years[i - 1]], cur = epsByYear[years[i]];
+    if (prev != null && cur != null) epsTrend.push({ y: years[i], pct: (cur - prev) / prev * 100 });
+  }
+  const epsLastYear = years.length ? years[years.length - 1] : null;
+  const epsWindowed = epsTrend.filter(t => epsLastYear != null && t.y >= epsLastYear - SELL_WINDOW_YEARS + 1);
+  let epsBad = false;
+  for (let i = 1; i < epsWindowed.length; i++) { if (epsWindowed[i].pct < 0 && epsWindowed[i - 1].pct < 0) { epsBad = true; break; } }
+  const byYear = {};
+  divs.forEach(d => { if (d.pending || !d.ex || !(d.dps > 0)) return; const y = (d.report || d.ex).slice(0, 4); byYear[y] = (byYear[y] || 0) + d.dps; });
+  const ys = Object.keys(byYear).filter(y => byYear[y] > 0).sort();
+  const yoy = [];
+  for (let i = 1; i < ys.length; i++) { const prev = byYear[ys[i - 1]], cur = byYear[ys[i]]; yoy.push({ y: ys[i], pct: prev > 0 ? (cur - prev) / prev * 100 : null }); }
+  const lastFullYear = ys.length ? ys[ys.length - 1] : null;
+  const yoyWindowed = yoy.filter(t => lastFullYear != null && t.y >= lastFullYear - SELL_WINDOW_YEARS + 1);
+  let divBad = false;
+  for (let i = 1; i < yoyWindowed.length; i++) { if (yoyWindowed[i].pct != null && yoyWindowed[i].pct < 0 && yoyWindowed[i - 1].pct != null && yoyWindowed[i - 1].pct < 0) { divBad = true; break; } }
+  return { epsBad, divBad };
+}
+
 /* ---------- 对外导出 ---------- */
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
-  tierSpot,
+  tierSpot, sellSignalQuick,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,

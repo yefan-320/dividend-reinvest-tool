@@ -330,6 +330,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     for (const [re, ind] of NAME_IND_RULES) if (re.test(name || '')) return ind;
     return null;
   }
+  /* O2（2026-08-18）：同步行业读取（日历/卡片用，零网络）——sessionStorage 缓存 → 名称规则 */
+  function industryForSync(code, name) {
+    try {
+      const sess = JSON.parse(sessionStorage.getItem('ind_hint') || '{}');
+      if (sess[code]) return DL.industryOf(sess[code]);
+    } catch (e) { }
+    return industryByName(name);
+  }
   async function industryHint(code) {
     const name = ((homeState.watchlist || []).find(x => x.code === code) || {}).name || '';
     try {
@@ -452,16 +460,33 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       } catch (e) { /* 静默：下次"点此重试" */ }
     }
     if (needRetry.length) { const wl2 = await DL.Watchlist.list(); homeState.watchlist = wl2; wl.length = 0; wl.push(...wl2); }
+    /* O3（2026-08-18 大师排序第一）：卖出信号角标——每标的每会话补算 1 次（sessionStorage 缓存），只拉 divs（1 请求）
+     * 与诊断页 renderSellSignals 同源（DL.sellSignalQuick）；失败=无信号（角标宁缺勿误报） */
+    let sellSig = {};
+    try { sellSig = JSON.parse(sessionStorage.getItem('sell_sig') || '{}'); } catch (e) { }
+    const sellNeed = wl.filter(it => !(it.code in sellSig)).map(it => it.code);
+    for (const code of sellNeed) {
+      sellSig[code] = 'pending';
+      try {
+        const divs = await DL.fetchDividendsOne(code);
+        const r = DL.sellSignalQuick(divs);
+        sellSig[code] = (r.epsBad || r.divBad) ? (r.epsBad && r.divBad ? 'both' : (r.epsBad ? 'eps' : 'div')) : 'ok';
+      } catch (e) { sellSig[code] = 'ok'; }
+      try { sessionStorage.setItem('sell_sig', JSON.stringify(sellSig)); } catch (e) { }
+    }
     el.innerHTML = wl.map(it => {
       const s = snap[it.code];
       const dy = it.snapshot ? it.snapshot.divYield : null;
+      const sig = sellSig[it.code];
+      const sigTxt = sig && sig !== 'ok' && sig !== 'pending'
+        ? `<span class="chip" style="background:rgba(224,90,90,.15);color:#e05a5a;font-size:10px;padding:1px 6px;border:1px solid rgba(224,90,90,.4)" title="连续2年${sig.indexOf('eps') >= 0 ? 'EPS下滑' : ''}${sig === 'both' ? ' + ' : ''}${sig.indexOf('div') >= 0 ? '分红下调' : ''}（5财年窗口）">⚠️ 卖出信号</span>` : '';
       /* O1（并入 P2）：自选卡三档联动——距加仓线差（股息率差口径，大师 Q3 确认；行业未识别降级） */
       const ind = snapAllInd[it.code];
       const spot = (dy != null && ind) ? DL.tierSpot(dy, ind) : null;
       const gapTxt = spot ? (spot.cur === 'add' ? '<span style="color:var(--gold)">已到加仓线</span>' : spot.cur === 'heavy' ? '<span style="color:#e05a5a">已到重仓线</span>' : spot.cur === 'small' ? `距加仓线差 <b>${spot.gapAdd.toFixed(2)}pp</b>` : `距小仓线差 ${(spot.mid - dy).toFixed(2)}pp`) : '';
       const missTxt = (dy == null && retried[it.code]) ? ' · <a href="javascript:void(0)" class="wl-retry" data-code="' + it.code + '" style="color:var(--gold)">点此重试</a>' : '';
       return `<div class="wl-card" data-code="${it.code}">
-        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
+        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${sigTxt}${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
           <button class="wl-del" data-code="${it.code}">✕</button></div>
         <div class="wl-main">${dy != null ? `年化股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>' + missTxt}
           ${s ? `<span class="wl-price">${fmt(s.price, 2)}元</span>` : ''}</div>
@@ -526,7 +551,18 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const rows = cf.map(m => {
       const hasAmt = m.items.some(x => x.shares > 0);
       const amt = hasAmt ? m.items.reduce((s, x) => s + x.dps * x.shares, 0) : 0;
-      const items = m.items.map(x => `${x.name}${x.est ? '(估)' : ''} ${(x.dps * 10).toFixed(2)}元${x.shares > 0 ? '×' + x.shares : ''}`).join(' · ');
+      const items = m.items.map(x => {
+        /* O2（2026-08-18 大师排序第三）：日历×三档联动——每只标的显示当前股息率 vs 加仓线（同步零网络） */
+        const wlIt = wl.find(w => w.code === x.code);
+        const dy = wlIt && wlIt.snapshot ? wlIt.snapshot.divYield : null;
+        let tierTxt = '';
+        if (dy != null) {
+          const ind = industryForSync(x.code, x.name);
+          const spot = ind ? DL.tierSpot(dy, ind) : null;
+          if (spot) tierTxt = spot.cur === 'add' ? ' <span style="color:var(--gold)">已到加仓线</span>' : spot.cur === 'heavy' ? ' <span style="color:#e05a5a">已到重仓线</span>' : spot.cur === 'small' ? ` <span style="color:var(--sub)">距加仓线差 ${spot.gapAdd.toFixed(2)}pp</span>` : ` <span style="color:var(--sub)">距小仓线差 ${(spot.mid - dy).toFixed(2)}pp</span>`;
+        }
+        return `${x.name}${x.est ? '(估)' : ''} ${(x.dps * 10).toFixed(2)}元${x.shares > 0 ? '×' + x.shares : ''}${tierTxt}`;
+      }).join(' · ');
       return `<div class="cal-item" style="display:flex;justify-content:space-between;gap:6px"><span class="cal-date">${m.month}</span><span style="flex:1;font-size:11px">${items}</span>${hasAmt ? `<b style="color:var(--txt)">${(amt / 10000).toFixed(2)}万</b>` : ''}</div>`;
     });
     const yearTotal = cf.reduce((s, m) => s + m.total, 0);
@@ -1849,6 +1885,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
       }
       setPeriodNote();
+    }
+    // O4（2026-08-18 大师排序第二）：对比页预填自选（前 5 只；URL cmp 参数优先时不预填——分享链接只显示 URL 标的）
+    if (!cmpState.list.length && !params.get('cmp')) {
+      try {
+        const wl = DL.Watchlist.list();
+        if (wl.length) { cmpState.list = wl.slice(0, 5).map(x => ({ code: x.code, name: x.name || x.code })); cmpRenderList(); }
+      } catch (e) { }
     }
     if (cmp) {
       const ver = params.get('v');
