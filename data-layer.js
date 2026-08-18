@@ -1294,7 +1294,7 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
   const buyP = bp(line), heavyP = bp(heavyLine);
   /* Q1（M38）：当前档位指示——现价股息率落在哪个区 */
   let curTier = null;
-  if (dy != null && midLine != null) {
+  if (dy != null && midLine != null && !(tl && tl.pending)) {
     if (dy >= heavyLine) curTier = { name: '重仓区', note: '已到重仓线 ' + heavyLine.toFixed(1) + '%' };
     else if (dy >= line) curTier = { name: '加仓区', note: '已到加仓线 ' + line.toFixed(1) + '%' };
     else if (dy >= midLine) curTier = { name: '小仓区', note: '已可小仓（≥' + midLine.toFixed(1) + '%），未到加仓线 ' + line.toFixed(1) + '%' };
@@ -1313,12 +1313,16 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     }
   }
   const tiers = [];
-  /* M47 Q1：三档结构化（股息率主显 + 价格附注小字）——rate 为档位股息率，price 为换算价（附注用） */
-  if (curTier) tiers.push({ type: 'cur', text: '📍 当前：' + curTier.name + '（' + curTier.note + '）' });
-  if (midLine != null) tiers.push({ type: 'small', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
-  if (buyP) tiers.push({ type: 'add', rate: line, price: buyP, hit: dy != null && dy >= line });
-  if (heavyP) tiers.push({ type: 'full', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
-  /* v1.9.13：线源标注（溢价分位 vs 行业参考）+ 语义行 */
+  /* M47 Q1：三档结构化（股息率主显 + 价格附注小字）——rate 为档位股息率，price 为换算价（附注用）
+   * v1.9.13：pending（线待补）不展示三档——只展示不触发 */
+  if (!(tl && tl.pending)) {
+    if (curTier) tiers.push({ type: 'cur', text: '📍 当前：' + curTier.name + '（' + curTier.note + '）' });
+    if (midLine != null) tiers.push({ type: 'small', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
+    if (buyP) tiers.push({ type: 'add', rate: line, price: buyP, hit: dy != null && dy >= line });
+    if (heavyP) tiers.push({ type: 'full', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
+  }
+  /* v1.9.13：线源标注（溢价分位 vs 行业参考）+ 语义行 + 过滤层黄灯（优先级：trap>红线>短样本>漂移）
+   * 大师第5轮：过滤层只降级不改数；黄灯原因优先级排序，显示前 2 条 */
   if (tl) {
     if (tl.pending) {
       out.lineNote = '⚠️ 溢价分位线待补（K线源故障）·当前显示股息率线（口径不同）·仅展示不触发';
@@ -1327,6 +1331,34 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
         + (indLine != null ? '；行业参考 ' + indLine.toFixed(1) + '%' : '')
         + '；线高=市场对其分红增长信心低（分红CAGR ' + (tl.cagr != null ? tl.cagr.toFixed(1) + '%' : '—') + '）';
       if (tl.redLine) out.lineNote += '；⚠️ 支付率 ' + tl.payout + '% 超红线，分位线仅供参考';
+    }
+    /* 过滤层黄灯数组（只降级不改数） */
+    const filters = [];
+    if (out.trap) filters.push({ sev: 1, txt: (out.trap.level === 'hard' ? '🚫' : '⚠️') + ' ' + out.trap.msg });
+    if (tl.redLine) filters.push({ sev: 2, txt: '⚠️ 支付率 ' + tl.payout + '% 超红线（>90%/<20%），分位线仅供参考' });
+    if (tl.pending) filters.push({ sev: 2, txt: '⚠️ K线源故障，股息率线暂替（口径不同），仅展示不触发' });
+    if (tl.shortSample) filters.push({ sev: 3, txt: '⚠️ 样本不足 5 年，分位线稳定性待观察' });
+    if (tl.drift) filters.push({ sev: 4, txt: '⚠️ 线漂移中（连续 3 季累计下移 >0.8pp，阴跌锚定风险）' });
+    out.filters = filters.sort((a, b) => a.sev - b.sev).slice(0, 2);
+    /* 三维参考（参照系层并列展示·黑盒加权禁令：矛盾展示不做加权） */
+    const absLevel = (dy != null && indLine != null) ? (dy >= indLine ? '高' : (dy >= indLine * 0.85 ? '中' : '低')) : null;
+    const pctLevel = curTier ? curTier.name : null;
+    const finLevel = tl.quality || null;
+    out.ref3D = {
+      abs: absLevel ? { label: '绝对', val: dy != null ? dy.toFixed(2) + '%' : '—', ref: indLine != null ? '行业 ' + indLine.toFixed(1) + '%' : null, level: absLevel } : null,
+      pct: pctLevel ? { label: '分位', val: curTier.name, ref: tl.p90_1y != null ? '近1年P90 ' + (tl.p90_1y + TREASURY_NOW).toFixed(2) + '%' : null, level: pctLevel } : null,
+      fin: finLevel ? { label: '财报', val: (tl.cagr != null ? 'CAGR ' + tl.cagr.toFixed(1) + '%' : '—'), ref: '支付率 ' + (tl.payout != null ? tl.payout + '%' : '—'), level: finLevel } : null,
+    };
+    /* 矛盾检测（展示不裁决）：绝对高但分位低 / 分位极值但绝对低 / 财报负增长但分位极值 */
+    out.conflicts = [];
+    if (absLevel === '高' && curTier && (curTier.name === '等待区' || curTier.name === '小仓区')) {
+      out.conflicts.push('绝对股息率高于行业参考，但分位仅' + curTier.name + '——该股历史整体高息，绝对高≠相对机会');
+    }
+    if (absLevel === '低' && curTier && (curTier.name === '重仓区' || curTier.name === '加仓区')) {
+      out.conflicts.push('分位已到' + curTier.name + '，但绝对股息率低于行业参考——利率环境或该股历史低息所致');
+    }
+    if (tl.quality === '负增长' && curTier && (curTier.name === '重仓区' || curTier.name === '加仓区')) {
+      out.conflicts.push('分位已到' + curTier.name + '，但分红负增长——陷阱风险（价值毁灭型高股息）');
     }
   }
   out.tiers = tiers;
@@ -1391,36 +1423,37 @@ function sigNote(ind, tierKey) {
 /* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08 近似 1.55%，正式源待接入 backlog） */
 const TREASURY_NOW = 1.55;
 const TIER_LINE = {
-  '000001': { name: '平安银行', ind: 'bank', p75: 4.35, p90: 5.07, p95: 5.28, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, pending: false },
-  '000333': { name: '美的集团', ind: 'consumer', p75: 3.22, p90: 3.88, p95: 4.03, cagr: 19.8, payout: 69, quality: '高增长', redLine: false, pending: false },
-  '000651': { name: '格力电器', ind: 'consumer', p75: 5.73, p90: 6.19, p95: 6.42, cagr: -20.6, payout: null, quality: '负增长', redLine: false, pending: false },
-  '000858': { name: '五粮液', ind: 'consumer', p75: 3.16, p90: 3.63, p95: 5.1, cagr: 10.9, payout: 104, quality: '高增长', redLine: true, pending: false },
-  '000895': { name: '双汇发展', ind: 'consumer', p75: 4.08, p90: 4.28, p95: 4.44, cagr: -3.2, payout: 98, quality: '负增长', redLine: true, pending: false },
-  '600016': { name: '民生银行', ind: 'bank', p75: 3.66, p90: 3.89, p95: 4.21, cagr: -4.1, payout: 30, quality: '负增长', redLine: false, pending: false },
-  '600027': { name: '华电国际', ind: 'utility', p75: 2.41, p90: 3.07, p95: 3.38, cagr: 4.8, payout: 46, quality: '低增长', redLine: false, pending: false },
-  '600028': { name: '中国石化', ind: 'energy', p75: 3.61, p90: 4.22, p95: 4.5, cagr: -17.4, payout: 72, quality: '负增长', redLine: false, pending: false },
-  '600036': { name: '招商银行', ind: 'bank', p75: 3.78, p90: 4.09, p95: 4.24, cagr: 5.1, payout: 35, quality: '稳定增长', redLine: false, pending: false },
-  '600188': { name: '兖矿能源', ind: 'energy', p75: 7.83, p90: 12.92, p95: 13.65, cagr: -45.4, payout: 55, quality: '负增长', redLine: false, pending: false },
-  '600519': { name: '贵州茅台', ind: 'consumer', p75: 1.98, p90: 2.2, p95: 2.51, cagr: 26.1, payout: 77, quality: '高增长', redLine: false, pending: false },
-  '600690': { name: '海尔智家', ind: 'consumer', p75: 2.19, p90: 3.79, p95: 4.07, cagr: 27, payout: 51, quality: '高增长', redLine: false, pending: false },
-  '600795': { name: '国电电力', ind: 'utility', p75: 2.79, p90: 3.38, p95: 3.51, cagr: null, payout: 46, quality: '—', redLine: false, pending: false },
-  '600886': { name: '国投电力', ind: 'utility', p75: 1.62, p90: 2.22, p95: 2.31, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, pending: false },
-  '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false },
-  '600900': { name: '长江电力', ind: 'utility', p75: 1.78, p90: 2.16, p95: 2.23, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, pending: false },
-  '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: true },
-  '601088': { name: '中国神华', ind: 'energy', p75: 5.85, p90: 6.49, p95: 6.64, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, pending: false },
-  '601166': { name: '兴业银行', ind: 'bank', p75: 4.56, p90: 5.08, p95: 5.36, cagr: -3.5, payout: 31, quality: '负增长', redLine: false, pending: false },
-  '601225': { name: '陕西煤业', ind: 'energy', p75: 8.37, p90: 9.6, p95: 10.11, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, pending: false },
-  '601288': { name: '农业银行', ind: 'bank', p75: 3.82, p90: 4.11, p95: 4.86, cagr: 3.9, payout: 32, quality: '低增长', redLine: false, pending: false },
-  '601318': { name: '中国平安', ind: 'insurer', p75: 3.56, p90: 3.89, p95: 4, cagr: 3.7, payout: 35, quality: '低增长', redLine: false, pending: false },
-  '601328': { name: '交通银行', ind: 'bank', p75: 4.08, p90: 4.38, p95: 4.84, cagr: -4.5, payout: 31, quality: '负增长', redLine: false, pending: false },
-  '601398': { name: '工商银行', ind: 'bank', p75: 3.89, p90: 4.21, p95: 4.37, cagr: 0.7, payout: 31, quality: '低增长', redLine: false, pending: false },
-  '601601': { name: '中国太保', ind: 'insurer', p75: 1.78, p90: 2.16, p95: 2.31, cagr: 4.1, payout: 22, quality: '低增长', redLine: false, pending: false },
-  '601628': { name: '中国人寿', ind: 'insurer', p75: 0.04, p90: 0.71, p95: 0.84, cagr: 20.4, payout: 16, quality: '高增长', redLine: true, pending: false },
-  '601857': { name: '中国石油', ind: 'energy', p75: 3.83, p90: 4.27, p95: 5.07, cagr: 3.6, payout: 53, quality: '低增长', redLine: false, pending: false },
-  '601985': { name: '中国核电', ind: 'utility', p75: 0.27, p90: 0.51, p95: 0.56, cagr: 1.9, payout: 37, quality: '低增长', redLine: false, pending: false },
-  '601988': { name: '中国银行', ind: 'bank', p75: 3.52, p90: 3.9, p95: 4.44, cagr: -0.8, payout: 31, quality: '负增长', redLine: false, pending: false },
+  '000001': { name: '平安银行', ind: 'bank', p75: 4.35, p90: 5.07, p95: 5.28, p90_1y: 3.99, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, pending: false },
+  '000333': { name: '美的集团', ind: 'consumer', p75: 3.22, p90: 3.88, p95: 4.03, p90_1y: 4.04, cagr: 19.8, payout: 69, quality: '高增长', redLine: false, pending: false },
+  '000651': { name: '格力电器', ind: 'consumer', p75: 5.73, p90: 6.19, p95: 6.42, p90_1y: 6.43, cagr: -20.6, payout: null, quality: '负增长', redLine: false, pending: false },
+  '000858': { name: '五粮液', ind: 'consumer', p75: 3.16, p90: 3.63, p95: 5.1, p90_1y: 5.18, cagr: 10.9, payout: 104, quality: '高增长', redLine: true, pending: false },
+  '000895': { name: '双汇发展', ind: 'consumer', p75: 4.08, p90: 4.28, p95: 4.44, p90_1y: 4.38, cagr: -3.2, payout: 98, quality: '负增长', redLine: true, pending: false },
+  '600016': { name: '民生银行', ind: 'bank', p75: 3.66, p90: 3.89, p95: 4.21, p90_1y: 3.88, cagr: -4.1, payout: 30, quality: '负增长', redLine: false, pending: false },
+  '600027': { name: '华电国际', ind: 'utility', p75: 2.41, p90: 3.07, p95: 3.38, p90_1y: 3.41, cagr: 4.8, payout: 46, quality: '低增长', redLine: false, pending: false },
+  '600028': { name: '中国石化', ind: 'energy', p75: 3.61, p90: 4.22, p95: 4.5, p90_1y: 3.48, cagr: -17.4, payout: 72, quality: '负增长', redLine: false, pending: false },
+  '600036': { name: '招商银行', ind: 'bank', p75: 3.78, p90: 4.09, p95: 4.24, p90_1y: 3.82, cagr: 5.1, payout: 35, quality: '稳定增长', redLine: false, pending: false },
+  '600188': { name: '兖矿能源', ind: 'energy', p75: 7.83, p90: 12.92, p95: 13.65, p90_1y: 4.47, cagr: -45.4, payout: 55, quality: '负增长', redLine: false, pending: false },
+  '600519': { name: '贵州茅台', ind: 'consumer', p75: 1.98, p90: 2.2, p95: 2.51, p90_1y: 2.54, cagr: 26.1, payout: 77, quality: '高增长', redLine: false, pending: false },
+  '600690': { name: '海尔智家', ind: 'consumer', p75: 2.19, p90: 3.79, p95: 4.07, p90_1y: 4.08, cagr: 27, payout: 51, quality: '高增长', redLine: false, pending: false },
+  '600795': { name: '国电电力', ind: 'utility', p75: 2.79, p90: 3.38, p95: 3.51, p90_1y: 3.54, cagr: null, payout: 46, quality: '—', redLine: false, pending: false },
+  '600886': { name: '国投电力', ind: 'utility', p75: 1.62, p90: 2.22, p95: 2.31, p90_1y: 2.31, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, pending: false },
+  '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, p90_1y: 3.87, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false },
+  '600900': { name: '长江电力', ind: 'utility', p75: 1.78, p90: 2.16, p95: 2.23, p90_1y: 2.24, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, pending: false },
+  '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, p90_1y: null, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: true },
+  '601088': { name: '中国神华', ind: 'energy', p75: 5.85, p90: 6.49, p95: 6.64, p90_1y: 4.38, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, pending: false },
+  '601166': { name: '兴业银行', ind: 'bank', p75: 4.56, p90: 5.08, p95: 5.36, p90_1y: 4.46, cagr: -3.5, payout: 31, quality: '负增长', redLine: false, pending: false },
+  '601225': { name: '陕西煤业', ind: 'energy', p75: 8.37, p90: 9.6, p95: 10.11, p90_1y: 5.24, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, pending: false },
+  '601288': { name: '农业银行', ind: 'bank', p75: 3.82, p90: 4.11, p95: 4.86, p90_1y: 3.04, cagr: 3.9, payout: 32, quality: '低增长', redLine: false, pending: false },
+  '601318': { name: '中国平安', ind: 'insurer', p75: 3.56, p90: 3.89, p95: 4, p90_1y: 3.58, cagr: 3.7, payout: 35, quality: '低增长', redLine: false, pending: false },
+  '601328': { name: '交通银行', ind: 'bank', p75: 4.08, p90: 4.38, p95: 4.84, p90_1y: 3.65, cagr: -4.5, payout: 31, quality: '负增长', redLine: false, pending: false },
+  '601398': { name: '工商银行', ind: 'bank', p75: 3.89, p90: 4.21, p95: 4.37, p90_1y: 2.87, cagr: 0.7, payout: 31, quality: '低增长', redLine: false, pending: false },
+  '601601': { name: '中国太保', ind: 'insurer', p75: 1.78, p90: 2.16, p95: 2.31, p90_1y: 2.14, cagr: 4.1, payout: 22, quality: '低增长', redLine: false, pending: false },
+  '601628': { name: '中国人寿', ind: 'insurer', p75: 0.04, p90: 0.71, p95: 0.84, p90_1y: 0.84, cagr: 20.4, payout: 16, quality: '高增长', redLine: true, pending: false },
+  '601857': { name: '中国石油', ind: 'energy', p75: 3.83, p90: 4.27, p95: 5.07, p90_1y: 4.21, cagr: 3.6, payout: 53, quality: '低增长', redLine: false, pending: false },
+  '601985': { name: '中国核电', ind: 'utility', p75: 0.27, p90: 0.51, p95: 0.56, p90_1y: 0.56, cagr: 1.9, payout: 37, quality: '低增长', redLine: false, pending: false },
+  '601988': { name: '中国银行', ind: 'bank', p75: 3.52, p90: 3.9, p95: 4.44, p90_1y: 2.84, cagr: -0.8, payout: 31, quality: '负增长', redLine: false, pending: false },
 };
+
 
 
 /* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——给定当前股息率+行业 → 落档 + 距加仓线差

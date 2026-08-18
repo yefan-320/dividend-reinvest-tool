@@ -43,6 +43,9 @@ function treasuryAt(d) {
       if (r3.length < 400) continue;
       const sp = r3.map(x => x.dy - treasuryAt(x.d)).sort((a, b) => a - b);
       const q = (p) => sp[Math.min(sp.length - 1, Math.floor(p / 100 * sp.length))];
+      // 近1年参考窗（大师第4轮 A2：只展示不触发，防"线含过去时"——工行近1年P90=4.52 vs 近3年6.57）
+      const r1 = series.filter(x => x.dy != null && x.d >= '2025-01-01').map(x => x.dy - treasuryAt(x.d)).sort((a, b) => a - b);
+      const q1 = (p) => r1.length >= 100 ? r1[Math.min(r1.length - 1, Math.floor(p / 100 * r1.length))] : null;
       const byRep = {}, epsY = {};
       divs.forEach(d => { if (d.pending || !d.report) return; const y = d.report.slice(0, 4); if (!y) return; byRep[y] = (byRep[y] || 0) + (d.dps || 0); if (/-12-31$/.test(d.report) && d.eps != null) epsY[y] = d.eps; });
       const yrs = Object.keys(byRep).filter(y => byRep[y] > 0).sort();
@@ -54,6 +57,7 @@ function treasuryAt(d) {
       out[code] = {
         name: NAME[code] || code, ind,
         p75: +q(75).toFixed(2), p90: +q(90).toFixed(2), p95: +q(95).toFixed(2),
+        p90_1y: q1(90) != null ? +q1(90).toFixed(2) : null,
         cagr: cagr != null ? +cagr.toFixed(1) : null,
         payout: payout != null ? +(payout * 100).toFixed(0) : null,
         quality,
@@ -63,15 +67,15 @@ function treasuryAt(d) {
     }
   }
   // 移动：K线源故障 → 股息率线暂替（pending：只展示不触发）
-  const m = { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, sampleDays: 877, asOf: '2026-08-18', window: '股息率线暂替', pending: true };
+  const m = { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, p90_1y: null, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, sampleDays: 877, asOf: '2026-08-18', window: '股息率线暂替', pending: true };
   out['600941'] = m;
   const lines = [];
   for (const [code, o] of Object.entries(out).sort()) {
-    lines.push(`  '${code}': { name: '${o.name}', ind: '${o.ind}', p75: ${o.p75}, p90: ${o.p90}, p95: ${o.p95}, cagr: ${o.cagr}, payout: ${o.payout}, quality: '${o.quality}', redLine: ${o.redLine}, pending: ${!!o.pending} },`);
+    lines.push(`  '${code}': { name: '${o.name}', ind: '${o.ind}', p75: ${o.p75}, p90: ${o.p90}, p95: ${o.p95}, p90_1y: ${o.p90_1y != null ? o.p90_1y : 'null'}, cagr: ${o.cagr}, payout: ${o.payout}, quality: '${o.quality}', redLine: ${o.redLine}, pending: ${!!o.pending} },`);
   }
   fs.writeFileSync('/tmp/tier-line-block-v2.js', 'const TIER_LINE = {\n' + lines.join('\n') + '\n};\n');
   console.log('生成 ' + Object.keys(out).length + ' 只溢价分位数据块 → /tmp/tier-line-block-v2.js');
   console.log('\n6 只持仓（溢价分位 pp）：');
-  ['600036', '601398', '600887', '600941', '000333', '601318'].forEach(c => { const o = out[c]; if (o) console.log('  ' + o.name + ' P75=' + o.p75 + ' P90=' + o.p90 + ' P95=' + o.p95 + 'pp' + (o.pending ? ' [股息率线暂替·只展示不触发]' : '') + ' CAGR=' + o.cagr + ' 支付率=' + o.payout + '%'); });
+  ['600036', '601398', '600887', '600941', '000333', '601318'].forEach(c => { const o = out[c]; if (o) console.log('  ' + o.name + ' P75=' + o.p75 + ' P90=' + o.p90 + ' P95=' + o.p95 + 'pp 近1年P90=' + (o.p90_1y != null ? o.p90_1y : '—') + 'pp' + (o.pending ? ' [股息率线暂替·只展示不触发]' : '') + ' CAGR=' + o.cagr + ' 支付率=' + o.payout + '%'); });
   process.exit(0);
 })();

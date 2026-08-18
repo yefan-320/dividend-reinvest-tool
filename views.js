@@ -514,9 +514,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const ind = snapAllInd[it.code];
       const spot = (dy != null && ind) ? DL.tierSpot(dy, ind, it.code) : null;
       const gapTxt = spot ? (spot.pending ? '<span style="color:var(--gold)" title="K线源故障，溢价线待补">⚠️ 线待补（仅参考）</span>' : spot.cur === 'add' ? '<span style="color:var(--gold)">已到加仓线</span>' : spot.cur === 'heavy' ? '<span style="color:#e05a5a">已到重仓线</span>' : spot.cur === 'small' ? `距加仓线差 <b>${spot.gapAdd.toFixed(2)}pp</b>` : `距小仓线差 ${(spot.mid - dy).toFixed(2)}pp`) : '';
+      /* v1.9.13：过滤层黄灯角标（红线/短样本→可点击跳诊断页看原因；大师第2轮：角标=入口不是终点） */
+      const spotTl = spot && spot.tl;
+      const warnTxt = spotTl && !spot.pending && (spotTl.redLine || spotTl.shortSample || spotTl.drift)
+        ? `<a href="javascript:void(0)" class="wl-warn" data-code="${it.code}" title="信号降级：${[spotTl.redLine ? '支付率超红线' : '', spotTl.shortSample ? '短样本' : '', spotTl.drift ? '线漂移' : ''].filter(Boolean).join('、')}（点击看详情）" style="color:#d9a45b;font-size:10px;margin-left:4px">🟡</a>` : '';
       const missTxt = (dy == null && retried[it.code]) ? ' · <a href="javascript:void(0)" class="wl-retry" data-code="' + it.code + '" style="color:var(--gold)">点此重试</a>' : '';
       return `<div class="wl-card" data-code="${it.code}">
-        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${sigTxt}${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
+        <div class="wl-head"><b>${it.name}</b><span class="wl-code">${it.code}</span>${warnTxt}${sigTxt}${secTypeLabel({ code: it.code }) !== '股票' ? `<span class="chip" style="font-size:10px;padding:1px 6px">${secTypeLabel({ code: it.code })}</span>` : ''}
           <button class="wl-del" data-code="${it.code}">✕</button></div>
         <div class="wl-main">${dy != null ? `年化股息率 <b class="gold">${dy.toFixed(2)}%</b>` : '<span class="hint">待数据</span>' + missTxt}
           ${s ? `<span class="wl-price">${fmt(s.price, 2)}元</span>` : ''}</div>
@@ -524,6 +528,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>`;
     }).join('');
     el.querySelectorAll('.wl-card').forEach(c => c.onclick = () => openDiagnose(c.dataset.code));
+    /* v1.9.13：黄灯角标→诊断页（大师第2轮：角标=入口不是终点；stopPropagation 防触卡） */
+    el.querySelectorAll('.wl-warn').forEach(a => {
+      a.onclick = e => { e.stopPropagation(); openDiagnose(a.dataset.code); };
+    });
     el.querySelectorAll('.wl-del').forEach(b => {
       b.onclick = async e => { e.stopPropagation(); await DL.Watchlist.remove(b.dataset.code); renderHome(); };
     });
@@ -1368,8 +1376,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote}</div>
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
         ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}</div>` : ''}
+        ${v.filters && v.filters.length ? `<div style="font-size:10px;margin-bottom:4px;color:#d9a45b;background:rgba(217,164,91,.08);border:1px solid rgba(217,164,91,.3);border-radius:6px;padding:3px 6px">🟡 信号降级：仅参考 — ${v.filters.map(f => f.txt).join('；')}</div>` : ''}
         ${verdictHtml}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : t.type + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
+        ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
+        ${v.conflicts && v.conflicts.length ? `<div style="font-size:10px;margin-top:3px;color:#d9a45b">⚡ 矛盾提示：${v.conflicts.join('；')}（并列展示，请自行裁决）</div>` : ''}
         ${lineNoteHtml}
         ${v.curTier && industry ? sigNoteHtml(industry, v.curTier.name, v.trap) : ''}
       </div>
