@@ -1148,8 +1148,9 @@ const _f10Cache = new Map();
 async function fetchF10Annual(code, tryN = 1) {
   const key = 'f10:' + code;
   const hit = _f10Cache.get(key);
-  // Q3（M37）：年报+CSRC 行业均年频静态 → TTL 7 天（原 24h 过保守）
-  if (hit && Date.now() - hit.ts < 7 * 24 * 3600 * 1000) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
+  // P7（2026-08-18）：财报季感知 TTL——4 月（年报集中披露）/8 月（中报）缩到 1 天，其余 7 天（防陷阱预警用旧数据延迟一周）
+  const _f10TtlMs = (() => { const m = new Date().getMonth() + 1; return (m === 4 || m === 8) ? 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000; })();
+  if (hit && Date.now() - hit.ts < _f10TtlMs) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
   const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=100&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
   try {
     const [r, r2] = await Promise.all([
@@ -1420,6 +1421,23 @@ function sigNote(ind, tierKey) {
   return `历史 1 年胜率 ${segTxt}（${lastTxt}，n=${st.n}）${noteTxt} · 历史胜率≠本次会赢`;
 }
 
+/* D7 分时段最大浮亏（2026-08-18 实测：1年持有含分红，事件收益 min；脚本 /tmp/maxdd.js）
+ * 展示：重仓/加仓区显示"该档位历史最大浮亏 X%（最差时段）"——回答核心三问之"最坏扛得住吗"
+ * 注意：全周期单值会被 2015 股灾污染，用分时段最差；样本<5 的档位不显示 */
+const MAX_DD = {
+  bank:    { add: { dd: -25, seg: '2018-21' }, heavy: { dd: -23, seg: '2018-21' } },
+  consumer: { add: { dd: -45, seg: '2014-17' }, heavy: { dd: -49, seg: '2014-17' } },
+  insurer: { add: null, heavy: null },
+  utility: { add: { dd: -12, seg: '2014-17' }, heavy: { dd: 0, seg: '—' } },
+  energy:  { add: { dd: -28, seg: '2022-26' }, heavy: { dd: -27, seg: '2022-26' } },
+  telecom: { add: null, heavy: null },
+};
+function ddNote(ind, tierKey) {
+  const m = MAX_DD[ind] && MAX_DD[ind][tierKey];
+  if (!m) return null;
+  return `该档位历史最大浮亏 ${m.dd}%（${m.seg} 时段，1 年含分红口径）`;
+}
+
 /* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08 近似 1.55%，正式源待接入 backlog） */
 const TREASURY_NOW = 1.55;
 const TIER_LINE = {
@@ -1537,7 +1555,7 @@ window.DL = {
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
-  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, sigNote, SIG_STATS,
+  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, sigNote, SIG_STATS, ddNote, MAX_DD,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */

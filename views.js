@@ -157,6 +157,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
     if (act.length) {
       html += `<div style="background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.4);border-radius:10px;padding:10px 14px;margin-bottom:10px">🔔 <b>建仓区提醒</b>：${act.map(r => `<b>${r.name}</b>(${r.code}) ${r.pct.toFixed(0)}%分位 [${r.label}]${r.tcls && r.tcls.cls === 'trap' ? ' <span style="color:#e05a5a">⚠️分红陷阱</span>' : r.tcls && r.tcls.cls === 'dull' ? ' <span style="color:#d9a45b">钝化</span>' : ''}${r.tiersTxt ? '<div style="font-size:10px;color:var(--sub);margin-top:2px">' + r.tiersTxt + '</div>' : ''}`).join(' · ')}</div>`;
+      // D6：自动记录信号触发（同 code 同档位同日去重）
+      try {
+        const today = DL.todayStr();
+        const last = decLog().filter(x => x.decision === 'auto');
+        act.forEach(r => {
+          const dup = last.some(x => x.code === r.code && x.tier === r.label && x.date === today);
+          if (!dup) decAdd({ code: r.code, name: r.name, tier: r.label, pct: r.pct, dy: null, note: 'auto', trap: null, decision: 'auto' });
+        });
+      } catch (e) {}
     }
     if (watch.length) {
       html += `<div style="background:rgba(217,164,65,.10);border:1px solid rgba(217,164,65,.35);border-radius:10px;padding:10px 14px;margin-bottom:10px">👀 <b>待触发预告</b>：${watch.map(r => `${r.name}(${r.code}) ${r.pct.toFixed(0)}% · 距${r.ecoStart}起建线差 ${(r.ecoStart - r.pct).toFixed(0)}`).join(' · ')}</div>`;
@@ -604,7 +613,41 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       return `<div class="cal-item" style="display:flex;justify-content:space-between;gap:6px"><span class="cal-date">${m.month}</span><span style="flex:1;font-size:11px">${items}</span>${hasAmt ? `<b style="color:var(--txt)">${(amt / 10000).toFixed(2)}万</b>` : ''}</div>`;
     });
     const yearTotal = cf.reduce((s, m) => s + m.total, 0);
-    el.innerHTML = `${holdInput}${targetInput}${targetHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}`;
+    /* E1 分红年报 + D12 消费自由度 + E2 追加视角（2026-08-18 P1）：
+     * E1：历史年度分红收入（持仓股数×除息日 dps，按年聚合+同比）
+     * D12：月支出→覆盖率+缺口本金区间（保守 4-5% 股息率，给区间不给假精确）+ 提取四档（诚实呈现）
+     * E2：追加金额→年/月分红贡献（按自选平均股息率） */
+    const sharesOf = (code) => holdings[code] || 0;
+    const yearMap = {};
+    allDivs.forEach(d => { if (!(d.dps > 0) || !d.ex) return; const y = d.ex.slice(0, 4); const s = sharesOf(d.code); if (!s) return; yearMap[y] = (yearMap[y] || 0) + d.dps * s; });
+    const years = Object.keys(yearMap).sort();
+    const yearRows = years.slice(-6).map((y, i, a) => {
+      const prev = i > 0 ? a[i - 1] : null;
+      const cur = yearMap[y];
+      const yoy = (prev && yearMap[prev] > 0) ? ((cur / yearMap[prev] - 1) * 100) : null;
+      return `<div style="font-size:11px;padding:2px 0">${y}：<b>${(cur / 10000).toFixed(2)}万</b>${yoy != null ? ` <span style="color:${yoy >= 0 ? '#4caf7d' : '#e05a5a'}">${yoy >= 0 ? '↑' : '↓'}${Math.abs(yoy).toFixed(0)}%</span>` : ''}</div>`;
+    }).join('');
+    const expDef = (() => { try { return parseFloat(localStorage.getItem('divtool_monthly_exp') || '0') || 0; } catch (e) { return 0; } })();
+    const yearIncome = yearMap[years[years.length - 1]] || yearTotalNow;   // 最近完整年（或未来12月估）
+    const yearExp = expDef * 12;
+    const covPct = (yearExp > 0 && yearIncome > 0) ? Math.min(999, yearIncome / yearExp * 100) : null;
+    const gap = (yearExp > 0 && yearIncome < yearExp) ? yearExp - yearIncome : 0;
+    const gapRange = gap > 0 ? `缺口本金 ≈ <b>${(gap / 0.05 / 10000).toFixed(0)}~${(gap / 0.04 / 10000).toFixed(0)}万</b>（按 4-5% 股息率区间）` : (yearExp > 0 ? '已覆盖 🎉' : '');
+    const addDef = (() => { try { return parseFloat(localStorage.getItem('divtool_add_amt') || '0') || 0; } catch (e) { return 0; } })();
+    const avgDy = (() => { const ds = wl.map(w => w.snapshot && w.snapshot.divYield).filter(x => x > 0); return ds.length ? ds.reduce((s, x) => s + x, 0) / ds.length : 0.05; })();
+    const addYear = addDef * avgDy, addMonth = addYear / 12;
+    const lifeHtml = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
+      <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 分红年报 · D12 消费覆盖 · E2 追加视角）</summary>
+        <div style="font-size:11px;color:var(--sub);margin:6px 0 4px">📅 近 ${Math.min(6, years.length)} 年实际分红收入（需填持仓股数）：</div>
+        <div>${yearRows || '<span class="hint">填写上方持仓股数后显示历史分红收入</span>'}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">月生活支出（元）：</span><input id="divLifeExp" type="number" min="0" placeholder="如 15000" value="${expDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeExpSave">💾 算覆盖</button></div>
+        <div style="font-size:11px;margin-top:4px">${covPct != null ? `当前年分红 <b>${(yearIncome / 10000).toFixed(2)}万</b>（月 ${(yearIncome / 12 / 10000).toFixed(2)}万）→ 覆盖月支出 <b style="color:var(--gold)">${covPct.toFixed(0)}%</b>；${gapRange}` : '<span class="hint">填月支出后显示覆盖率与缺口本金</span>'}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">提取参考（分红由持股产生，提取不影响下年分红基数）：提取 0/30/50/100% → 每年可消费 0 / ${(yearIncome * 0.3 / 10000).toFixed(2)} / ${(yearIncome * 0.5 / 10000).toFixed(2)} / ${(yearIncome / 10000).toFixed(2)} 万，剩余复投</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">追加金额（元）：</span><input id="divLifeAdd" type="number" min="0" placeholder="如 50000" value="${addDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeAddSave">💾 算贡献</button><span style="font-size:10px;color:var(--muted)">按自选平均股息率 ${(avgDy * 100).toFixed(1)}%</span></div>
+        <div style="font-size:11px;margin-top:4px">${addDef > 0 ? `追加 ${(addDef / 10000).toFixed(1)}万 → 年贡献分红 <b>${(addYear / 10000).toFixed(2)}万</b>（月 ${(addMonth / 10000).toFixed(2)}万）——1 年后起算，长期吃分红视角` : '<span class="hint">填追加金额后显示分红贡献</span>'}</div>
+      </details>
+    </div>`;
+    el.innerHTML = `${holdInput}${targetInput}${targetHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
     const saveBtn = $('#divtoolHoldSave');
     if (saveBtn) saveBtn.onclick = () => {
       const v = ($('#divtoolHoldInput') || {}).value || '';
@@ -620,6 +663,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (tSave) tSave.onclick = () => {
       const v = parseFloat(($('#divtoolTargetInput') || {}).value || '0') || 0;
       try { localStorage.setItem('divtool_div_target', String(v * 10000)); } catch (e) {}
+      renderDivCalendar();
+    };
+    // D12/E1/E2：生活视角按钮
+    const expSave = $('#divLifeExpSave');
+    if (expSave) expSave.onclick = () => {
+      const v = parseFloat(($('#divLifeExp') || {}).value || '0') || 0;
+      try { localStorage.setItem('divtool_monthly_exp', String(v)); } catch (e) {}
+      renderDivCalendar();
+    };
+    const addSave = $('#divLifeAddSave');
+    if (addSave) addSave.onclick = () => {
+      const v = parseFloat(($('#divLifeAdd') || {}).value || '0') || 0;
+      try { localStorage.setItem('divtool_add_amt', String(v)); } catch (e) {}
       renderDivCalendar();
     };
   }
@@ -880,7 +936,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       renderDivTrend(divs);
       renderStrategy(divs, kline);
       // v1.9.1 P7：卖出信号卡（EPS 趋势 + 分红连续性 + 估值放大器）
-      renderSellSignals(divs, kline);
+      renderSellSignals(divs, kline, code);
       // v1.9.3：档位画像卡
       renderTierProfile(code);
       // O1/O2：报告卡（F10 自动数据优先，研究静态数据兜底）
@@ -1219,9 +1275,18 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
    * 基本面恶化：EPS 按报告期归组（每年最新），连续 2 年下滑 → 恶化
    * 分红连续 2 年停增/下调 → 降级观察（已有 renderDivTrend 逻辑复用）
    * 估值放大器：当前分位 ≤20（便宜）→ 卖出信号可信度低（提示谨慎）；≥80 → 可信度高 */
-  function renderSellSignals(divs, kline) {
+  function renderSellSignals(divs, kline, code) {
     const el = $('#diagSellSignals');
     if (!el) return;
+    // 卖出信号回测（2026-08-18 P1，test/sell-signal-backtest.js，46 次触发）：行业有效性标注
+    const SELL_EFFECT = {
+      utility: { verdict: '有效', txt: '该行业分红连降≈真恶化（历史卖出后 1 年均 -8.7%、2 年 -13.9%）' },
+      bank: { verdict: '有效/中性', txt: '该行业分红连降≈真问题（历史卖出≈中性偏优，2 年 -0.1%）' },
+      consumer: { verdict: '踏空史', txt: '该行业分红连降多为波动假信号（历史卖出后 1 年均 +35%，卖出=踏空）' },
+      energy: { verdict: '踏空史', txt: '该行业分红连降常为周期底假信号（历史卖出后 1 年均 +13.4%、2 年 +24.1%，随后反弹）' },
+      insurer: { verdict: '样本不足', txt: '该行业触发样本仅 3 次，信号不可靠' },
+    };
+    const eff = (code && DL.TIER_LINE[code]) ? SELL_EFFECT[DL.TIER_LINE[code].ind] : null;
     // P0-C 修复（2026-08-18）：卖出信号限最近 5 个完整财年（滚动财年窗，窗口终点=最近完整财年）
     // 旧：遍历全部历史 → 长电 2019/2022 历史事件永久触发"建议退出或减仓"
     const SELL_WINDOW_YEARS = 5;
@@ -1282,6 +1347,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.innerHTML = `<div style="margin-bottom:4px">${signals.map(s => `<div style="font-size:12px;margin:2px 0">${s.t}</div>`).join('')}</div>
       <div style="font-size:12px;margin:4px 0">判定：${verdict}</div>
       <div class="hint">估值放大器：${ampTxt}${exit ? '（基本面恶化 + 估值' + (valAmp === 'high' ? '高位 → 退出信号可信' : valAmp === 'low' ? '低位 → 建议二次确认' : '中性') + '）' : ''}</div>
+      ${eff ? `<div style="font-size:10px;color:${eff.verdict.indexOf('踏空') >= 0 ? '#e06666' : eff.verdict === '有效' ? '#4caf7d' : 'var(--muted)'};margin-top:4px">🎯 该行业卖出信号历史有效性：<b>${eff.verdict}</b>——${eff.txt}</div>` : ''}
       ${exit ? '<div class="hint" style="margin-top:4px;color:#d9a45b">💡 释放资金去向：切到 <b>决策台</b> 查看顶部“建仓区提醒”横幅（当前建仓区标的 + 档位距离 + 分红陷阱/钝化标注），或自选持仓巡检卡对比健康标的</div>' : ''}
       <div class="hint">口径：EPS/分红按报告期归组；连续 2 年（相邻年度）恶化才触发退出，单年波动仅关注；<b>信号仅看最近 5 个完整财年（滚动窗口，历史事件不永久触发）</b>；卖出信号是纪律参考，非自动执行</div>`;
   }
@@ -1296,7 +1362,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     let html = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="color:${tcls.color}">${tcls.label}</b><span style="font-size:11px;color:var(--sub)">${tcls.detail}</span></div>`;
     if (known) {
       html += `<table class="tbl" style="margin-top:6px"><tr><th>指标</th><th>数值</th><th>含义</th></tr>
-        <tr><td>年化等待收益</td><td><b>${p.annual.toFixed(1)} pp/年</b></td><td>等 90 档每年多赚的收益（>20 值得等 / <10 直接买）</td></tr>
+        <tr><td>年化等待收益</td><td><b>${p.annual.toFixed(1)} pp/年</b></td><td>等 90 档每年多赚的收益（>20 值得等 / <10 直接买）<span style="color:var(--muted)">· 均值口径非线性，直觉参考</span></td></tr>
         <tr><td>90 档平均间隔</td><td>${p.gap90} 天（约 ${(p.gap90 / 30.4).toFixed(0)} 个月）</td><td>等 90 档的历史等待成本</td></tr>
         <tr><td>90 vs 80 收益差</td><td>${p.diff >= 0 ? '+' : ''}${p.diff.toFixed(1)} pp</td><td>90 档买入比 80 档 5 年收益高出的百分点</td></tr>
       </table>`;
@@ -1320,9 +1386,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const key = tierName.indexOf('重仓') >= 0 ? 'heavy' : tierName.indexOf('加仓') >= 0 ? 'add' : tierName.indexOf('小仓') >= 0 ? 'small' : null;
       if (!key) return '';
       const note = DL.sigNote(ind, key);
-      if (!note) return '';
+      const dd = DL.ddNote(ind, key);   // D7：分时段最大浮亏（重仓/加仓档）
+      if (!note && !dd) return '';
       const isSmall = key === 'small';
-      return `<div style="font-size:10px;color:${isSmall ? 'var(--muted)' : 'var(--sub)'};margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📊 ${isSmall ? '小仓线历史≈随机买入，非机会信号' : '信号可信度：'}${note}</div>`;
+      const ddTxt = dd ? ` · ${dd}` : '';
+      return `<div style="font-size:10px;color:${isSmall ? 'var(--muted)' : 'var(--sub)'};margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📊 ${isSmall ? '小仓线历史≈随机买入，非机会信号' : '信号可信度：'}${note || ''}${ddTxt}</div>`;
     };
     const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     const last = series.filter(x => x.pct != null).pop();
@@ -1375,7 +1443,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote}</div>
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
-        ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}</div>` : ''}
+        ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}${v.trap.level === 'hard' ? ' · 💱 换仓参考：继续持有=吃当前股息率（覆盖 ' + (cov != null ? (1 / cov).toFixed(1) + ' 倍' : '—') + '）；如需换仓可到决策台扫描对比更健康标的——注意换仓有交易成本+浮盈税（A股印花税 0.05%+佣金），历史数据非承诺' : ''}</div>` : ''}
         ${v.filters && v.filters.length ? `<div style="font-size:10px;margin-bottom:4px;color:#d9a45b;background:rgba(217,164,91,.08);border:1px solid rgba(217,164,91,.3);border-radius:6px;padding:3px 6px">🟡 信号降级：仅参考 — ${v.filters.map(f => f.txt).join('；')}</div>` : ''}
         ${verdictHtml}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : t.type + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
@@ -1393,6 +1461,29 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           <td style="padding:4px;background:var(--card2);border:1px solid var(--line);border-radius:0 6px 6px 0;text-align:center"><div style="color:var(--muted);font-size:10px">⑤ 风险</div><div style="font-size:10px">${v.q3.msg}</div></td>
         </tr>
       </table>`;
+  }
+
+  /* D6 决策日志（2026-08-18）：一条决策=一行流水，localStorage 持久化（上限 200 条）
+   * 自动：建仓区提醒/极值触发时记一条（decision='auto'）
+   * 手动：决策摘要区"记：买/不买/等"三按钮
+   * 字段：ts/date/code/name/tier/pct/dy/note/trap/decision/price */
+  const DEC_KEY = 'divtool_decisions_v1';
+  function decLog() { try { return JSON.parse(localStorage.getItem(DEC_KEY)) || []; } catch (e) { return []; } }
+  function decAdd(rec) {
+    try {
+      const arr = decLog();
+      arr.unshift(Object.assign({ ts: Date.now(), date: DL.todayStr() }, rec));
+      localStorage.setItem(DEC_KEY, JSON.stringify(arr.slice(0, 200)));
+    } catch (e) {}
+  }
+  function decListHtml(limit) {
+    const arr = decLog().slice(0, limit || 8);
+    if (!arr.length) return '<div class="hint">还没有决策记录——信号触发会自动记录，或点上方按钮记本次决策（1-3 年后回来对照）</div>';
+    return '<div style="font-size:10px;color:var(--muted);margin-bottom:2px">最近 ' + arr.length + ' 条（自动记录=信号触发；手动=你的决定）</div>' + arr.map(x => {
+      const d = (x.decision === 'buy' ? '✅买' : x.decision === 'no' ? '⏸不买' : x.decision === 'wait' ? '⏳等' : '🔔信号');
+      const c = x.decision === 'buy' ? '#4caf7d' : x.decision === 'no' ? '#e06666' : x.decision === 'wait' ? '#d9a45b' : 'var(--sub)';
+      return `<div style="font-size:11px;padding:3px 0;border-bottom:1px dashed var(--line)">${x.date} <b>${x.name || x.code}</b> ${x.tier || ''} · ${x.pct != null ? x.pct.toFixed(0) + '%分位' : ''}${x.dy != null ? ' · ' + x.dy.toFixed(2) + '%' : ''}<span style="color:${c}"> ${d}</span>${x.trap ? ' <span style="color:#e05a5a">' + (x.trap.level === 'hard' ? '🚫' : '⚠️') + '</span>' : ''}</div>`;
+    }).join('');
   }
 
   /* v1.9.6 P0-8/9：决策摘要区（买入结论行 + 关键三数）——规则树与 rule-tree-backtest.js 一致，历史胜率来自回测表 */
@@ -1430,7 +1521,24 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>
       <div style="font-size:12px;margin-top:6px;color:var(--txt)">当前分位 ${last.pct.toFixed(0)}%（${tcls.label} · ${ecoName}）${waitHint}</div>
       <div style="font-size:11px;color:var(--sub);margin-top:4px">股息率(TTM) ${yieldTxt} · 分红率(近2财年) ${cov != null ? (cov * 100).toFixed(0) + '%' : '—'} · 分红CAGR ${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</div>
-      <details style="margin-top:6px"><summary style="font-size:11px;color:var(--sub);cursor:pointer">查看判定依据</summary>${stepsHtml}<div style="font-size:10px;color:var(--muted);margin-top:4px">规则：分红趋势一票否决 → 覆盖率降级 → 分位×生态类型 → 等待成本；历史胜率=40只×16年回测（375窗口）；非投资建议，不构成买卖依据</div></details>`;
+      <details style="margin-top:6px"><summary style="font-size:11px;color:var(--sub);cursor:pointer">查看判定依据</summary>${stepsHtml}<div style="font-size:10px;color:var(--muted);margin-top:4px">规则：分红趋势一票否决 → 覆盖率降级 → 分位×生态类型 → 等待成本；历史胜率=40只×16年回测（375窗口）；非投资建议，不构成买卖依据</div></details>
+      <div style="margin-top:6px;border-top:1px dashed var(--line);padding-top:6px">
+        <div style="font-size:11px;color:var(--sub);margin-bottom:4px">📒 决策日志（D6：记下今天的选择，1-3 年后自动对照）</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          <button type="button" class="chip" id="decBtnBuy" style="color:#4caf7d">✅ 记：买</button>
+          <button type="button" class="chip" id="decBtnNo" style="color:#e06666">⏸ 记：不买</button>
+          <button type="button" class="chip" id="decBtnWait" style="color:#d9a45b">⏳ 记：等</button>
+        </div>
+        <div id="decLogList">${decListHtml(6)}</div>
+      </div>`;
+    const bindDec = (decision) => {
+      decAdd({ code, name: (window.REPORT_CARD_EXTRA && window.REPORT_CARD_EXTRA[code] && window.REPORT_CARD_EXTRA[code].name) || code, tier: v.tier, pct: last.pct, dy: dyTmp ? dyTmp.yieldPct : null, note: label, trap: null, decision });
+      const ll = document.getElementById('decLogList');
+      if (ll) ll.innerHTML = decListHtml(6);
+    };
+    const b1 = document.getElementById('decBtnBuy'); if (b1) b1.onclick = () => bindDec('buy');
+    const b2 = document.getElementById('decBtnNo'); if (b2) b2.onclick = () => bindDec('no');
+    const b3 = document.getElementById('decBtnWait'); if (b3) b3.onclick = () => bindDec('wait');
   }
 
   /* 分红节奏：每年几月派息 */
