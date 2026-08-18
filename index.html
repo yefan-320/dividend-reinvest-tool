@@ -143,6 +143,7 @@ body{padding-bottom:64px}
 <div id="lockScreen" style="position:fixed;inset:0;z-index:99999;background:#0d1a14;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px">
   <div style="font-size:20px;font-weight:700;color:#d9a441;letter-spacing:2px">🔒 红利复投工具</div>
   <div style="font-size:12px;color:#8fa69c">私人工具 · 请输入访问密码</div>
+  <div style="font-size:11px;color:#5f7a6e;max-width:280px;text-align:center;line-height:1.5">密码锁仅防路人/误触（浏览器端校验），不防懂技术者；持仓与自选数据存本机浏览器，不上传</div>
   <input id="lockPwd" type="password" placeholder="访问密码" style="width:220px;padding:10px 14px;background:#16211d;border:1px solid #2a3d36;border-radius:10px;color:#e8efe9;font-size:15px;text-align:center;outline:none">
   <button id="lockBtn" style="padding:10px 34px;background:#d9a441;color:#0d1a14;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">进 入</button>
   <div id="lockMsg" style="color:#e06666;font-size:12px;min-height:16px"></div>
@@ -485,7 +486,7 @@ body{padding-bottom:64px}
 <script src="data-layer.js?v=v1.9.6"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.12';
+const APP_VERSION = 'v1.9.13';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{

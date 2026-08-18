@@ -1140,15 +1140,17 @@ function reportPeriodLabel(divs) {
  * 字段：ROEJQ（加权ROE%）、MGWFPLR（每股未分配·元）、PARENTNETPROFIT（归母净利·元）
  * 单位锚定（Q3 CI）：PARENTNETPROFIT=元（招行 150181000000=1501.81亿）、MGWFPLR=元/股（26.9551）、ROEJQ=%
  * 缓存：TTL 7 天（年报+CSRC 行业均年频静态，Q3）；缓存命中标 cachedAt（卡面血缘脚注 Q5）
- * 报告期：动态找最近完整年报（接口按 REPORT_DATE 降序，取第一条 12-31 结尾） */
+ * 报告期：动态找最近完整年报（接口按 REPORT_DATE 降序，取第一条 12-31 结尾）
+ * P0-3（2026-08-18）：pageSize 5→100 + annuals 序列 + netProfitYoY——
+ *   5 条会被季报挤占拿不到历史年报（实测格力 5 条仅回 2025Q1~2026Q1，无 2023/2024 年报）；
+ *   100 条覆盖 2006 年至今全序列（实测格力），支撑净利同比/趋势判据/回放验收（P0-4） */
 const _f10Cache = new Map();
 async function fetchF10Annual(code, tryN = 1) {
   const key = 'f10:' + code;
   const hit = _f10Cache.get(key);
   // Q3（M37）：年报+CSRC 行业均年频静态 → TTL 7 天（原 24h 过保守）
   if (hit && Date.now() - hit.ts < 7 * 24 * 3600 * 1000) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
-  // pageSize=5：覆盖"中报+一季报+年报"并存场景（移动 3 条记录，pageSize=2 拿不到年报）
-  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
+  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=100&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
   try {
     const [r, r2] = await Promise.all([
       fetch(url, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
@@ -1158,17 +1160,31 @@ async function fetchF10Annual(code, tryN = 1) {
     let csrc = '';
     try { const j2 = await r2.json(); const b = (j2 && j2.result && j2.result.data) || []; csrc = (b[0] && b[0].CSRC_INDUSTRY_NAME) || ''; } catch (e2) {}
     const rows = (j && j.result && j.result.data) || [];
-    // 取最近一条 12-31 结尾的（完整年报）
-    const annual = rows.find(x => /12-31/.test(x.REPORT_DATE || ''));
+    // 所有完整年报序列（接口降序 → 保持降序），全量保留（回放验收需 2018 年前数据，实测 pageSize=100 覆盖至 2006）
+    const annuals = rows.filter(x => /12-31/.test(x.REPORT_DATE || '')).map(x => ({
+      reportDate: (x.REPORT_DATE || '').slice(0, 10),
+      netProfit: x.PARENTNETPROFIT != null ? parseFloat(x.PARENTNETPROFIT) / 1e8 : null,   // 元→亿
+      roe: x.ROEJQ != null ? parseFloat(x.ROEJQ) : null,
+    }));
+    const annual = annuals[0] || null;   // 最近完整年报
+    const annualRow = rows.find(x => /12-31/.test(x.REPORT_DATE || ''));   // 原始行（mgwfplr/ORG_TYPE 回源）
     if (!annual) return null;
+    // 净利同比：最新年报 vs 上一年报（%），任一缺失/基期为 0 → null（宁缺勿误报）
+    let netProfitYoY = null;
+    if (annuals[0] && annuals[1] && annuals[0].netProfit != null && annuals[1].netProfit != null && annuals[1].netProfit !== 0) {
+      netProfitYoY = (annuals[0].netProfit / annuals[1].netProfit - 1) * 100;
+    }
     const out = {
-      roe: parseFloat(annual.ROEJQ) || null,
-      mgwfplr: parseFloat(annual.MGWFPLR) || null,
-      netProfit: annual.PARENTNETPROFIT != null ? parseFloat(annual.PARENTNETPROFIT) / 1e8 : null,   // 元→亿
-      orgType: annual.ORG_TYPE || '',
+      roe: annual.roe,
+      netProfit: annual.netProfit,
+      netProfitYoY,       // P0-3：最新完整年报净利同比（%）
+      annuals,            // P0-3：年报序列（降序，{reportDate,netProfit,roe}）
+      orgType: annualRow ? (annualRow.ORG_TYPE || '') : '',
       csrcIndustry: csrc,   // 证监会行业（第二判据，Q1）
-      reportDate: (annual.REPORT_DATE || '').slice(0, 10),
+      reportDate: annual.reportDate,
     };
+    // mgwfplr：从原始行回源（annuals 映射未保留该字段）
+    if (annualRow) out.mgwfplr = annualRow.MGWFPLR != null ? parseFloat(annualRow.MGWFPLR) : null;
     _f10Cache.set(key, { ts: Date.now(), data: out });
     return Object.assign({ cached: false }, out);
   } catch (e) {
@@ -1199,7 +1215,28 @@ function industryOf(secuType) {
   if (t.includes('煤炭') || t.includes('能源')) return 'energy';
   return null;   // 未知 → 报告卡只显示通用三问核心，不挂行业维度（M22 Q2：挂错比不挂更糟）
 }
-function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, price, dy, pct, industry, roe, roeTrend, dividendCagr, code }) {
+/* P0-3/P0-4 陷阱过滤器（2026-08-18 主人拍板：先默认共现版，P0-4 回放校准定稿）
+ * 定位：重仓线守门员（硬排除）+ 加仓线降级（软观察）——拦截"价值毁灭型"高股息（格力 2021/兖矿 2024 型）
+ * 回放校准结论（test/trap-replay.js v3，942 事件）：
+ *   v1 共现版（同比<0）精确率仅 31%、神华周期底部误伤 88% ❌
+ *   v3（同比<-10% + 支付率>50% + 高股息画像，hard 仅守重仓档）：精确率 100%（6/6 全对）、误伤 0% ✅
+ * 输入：netProfitYoY（最新完整年报净利同比%，null=不判）、payout（支付率 0.35=35%，
+ *       与决策规范第1章对应：覆盖倍数=EPS÷派息，覆盖<2 ⇔ 支付率>50%）、
+ *       dy（当前股息率）、p90Line（加仓线=个股分位P90，高股息画像判定：股息率>行业分位90）
+ * 输出：{ level:'hard'|'soft'|null, msg }
+ *   hard：净利同比<-10%（毁灭信号）且 支付率>50%（覆盖<2）且 dy>=P90线（高股息画像）——仅守重仓档（引擎层落实）
+ *   soft：净利同比<0 但不满足 hard → 观察型（加仓降级小仓）
+ * 周期豁免：净利小负（-10% 内）不判 hard——神华 2020/2021 周期底部天然豁免；煤炭 2015 同理 */
+function trapFilter({ netProfitYoY, payout, dy, p90Line }) {
+  if (netProfitYoY == null || !(netProfitYoY < 0)) return { level: null, msg: null };
+  const highYield = p90Line != null ? (dy != null && dy >= p90Line) : (dy != null && dy >= 5);
+  if (netProfitYoY < -10 && highYield && payout != null && payout > 0.5) {
+    return { level: 'hard', msg: `陷阱确认：最新年报净利同比 ${netProfitYoY.toFixed(1)}% 下滑 + 支付率 ${(payout * 100).toFixed(0)}%（覆盖<2）` };
+  }
+  return { level: 'soft', msg: `观察：最新年报净利同比 ${netProfitYoY.toFixed(1)}% 下滑（覆盖尚可，盯年报）` };
+}
+
+function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, price, dy, pct, industry, roe, roeTrend, dividendCagr, code, netProfitYoY }) {
   const out = { q1: null, q2: null, q3: null, summary: null };
   /* Q1 这笔分红可靠吗？ */
   if (coverage == null) {
@@ -1248,9 +1285,10 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
   const parts = [out.q1.verdict, out.q2.verdict, out.q3.verdict];
   const yb = BENCH[industry] || null;
   const tl = code && TIER_LINE[code] ? TIER_LINE[code] : null;
-  const midLine = tl ? tl.p75 : (yb ? yb.yieldMid : null);
-  const line = tl ? tl.p90 : (yb ? yb.yieldMid + yb.yieldUp : null);
-  const heavyLine = tl ? tl.p95 : (line != null ? line + 1 : null);
+  /* v1.9.13 溢价分位：TIER_LINE 存溢价 pp，触发判定等价（dy≥p+国债 ⟺ dy−国债≥p），显示回算 dy 口径 */
+  const midLine = tl ? (tl.pending ? tl.p75 : tl.p75 + TREASURY_NOW) : (yb ? yb.yieldMid : null);
+  const line = tl ? (tl.pending ? tl.p90 : tl.p90 + TREASURY_NOW) : (yb ? yb.yieldMid + yb.yieldUp : null);
+  const heavyLine = tl ? (tl.pending ? tl.p95 : tl.p95 + TREASURY_NOW) : (line != null ? line + 1 : null);
   const indLine = yb ? yb.yieldMid + yb.yieldUp : null;
   const bp = (r) => dps != null && dps > 0 && r != null ? (dps / (r / 100)).toFixed(1) : null;
   const buyP = bp(line), heavyP = bp(heavyLine);
@@ -1262,58 +1300,128 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     else if (dy >= midLine) curTier = { name: '小仓区', note: '已可小仓（≥' + midLine.toFixed(1) + '%），未到加仓线 ' + line.toFixed(1) + '%' };
     else curTier = { name: '等待区', note: '未达小仓线 ' + midLine.toFixed(1) + '%；现价买入仍可吃分红（' + dy.toFixed(2) + '%），三档为加仓节奏参考非买入否决' };
   }
+  /* P0-3/P0-4：陷阱过滤器接入（回放校准 v3：hard 仅守重仓档）——重仓硬排除 / 加仓软降级 */
+  out.trap = null;
+  if (netProfitYoY != null && netProfitYoY < 0) {
+    const tr = trapFilter({ netProfitYoY, payout: coverage, dy, p90Line: line });
+    if (tr.level === 'hard' && curTier && curTier.name === '重仓区') {
+      out.trap = { level: 'hard', msg: tr.msg + '——重仓线拦截，降级观察' };
+      curTier = { name: '重仓区(陷阱拦截)', note: '陷阱确认：净利下滑+支付率过高，重仓线不生效，降级观察' };
+    } else if (tr.level) {
+      out.trap = { level: 'soft', msg: tr.msg + '——加仓线降为小仓' };
+      if (curTier && curTier.name === '加仓区') curTier = { name: '加仓区(观察)', note: '净利同比下滑，加仓线降为小仓，等年报确认' };
+    }
+  }
   const tiers = [];
   /* M47 Q1：三档结构化（股息率主显 + 价格附注小字）——rate 为档位股息率，price 为换算价（附注用） */
   if (curTier) tiers.push({ type: 'cur', text: '📍 当前：' + curTier.name + '（' + curTier.note + '）' });
   if (midLine != null) tiers.push({ type: 'small', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
   if (buyP) tiers.push({ type: 'add', rate: line, price: buyP, hit: dy != null && dy >= line });
   if (heavyP) tiers.push({ type: 'full', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
-  /* v1.9.13：线源标注（分位线 vs 行业参考）+ 语义行 */
+  /* v1.9.13：线源标注（溢价分位 vs 行业参考）+ 语义行 */
   if (tl) {
-    out.lineNote = '三档=个股分位线（近3年：小仓P75/加仓P90/重仓P95）' + (indLine != null ? '；行业参考 ' + indLine.toFixed(1) + '%' : '')
-      + '；线高=市场对其分红增长信心低（分红CAGR ' + (tl.cagr != null ? tl.cagr.toFixed(1) + '%' : '—') + '）';
-    if (tl.redLine) out.lineNote += '；⚠️ 支付率 ' + tl.payout + '% 超红线，分位线仅供参考';
-    if (tl.shortSample) out.lineNote += '；⚠️ 样本不足5年，分位线稳定性待观察';
+    if (tl.pending) {
+      out.lineNote = '⚠️ 溢价分位线待补（K线源故障）·当前显示股息率线（口径不同）·仅展示不触发';
+    } else {
+      out.lineNote = '三档=溢价分位线（近3年：dy−国债；P75/P90/P95=' + tl.p75.toFixed(2) + '/' + tl.p90.toFixed(2) + '/' + tl.p95.toFixed(2) + 'pp，国债锚 ' + TREASURY_NOW.toFixed(2) + '% 近似）'
+        + (indLine != null ? '；行业参考 ' + indLine.toFixed(1) + '%' : '')
+        + '；线高=市场对其分红增长信心低（分红CAGR ' + (tl.cagr != null ? tl.cagr.toFixed(1) + '%' : '—') + '）';
+      if (tl.redLine) out.lineNote += '；⚠️ 支付率 ' + tl.payout + '% 超红线，分位线仅供参考';
+    }
   }
   out.tiers = tiers;
   /* 文本形态（向后兼容：summary 等使用处） */
   out.tiersTxt = tiers.map(t => t.type === 'cur' ? t.text : (t.type === 'small' ? '小仓' : t.type === 'add' ? '加仓' : '重仓') + '=' + t.rate.toFixed(1) + '%·' + t.price + ' 元' + (t.hit ? ' ✅' : '')).join(' / ');
   out.curTier = curTier;
-  out.summary = `${parts.join(' · ')}` + (out.tiersTxt ? '；' + out.tiersTxt : '');
+  let summaryPrefix = '';
+  if (out.trap) summaryPrefix = (out.trap.level === 'hard' ? '🚫 ' : '⚠️ ') + out.trap.msg + '；';
+  out.summary = summaryPrefix + `${parts.join(' · ')}` + (out.tiersTxt ? '；' + out.tiersTxt : '');
   return out;
 }
 
-const TIER_LINE = {
-  '000001': { name: '平安银行', ind: 'bank', p75: 6.13, p90: 6.99, p95: 7.23, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, shortSample: false },
-  '000333': { name: '美的集团', ind: 'consumer', p75: 4.93, p90: 5.41, p95: 5.56, cagr: 19.8, payout: 69, quality: '高增长', redLine: false, shortSample: false },
-  '000651': { name: '格力电器', ind: 'consumer', p75: 7.32, p90: 7.71, p95: 7.92, cagr: -20.6, payout: null, quality: '负增长', redLine: false, shortSample: false },
-  '000858': { name: '五粮液', ind: 'consumer', p75: 4.75, p90: 5.15, p95: 6.57, cagr: 10.9, payout: 104, quality: '高增长', redLine: true, shortSample: false },
-  '000895': { name: '双汇发展', ind: 'consumer', p75: 6.17, p90: 6.34, p95: 6.43, cagr: -3.2, payout: 98, quality: '负增长', redLine: true, shortSample: false },
-  '600016': { name: '民生银行', ind: 'bank', p75: 5.66, p90: 6.17, p95: 6.24, cagr: -4.1, payout: 30, quality: '负增长', redLine: false, shortSample: false },
-  '600027': { name: '华电国际', ind: 'utility', p75: 4.04, p90: 4.61, p95: 4.86, cagr: 4.8, payout: 46, quality: '低增长', redLine: false, shortSample: false },
-  '600028': { name: '中国石化', ind: 'energy', p75: 5.62, p90: 6.48, p95: 6.75, cagr: -17.4, payout: 72, quality: '负增长', redLine: false, shortSample: false },
-  '600036': { name: '招商银行', ind: 'bank', p75: 5.58, p90: 6.15, p95: 6.32, cagr: 5.1, payout: 35, quality: '稳定增长', redLine: false, shortSample: false },
-  '600188': { name: '兖矿能源', ind: 'energy', p75: 9.81, p90: 15.19, p95: 15.96, cagr: -45.4, payout: 55, quality: '负增长', redLine: false, shortSample: false },
-  '600519': { name: '贵州茅台', ind: 'consumer', p75: 3.57, p90: 3.72, p95: 3.98, cagr: 26.1, payout: 77, quality: '高增长', redLine: false, shortSample: false },
-  '600690': { name: '海尔智家', ind: 'consumer', p75: 3.8, p90: 5.25, p95: 5.56, cagr: 27, payout: 51, quality: '高增长', redLine: false, shortSample: false },
-  '600795': { name: '国电电力', ind: 'utility', p75: 4.42, p90: 4.88, p95: 5.02, cagr: null, payout: 46, quality: '—', redLine: false, shortSample: false },
-  '600886': { name: '国投电力', ind: 'utility', p75: 3.35, p90: 3.74, p95: 3.82, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, shortSample: false },
-  '600887': { name: '伊利股份', ind: 'consumer', p75: 4.6, p90: 5.25, p95: 5.4, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, shortSample: false },
-  '600900': { name: '长江电力', ind: 'utility', p75: 3.77, p90: 3.93, p95: 4.05, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, shortSample: false },
-  '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, shortSample: true },
-  '601088': { name: '中国神华', ind: 'energy', p75: 8.18, p90: 8.95, p95: 9.14, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, shortSample: false },
-  '601166': { name: '兴业银行', ind: 'bank', p75: 6.91, p90: 7.43, p95: 7.68, cagr: -3.5, payout: 31, quality: '负增长', redLine: false, shortSample: false },
-  '601225': { name: '陕西煤业', ind: 'energy', p75: 10.85, p90: 11.93, p95: 12.48, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, shortSample: false },
-  '601288': { name: '农业银行', ind: 'bank', p75: 6.12, p90: 6.46, p95: 7.38, cagr: 3.9, payout: 32, quality: '低增长', redLine: false, shortSample: false },
-  '601318': { name: '中国平安', ind: 'insurer', p75: 5.45, p90: 5.88, p95: 6.06, cagr: 3.7, payout: 35, quality: '低增长', redLine: false, shortSample: false },
-  '601328': { name: '交通银行', ind: 'bank', p75: 6.4, p90: 6.73, p95: 7.37, cagr: -4.5, payout: 31, quality: '负增长', redLine: false, shortSample: false },
-  '601398': { name: '工商银行', ind: 'bank', p75: 6.27, p90: 6.57, p95: 6.9, cagr: 0.7, payout: 31, quality: '低增长', redLine: false, shortSample: false },
-  '601601': { name: '中国太保', ind: 'insurer', p75: 3.72, p90: 4.12, p95: 4.37, cagr: 4.1, payout: 22, quality: '低增长', redLine: false, shortSample: false },
-  '601628': { name: '中国人寿', ind: 'insurer', p75: 1.69, p90: 2.18, p95: 2.33, cagr: 20.4, payout: 16, quality: '高增长', redLine: true, shortSample: false },
-  '601857': { name: '中国石油', ind: 'energy', p75: 5.71, p90: 6.15, p95: 7.59, cagr: 3.6, payout: 53, quality: '低增长', redLine: false, shortSample: false },
-  '601985': { name: '中国核电', ind: 'utility', p75: 2.33, p90: 2.49, p95: 2.63, cagr: 1.9, payout: 37, quality: '低增长', redLine: false, shortSample: false },
-  '601988': { name: '中国银行', ind: 'bank', p75: 5.81, p90: 6.25, p95: 6.97, cagr: -0.8, payout: 31, quality: '负增长', redLine: false, shortSample: false },
+/* P0-6 信号分层标注（2026-08-18 三维表实测，docs/信号三维表-20260818.md；1年持有含分红·无复投）
+ * 分时段=2010-13/2014-17/2018-21/2022-26；标注规则（大师三审）：
+ *   n<10 只标样本数不标胜率；n<5 不置顶不参与排序；全周期均值仅 tooltip；
+ *   小仓线≈随机买入（V1 实测剔除陷阱后 66→67%，本质随机）——标注"随机等效"
+ * 字段：all=全周期胜率、n=全周期样本、seg=分时段区间（去空段）、last=最近时段胜率、lastN=最近时段样本 */
+const SIG_STATS = {
+  bank: {
+    small: { all: '58%', n: 210, seg: '43-69%', last: '69%', lastN: 69, note: '随机等效' },
+    add:   { all: '82%', n: 118, seg: '65-100%', last: '91%', lastN: 47, note: '' },
+    heavy: { all: '96%', n: 80,  seg: '75-100%', last: '100%', lastN: 50, note: '' },
+  },
+  consumer: {
+    small: { all: '76%', n: 75, seg: '69-100%', last: '83%', lastN: 24, note: '随机等效' },
+    add:   { all: '80%', n: 46, seg: '75-85%', last: '75%', lastN: 20, note: '' },
+    heavy: { all: '62%', n: 32, seg: '50-81%', last: '50%', lastN: 4, note: '2021 格力时段全亏' },
+  },
+  insurer: {
+    small: { all: '58%', n: 24, seg: '27-100%', last: '80%', lastN: 10, note: '随机等效' },
+    add:   { all: '100%', n: 8, seg: '', last: '', lastN: 0, note: '样本不足(n=8)' },
+    heavy: { all: '100%', n: 1, seg: '', last: '', lastN: 0, note: '样本不足(n=1)' },
+  },
+  utility: {
+    small: { all: '68%', n: 99, seg: '53-85%', last: '76%', lastN: 25, note: '随机等效' },
+    add:   { all: '79%', n: 29, seg: '66-100%', last: '100%', lastN: 3, note: '' },
+    heavy: { all: '100%', n: 11, seg: '100%', last: '100%', lastN: 7, note: '' },
+  },
+  energy: {
+    small: { all: '74%', n: 98, seg: '33-96%', last: '68%', lastN: 69, note: '随机等效' },
+    add:   { all: '61%', n: 59, seg: '51-100%', last: '65%', lastN: 26, note: '石化拖累' },
+    heavy: { all: '69%', n: 52, seg: '60-88%', last: '88%', lastN: 17, note: '石化拖累' },
+  },
+  telecom: {
+    small: { all: '', n: 0, seg: '', last: '', lastN: 0, note: '样本不足' },
+    add:   { all: '', n: 0, seg: '', last: '', lastN: 0, note: '样本不足' },
+    heavy: { all: '', n: 0, seg: '', last: '', lastN: 0, note: '样本不足' },
+  },
 };
+/* 档位历史标注文案（P0-6）：
+ * 输入 ind+档位；输出标注（"历史 65-100%（最近 91%，n=118）· 历史胜率≠本次会赢"）或 null */
+function sigNote(ind, tierKey) {
+  const st = SIG_STATS[ind] && SIG_STATS[ind][tierKey];
+  if (!st || !st.n) return null;
+  if (st.n < 10) return `历史样本不足（n=${st.n}）· 历史胜率≠本次会赢`;
+  const segTxt = st.seg ? `${st.seg}` : '';
+  const lastTxt = st.last ? `最近 ${st.last}%` : '';
+  const noteTxt = st.note ? `· ${st.note}` : '';
+  return `历史 1 年胜率 ${segTxt}（${lastTxt}，n=${st.n}）${noteTxt} · 历史胜率≠本次会赢`;
+}
+
+/* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08 近似 1.55%，正式源待接入 backlog） */
+const TREASURY_NOW = 1.55;
+const TIER_LINE = {
+  '000001': { name: '平安银行', ind: 'bank', p75: 4.35, p90: 5.07, p95: 5.28, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, pending: false },
+  '000333': { name: '美的集团', ind: 'consumer', p75: 3.22, p90: 3.88, p95: 4.03, cagr: 19.8, payout: 69, quality: '高增长', redLine: false, pending: false },
+  '000651': { name: '格力电器', ind: 'consumer', p75: 5.73, p90: 6.19, p95: 6.42, cagr: -20.6, payout: null, quality: '负增长', redLine: false, pending: false },
+  '000858': { name: '五粮液', ind: 'consumer', p75: 3.16, p90: 3.63, p95: 5.1, cagr: 10.9, payout: 104, quality: '高增长', redLine: true, pending: false },
+  '000895': { name: '双汇发展', ind: 'consumer', p75: 4.08, p90: 4.28, p95: 4.44, cagr: -3.2, payout: 98, quality: '负增长', redLine: true, pending: false },
+  '600016': { name: '民生银行', ind: 'bank', p75: 3.66, p90: 3.89, p95: 4.21, cagr: -4.1, payout: 30, quality: '负增长', redLine: false, pending: false },
+  '600027': { name: '华电国际', ind: 'utility', p75: 2.41, p90: 3.07, p95: 3.38, cagr: 4.8, payout: 46, quality: '低增长', redLine: false, pending: false },
+  '600028': { name: '中国石化', ind: 'energy', p75: 3.61, p90: 4.22, p95: 4.5, cagr: -17.4, payout: 72, quality: '负增长', redLine: false, pending: false },
+  '600036': { name: '招商银行', ind: 'bank', p75: 3.78, p90: 4.09, p95: 4.24, cagr: 5.1, payout: 35, quality: '稳定增长', redLine: false, pending: false },
+  '600188': { name: '兖矿能源', ind: 'energy', p75: 7.83, p90: 12.92, p95: 13.65, cagr: -45.4, payout: 55, quality: '负增长', redLine: false, pending: false },
+  '600519': { name: '贵州茅台', ind: 'consumer', p75: 1.98, p90: 2.2, p95: 2.51, cagr: 26.1, payout: 77, quality: '高增长', redLine: false, pending: false },
+  '600690': { name: '海尔智家', ind: 'consumer', p75: 2.19, p90: 3.79, p95: 4.07, cagr: 27, payout: 51, quality: '高增长', redLine: false, pending: false },
+  '600795': { name: '国电电力', ind: 'utility', p75: 2.79, p90: 3.38, p95: 3.51, cagr: null, payout: 46, quality: '—', redLine: false, pending: false },
+  '600886': { name: '国投电力', ind: 'utility', p75: 1.62, p90: 2.22, p95: 2.31, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, pending: false },
+  '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false },
+  '600900': { name: '长江电力', ind: 'utility', p75: 1.78, p90: 2.16, p95: 2.23, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, pending: false },
+  '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: true },
+  '601088': { name: '中国神华', ind: 'energy', p75: 5.85, p90: 6.49, p95: 6.64, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, pending: false },
+  '601166': { name: '兴业银行', ind: 'bank', p75: 4.56, p90: 5.08, p95: 5.36, cagr: -3.5, payout: 31, quality: '负增长', redLine: false, pending: false },
+  '601225': { name: '陕西煤业', ind: 'energy', p75: 8.37, p90: 9.6, p95: 10.11, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, pending: false },
+  '601288': { name: '农业银行', ind: 'bank', p75: 3.82, p90: 4.11, p95: 4.86, cagr: 3.9, payout: 32, quality: '低增长', redLine: false, pending: false },
+  '601318': { name: '中国平安', ind: 'insurer', p75: 3.56, p90: 3.89, p95: 4, cagr: 3.7, payout: 35, quality: '低增长', redLine: false, pending: false },
+  '601328': { name: '交通银行', ind: 'bank', p75: 4.08, p90: 4.38, p95: 4.84, cagr: -4.5, payout: 31, quality: '负增长', redLine: false, pending: false },
+  '601398': { name: '工商银行', ind: 'bank', p75: 3.89, p90: 4.21, p95: 4.37, cagr: 0.7, payout: 31, quality: '低增长', redLine: false, pending: false },
+  '601601': { name: '中国太保', ind: 'insurer', p75: 1.78, p90: 2.16, p95: 2.31, cagr: 4.1, payout: 22, quality: '低增长', redLine: false, pending: false },
+  '601628': { name: '中国人寿', ind: 'insurer', p75: 0.04, p90: 0.71, p95: 0.84, cagr: 20.4, payout: 16, quality: '高增长', redLine: true, pending: false },
+  '601857': { name: '中国石油', ind: 'energy', p75: 3.83, p90: 4.27, p95: 5.07, cagr: 3.6, payout: 53, quality: '低增长', redLine: false, pending: false },
+  '601985': { name: '中国核电', ind: 'utility', p75: 0.27, p90: 0.51, p95: 0.56, cagr: 1.9, payout: 37, quality: '低增长', redLine: false, pending: false },
+  '601988': { name: '中国银行', ind: 'bank', p75: 3.52, p90: 3.9, p95: 4.44, cagr: -0.8, payout: 31, quality: '负增长', redLine: false, pending: false },
+};
+
 
 /* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——给定当前股息率+行业 → 落档 + 距加仓线差
  * 与 verdictEngine 同源（BENCH 零硬编码）；雷达展示用，不含价格换算（价格差易误导 M47 教训） */
@@ -1323,10 +1431,16 @@ const TIER_LINE = {
  * ——行业线（BENCH）=数据不足（<3年日K）兜底 + 卡面参考；红线（支付率>90%/<20%）降级仅参考 */
 function tierSpot(dy, industry, code) {
   const tl = code && TIER_LINE[code] ? TIER_LINE[code] : null;
-  let mid, line, heavy, src = 'ind', redLine = false, shortSample = false;
+  let mid, line, heavy, src = 'ind', redLine = false, shortSample = false, pending = false;
   if (tl) {
-    mid = tl.p75; line = tl.p90; heavy = tl.p95; src = 'pct';
-    redLine = !!tl.redLine; shortSample = !!tl.shortSample;
+    /* v1.9.13 溢价分位：TIER_LINE 存溢价分位（pp），触发比较 dy−国债；回算 dy 口径供显示（+TREASURY_NOW）
+     * 数学：dy ≥ p+国债 ⟺ dy−国债 ≥ p，等价判定 */
+    if (tl.pending) {
+      // 移动类：K线源故障，股息率线暂替——只展示不触发（大师第5轮）
+      return { mid: tl.p75, line: tl.p90, heavy: tl.p95, cur: null, gapAdd: Math.max(0, tl.p90 - dy), src: 'pct-pending', redLine: !!tl.redLine, shortSample: true, pending: true, tl };
+    }
+    mid = tl.p75 + TREASURY_NOW; line = tl.p90 + TREASURY_NOW; heavy = tl.p95 + TREASURY_NOW;
+    src = 'prem'; redLine = !!tl.redLine;
   } else {
     const yb = BENCH[industry];
     if (!yb || dy == null) return null;
@@ -1337,7 +1451,7 @@ function tierSpot(dy, industry, code) {
   else if (dy >= line) cur = 'add';
   else if (dy >= mid) cur = 'small';
   else cur = 'wait';
-  return { mid, line, heavy, cur, gapAdd: Math.max(0, line - dy), src, redLine, shortSample, tl };
+  return { mid, line, heavy, cur, gapAdd: Math.max(0, line - dy), src, redLine, shortSample, pending, tl };
 }
 
 /* O3 卖出信号轻量判定（2026-08-18）：自选卡角标用——只依赖 divs（1 请求），不依赖 kline（分位放大器属诊断页完整版）
@@ -1390,7 +1504,7 @@ window.DL = {
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
-  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual,
+  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, sigNote, SIG_STATS,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
