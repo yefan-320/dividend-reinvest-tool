@@ -319,9 +319,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     })();
   }
 
-  /* 行业提示（P2 机会雷达用）：三级查找，零多余网络（大师 P1 限频纪律）
-   * ① snap:all 缓存（扫描器建立过）② sessionStorage 缓存（每会话每标的 1 次）③ 东财单股 f127（push2 CORS 实测通） */
+  /* 行业提示（P2 机会雷达用）：四级查找，零阻塞（大师 P1 限频纪律）
+   * ① snap:all 缓存（扫描器建立过）② sessionStorage 缓存 ③ 名称规则兜底（零网络，覆盖常见高股息股）④ push2 f127（不稳定，失败静默） */
+  const NAME_IND_RULES = [
+    [/银行/, 'bank'], [/保险/, 'insurer'], [/移动|联通|电信/, 'telecom'],
+    [/电力|华能|大唐|国电/, 'utility'], [/煤炭|石油|石化|神华|能源/, 'energy'],
+    [/伊利|蒙牛|美的|格力|海尔|茅台|五粮液|海天|农夫|双汇|海天/, 'consumer'],
+  ];
+  function industryByName(name) {
+    for (const [re, ind] of NAME_IND_RULES) if (re.test(name || '')) return ind;
+    return null;
+  }
   async function industryHint(code) {
+    const name = ((homeState.watchlist || []).find(x => x.code === code) || {}).name || '';
     try {
       const snapAll = await DL.cacheGet('snap:all');
       if (snapAll && snapAll[code] && snapAll[code].industry) return DL.industryOf(snapAll[code].industry);
@@ -330,6 +340,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const sess = JSON.parse(sessionStorage.getItem('ind_hint') || '{}');
       if (sess[code]) return DL.industryOf(sess[code]);
     } catch (e) { }
+    const byName = industryByName(name);
+    if (byName) {
+      try { const sess = JSON.parse(sessionStorage.getItem('ind_hint') || '{}'); sess[code] = byName; sessionStorage.setItem('ind_hint', JSON.stringify(sess)); } catch (e) { }
+      return byName;
+    }
     try {
       const d = await DL.fetchJson('https://push2.eastmoney.com/api/qt/stock/get?secid=' + DL.emSecidOf(code) + '&fields=f57,f127');
       const ind = d && d.data && d.data.f127;
