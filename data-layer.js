@@ -331,27 +331,35 @@ async function fetchEtfDividends(code) {
     const hit = await cacheGetFresh(cacheKey, CALIB.CACHE_TTL.dividends);
     if (hit && hit.data && hit.data.length) return hit.data;
   } catch (e) { }
-  const anns = parseEtfAnnList(await jsonp(
-    'https://api.fund.eastmoney.com/f10/FHGG?fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));   // 2026-08-17：URL 去掉 callback=?（jsonp 自动追加 &callback=cb_xxx；写死 ?= 会返回 ?(...) 无法解析→超时）
-  // 2026-08-17 性能+稳定：并发 2 + 每条重试（并发 4 触发 allorigins 限流，实测 5/6 成功率需低并发）
-  const out = [];
-  const CONC = 2;
-  for (let i = 0; i < anns.length; i += CONC) {
-    const batch = anns.slice(i, i + CONC);
-    const parsed = await Promise.all(batch.map(async a => {
-      try {
-        const d = await fetchEtfAnnouncement(a.id);   // 2026-08-17：直连+allorigins 代理双层（np-cnotice 在浏览器被 CORS 拦）
-        const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
-        if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; return rec; }
-      } catch (e) { /* 单条失败跳过，保整体 */ }
-      return null;
-    }));
-    parsed.forEach(r => { if (r) out.push(r); });
-  }
-  out.sort((x, y) => x.ex < y.ex ? 1 : -1);   // 与股票通道一致：除息日倒序
-  if (out.length) { try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { } return out; }
-  // v1.8.13 BUG-4：实时抓取结束仍 0 条 → JSON 权威=空数组（确实无分红）；JSON 无此码=数据暂缺（null）
-  return jsonHad ? [] : null;
+  // 实时抓取段（2026-08-18 加总超时预算：512890 无分红公告时 allorigins 链路可挂 30s+，拖卡加自选/诊断）
+  const REALTIME_BUDGET = 10000;   // 10s 总预算，超时=数据暂缺（null），不阻塞 UI
+  const realtime = (async () => {
+    const anns = parseEtfAnnList(await jsonp(
+      'https://api.fund.eastmoney.com/f10/FHGG?fundcode=' + code + '&pageSize=50&pageIndex=1', 'callback'));   // 2026-08-17：URL 去掉 callback=?（jsonp 自动追加 &callback=cb_xxx；写死 ?= 会返回 ?(...) 无法解析→超时）
+    // 2026-08-17 性能+稳定：并发 2 + 每条重试（并发 4 触发 allorigins 限流，实测 5/6 成功率需低并发）
+    const out = [];
+    const CONC = 2;
+    for (let i = 0; i < anns.length; i += CONC) {
+      const batch = anns.slice(i, i + CONC);
+      const parsed = await Promise.all(batch.map(async a => {
+        try {
+          const d = await fetchEtfAnnouncement(a.id);   // 2026-08-17：直连+allorigins 代理双层（np-cnotice 在浏览器被 CORS 拦）
+          const rec = parseEtfAnnouncement(a.title, d && d.data && d.data.notice_content);
+          if (rec) { rec.code = code; rec.notice = a.publish || rec.notice; return rec; }
+        } catch (e) { /* 单条失败跳过，保整体 */ }
+        return null;
+      }));
+      parsed.forEach(r => { if (r) out.push(r); });
+    }
+    out.sort((x, y) => x.ex < y.ex ? 1 : -1);   // 与股票通道一致：除息日倒序
+    if (out.length) { try { await cacheSet(cacheKey, { ts: Date.now(), data: out }); } catch (e) { } return out; }
+    // v1.8.13 BUG-4：实时抓取结束仍 0 条 → JSON 权威=空数组（确实无分红）；JSON 无此码=数据暂缺（null）
+    return jsonHad ? [] : null;
+  })();
+  return await Promise.race([
+    realtime,
+    new Promise(res => setTimeout(() => res(null), REALTIME_BUDGET)),
+  ]);
 }
 
 /* ---------- K线（腾讯主源分段 / 新浪备源；缓存走 IndexedDB） ---------- */
