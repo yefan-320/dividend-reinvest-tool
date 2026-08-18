@@ -132,7 +132,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           if (ind) {
             const dps = DL.ttmDivsAt(divs, today);
             const v = DL.verdictEngine({ coverage: DL.coverageAt(divs, parseInt(today.slice(0, 4), 10)), reserveYears: null, payoutRate: null, dps, dy: last.dy, pct: last.pct, industry: ind });
-            if (v.tiers && v.tiers.length) tiersTxt = v.tiers.slice(0, 1).join('') + (v.tiers.length > 1 ? ' | ' + v.tiers.slice(1, 3).join(' | ') : '');
+            if (v.tiers && v.tiers.length) tiersTxt = v.tiers.slice(0, 1).map(t => t.text).join('') + (v.tiers.length > 1 ? ' | ' + v.tiers.slice(1, 3).map(t => t.type + '=' + t.rate.toFixed(1) + '% <span style="font-size:9px;opacity:.7">' + t.price + ' 元</span>' + (t.hit ? ' ✅' : '')).join(' | ') : '');
           }
         } catch (e) { /* 三档失败不阻塞横幅 */ }
         rows.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoStart: eco.ecoStart, ecoType: eco.type, tcls, tiersTxt });
@@ -1173,7 +1173,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote}</div>
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
         ${verdictHtml}
-        ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.join(' &nbsp;|&nbsp; ') + '</div>' : ''}
+        ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : t.type + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
       </div>
       <table style="width:100%;font-size:11px;border-collapse:collapse">
         <tr>
@@ -2032,7 +2032,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       { name: '招商银行', code: '600036', price: 38.31, dy: 5.26, cov: 2.83, reserve: 13.4, pr: 35, roe: 13.44, roeTrend: -3, ind: '银行', tiers: '小仓区', dec: '✅ 可买' },
       { name: '工商银行', code: '601398', price: 7.67, dy: 4.05, cov: 3.22, reserve: 19.7, pr: 31, roe: 9.45, roeTrend: -1, ind: '银行', tiers: '等待区', dec: '🟡 等更低' },
       { name: '伊利股份', code: '600887', price: 25.14, dy: 5.49, cov: 1.33, reserve: 3.8, pr: 75, roe: 20.87, roeTrend: 0, ind: '消费', tiers: '小仓区', dec: '✅ 可买·预警' },
-      { name: '中国移动', code: '600941', price: 95.84, dy: 4.91, cov: 1.35, reserve: 12.0, pr: 74, roe: 9.90, roeTrend: -1, ind: '电信', tiers: '等待区', dec: '🟡 等更低' },
+      { name: '中国移动', code: '600941', price: 95.84, dy: 4.91, cov: 1.35, reserve: 12.0, pr: 74, roe: 9.90, roeTrend: -1, ind: '电信', tiers: '小仓区', dec: '✅ 可买' },
       { name: '美的集团', code: '000333', price: 83.40, dy: 5.16, cov: 1.35, reserve: 5.1, pr: 74, roe: 19.70, roeTrend: 0, ind: '消费', tiers: '小仓区', dec: '✅ 可买' },
       { name: '中国平安', code: '601318', price: 51.28, dy: 5.27, cov: 2.84, reserve: 15.7, pr: 35, roe: 14.00, roeTrend: 0, ind: '保险', tiers: '小仓区', dec: '✅ 可买' },
     ];

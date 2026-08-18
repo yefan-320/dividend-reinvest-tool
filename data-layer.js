@@ -1101,8 +1101,9 @@ const BENCH = {
   // M45 权威化（9 样本实测：中位 5.36%；重仓线 7.5% 历史 0 触发 → 降 7.0）——⚠️ 弱依据：持仓样本 2 只+触发 0 次，待扩充
   consumer:{ roe: [15, 20, 24],  yieldMid: 5.0, yieldUp: 1.0, note: '消费 9 样本实测（2026-08-18）：中位 5.36%；高分红率 70%+ 常见；三档 5.0/6.0/7.0（弱依据·样本2持仓·待扩充）' },
   // 电信：样本 移动4.91，中位≈5.0%，上浮 1.0pp → 买点线 6.0%
-  // M45：样本 3 只（移动/电信/联通，A 股仅 3 家）未达权威线（≥5）→ 维持初始值 + 标注
-  telecom: { roe: [8, 10, 13],   yieldMid: 5.0, yieldUp: 1.0, note: '电信实测（3 样本·未达权威线）：中位 4.14%；三档 5.0/6.0/7.0（维持初始值）' },
+  // M45：样本 3 只（移动/电信/联通，A 股仅 3 家）未达权威线（≥5）→ 维持 + 标注
+  // M47 Q3：小仓线 5.0→4.5（个股可达性修正：移动 4.91% 已是全市场高分红，5.0 过严卡等待）；加仓 6.0/重仓 7.0 不变
+  telecom: { roe: [8, 10, 13],   yieldMid: 4.5, yieldUp: 1.5, note: '电信实测（3 样本·未达权威线）：中位 4.14%；三档 4.5/6.0/7.0（4.5 基于个股可达性修正）' },
   // 保险：样本 平安5.27，中位≈4.5%，上浮 1.0pp → 买点线 5.5%（Q2 修正：与"45加仓"自洽，2.70/0.055≈49 元）
   // M45 权威化（5 样本实测：中位 3.84%；NBV 年度概念禁季度判趋势）——三档 4.0/5.5/6.5（平安 49.1 已核）
   insurer: { roe: [14, 18, 28],   yieldMid: 4.0, yieldUp: 1.5, note: '保险 5 样本实测（2026-08-18）：中位 3.84%；平安 5.26 特例拉高；三档 4.0/5.5/6.5' },
@@ -1252,16 +1253,19 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     if (dy >= heavyLine) curTier = { name: '重仓区', note: '已到重仓线 ' + heavyLine.toFixed(1) + '%' };
     else if (dy >= line) curTier = { name: '加仓区', note: '已到加仓线 ' + line.toFixed(1) + '%' };
     else if (dy >= midLine) curTier = { name: '小仓区', note: '已可小仓（≥' + midLine.toFixed(1) + '%），未到加仓线 ' + line.toFixed(1) + '%' };
-    else curTier = { name: '等待区', note: '未达小仓线 ' + midLine.toFixed(1) + '%' };
+    else curTier = { name: '等待区', note: '未达小仓线 ' + midLine.toFixed(1) + '%；现价买入仍可吃分红（' + dy.toFixed(2) + '%），三档为加仓节奏参考非买入否决' };
   }
   const tiers = [];
-  if (curTier) tiers.push('📍 当前：' + curTier.name + '（' + curTier.note + '）');
-  if (midLine != null) tiers.push('小仓=' + midLine.toFixed(1) + '%·' + bp(midLine) + ' 元' + (dy != null && dy >= midLine ? ' ✅' : ''));
-  if (buyP) tiers.push('加仓=' + line.toFixed(1) + '%·' + buyP + ' 元' + (dy != null && dy >= line ? ' ✅' : ''));
-  if (heavyP) tiers.push('重仓=' + heavyLine.toFixed(1) + '%·' + heavyP + ' 元' + (dy != null && dy >= heavyLine ? ' ✅' : ''));
+  /* M47 Q1：三档结构化（股息率主显 + 价格附注小字）——rate 为档位股息率，price 为换算价（附注用） */
+  if (curTier) tiers.push({ type: 'cur', text: '📍 当前：' + curTier.name + '（' + curTier.note + '）' });
+  if (midLine != null) tiers.push({ type: 'small', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
+  if (buyP) tiers.push({ type: 'add', rate: line, price: buyP, hit: dy != null && dy >= line });
+  if (heavyP) tiers.push({ type: 'full', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
   out.tiers = tiers;
+  /* 文本形态（向后兼容：summary 等使用处） */
+  out.tiersTxt = tiers.map(t => t.type === 'cur' ? t.text : (t.type === 'small' ? '小仓' : t.type === 'add' ? '加仓' : '重仓') + '=' + t.rate.toFixed(1) + '%·' + t.price + ' 元' + (t.hit ? ' ✅' : '')).join(' / ');
   out.curTier = curTier;
-  out.summary = `${parts.join(' · ')}` + (tiers.length ? '；' + tiers.join(' / ') : '');
+  out.summary = `${parts.join(' · ')}` + (out.tiersTxt ? '；' + out.tiersTxt : '');
   return out;
 }
 
