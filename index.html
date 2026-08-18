@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>红利复投工具</title>
 <script src="vendor/echarts.min.js"></script>
-<script><script>
+<script>
 /* O1：报告卡研究数据（2026-08-18 东财F10 2025年报 + 腾讯实时价）——F10 自动接入后删除 */
 window.REPORT_CARD_EXTRA = {
   '600036': { industry: 'bank', roe: 13.44, roeTrend: -3, netProfit: 1501.81, eps: 5.70, reserve: 26.9551, period: '2025年报' },
@@ -138,6 +138,50 @@ body{padding-bottom:64px}
 </style>
 </head>
 <body>
+<!-- 🔒 访问密码锁（2026-08-18：GitHub Pages 公开部署用；SHA-256 校验 + 30 天记住） -->
+<div id="lockScreen" style="position:fixed;inset:0;z-index:99999;background:#0d1a14;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px">
+  <div style="font-size:20px;font-weight:700;color:#d9a441;letter-spacing:2px">🔒 红利复投工具</div>
+  <div style="font-size:12px;color:#8fa69c">私人工具 · 请输入访问密码</div>
+  <input id="lockPwd" type="password" placeholder="访问密码" style="width:220px;padding:10px 14px;background:#16211d;border:1px solid #2a3d36;border-radius:10px;color:#e8efe9;font-size:15px;text-align:center;outline:none">
+  <button id="lockBtn" style="padding:10px 34px;background:#d9a441;color:#0d1a14;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">进 入</button>
+  <div id="lockMsg" style="color:#e06666;font-size:12px;min-height:16px"></div>
+</div>
+<script>
+/* 密码锁：SHA-256 校验（防明文）+ localStorage 30 天免密 */
+(function () {
+  var HASH = 'a2cb61c82c80eff0e70a3bab07b8885d76127bf587907add325e4033f8f001e3';
+  var KEY = 'divtool_unlock_ts', DAYS = 30;
+  function store() { try { return window.localStorage; } catch (e) { return null; } }
+  function sha256(s) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (b) {
+      return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    });
+  }
+  var ls = store(), unlocked = false;
+  try { if (ls && parseInt(ls.getItem(KEY) || '0', 10) && Date.now() - parseInt(ls.getItem(KEY), 10) < DAYS * 86400000) unlocked = true; } catch (e) {}
+  if (!unlocked) {
+    var lock = document.getElementById('lockScreen');
+    lock.style.display = 'flex';
+    function tryUnlock() {
+      var pwd = document.getElementById('lockPwd').value;
+      sha256(pwd).then(function (h) {
+        if (h === HASH) {
+          try { if (ls) ls.setItem(KEY, String(Date.now())); } catch (e) {}
+          lock.style.display = 'none';
+          document.getElementById('lockPwd').value = '';
+        } else {
+          document.getElementById('lockMsg').textContent = '密码错误，请重试';
+          document.getElementById('lockPwd').value = '';
+          document.getElementById('lockPwd').focus();
+        }
+      });
+    }
+    document.getElementById('lockBtn').onclick = tryUnlock;
+    document.getElementById('lockPwd').addEventListener('keydown', function (e) { if (e.key === 'Enter') tryUnlock(); });
+    setTimeout(function () { document.getElementById('lockPwd').focus(); }, 100);
+  }
+})();
+</script>
 <div class="wrap">
 <header>
   <h1>💰 红利复投<span class="g">工具</span></h1>
