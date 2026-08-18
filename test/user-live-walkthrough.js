@@ -120,6 +120,7 @@ async function waitFor(cdp, expr, timeout, desc, interval = 2000) {
 const todayMinus = n => { const d = new Date(); d.setFullYear(d.getFullYear() - n); return d.toISOString().slice(0, 10); };
 
 function killChrome() {
+  try { require('child_process').execSync(`pkill -f 'dvt-live'`); } catch (e) {}
   try { require('child_process').execSync(`pkill -f 'remote-debugging-port=${CDP_PORT}'`); } catch (e) {}
 }
 
@@ -137,6 +138,9 @@ function waitPortFree(timeout) {
 
 async function main() {
   console.log('🌐 用户视角线上走查: ' + LIVE + '\n');
+  /* 先清场：残留的无头 Chrome（含上次崩溃遗留）全杀，防端口冲突连错实例 */
+  killChrome();
+  await waitPortFree(15000);
 
   /* ========== A. 设备1 首访 + 密码锁 ========== */
   const profA = '/tmp/dvt-live-a-' + Date.now();
