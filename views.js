@@ -650,7 +650,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         DL.getKline(code, new Date(Date.now() - diagYears * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
       ]);
       if (seq !== diagSeq) return;   // v1.9.0 竞态修复
-      const snap = homeState.snap || await DL.getStockQuotes([code]);
+      // BUG修复(2026-08-18)：snap 复用同根因——诊断其他股票时若 snap 缺该 code，合并拉取保证 PE/PB/价格齐全
+      const fresh = await DL.getStockQuotes([code]);
+      const snap = Object.assign({}, homeState.snap || {}, fresh);
       homeState.snap = snap;
       const s = snap[code] || {};
       const lastPrice = s.price || (kline && Object.values(kline).pop());
@@ -1037,6 +1039,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   function renderSellSignals(divs, kline) {
     const el = $('#diagSellSignals');
     if (!el) return;
+    // P0-C 修复（2026-08-18）：卖出信号限最近 5 个完整财年（滚动财年窗，窗口终点=最近完整财年）
+    // 旧：遍历全部历史 → 长电 2019/2022 历史事件永久触发"建议退出或减仓"
+    const SELL_WINDOW_YEARS = 5;
     const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     // EPS 趋势（按报告期年份取最新）
     const epsByYear = {};
@@ -1062,9 +1067,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const ys = Object.keys(byYear).filter(y => byYear[y] > 0).sort();
     const yoy = [];
     for (let i = 1; i < ys.length; i++) { const prev = byYear[ys[i - 1]], cur = byYear[ys[i]]; yoy.push({ y: ys[i], pct: prev > 0 ? (cur - prev) / prev * 100 : null }); }
-    // P0-C 修复（2026-08-18）：卖出信号限最近 5 个完整财年（滚动财年窗，窗口终点=最近完整财年）
-    // 旧：遍历全部历史 → 长电 2019/2022 历史事件永久触发"建议退出或减仓"
-    const SELL_WINDOW_YEARS = 5;
     const lastFullYear = ys.length ? ys[ys.length - 1] : null;
     const yoyWindowed = yoy.filter(t => lastFullYear != null && t.y >= lastFullYear - SELL_WINDOW_YEARS + 1);
     const divConsec = [];
@@ -1765,7 +1767,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   async function addToWatchlist(code) {
     try {
       const name = await DL.fetchName(code);
-      const snap = homeState.snap || await DL.getStockQuotes([code]);
+      // BUG修复(2026-08-18 实战发现)：homeState.snap || 复用导致第2只以后全部取不到报价→股息率"待数据"
+      // 每次强制拉当前代码报价，并合并进已有 snap（旧股价格缓存保留）
+      const fresh = await DL.getStockQuotes([code]);
+      const snap = Object.assign({}, homeState.snap || {}, fresh);
       homeState.snap = snap;
       const s = snap[code];
       let divYield = null, price = s ? s.price : null;
