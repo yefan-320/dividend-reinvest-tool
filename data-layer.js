@@ -1438,6 +1438,64 @@ function ddNote(ind, tierKey) {
   return `该档位历史最大浮亏 ${m.dd}%（${m.seg} 时段，1 年含分红口径）`;
 }
 
+/* 历史战绩静态数据（2026-08-18 招行案例优化，大师三轮裁决 B/D/E + Q5/Q6）
+ * 数据源：data/track-record.js（window.TRACK_RECORD；node 测试环境 require 后挂 global）
+ * 口径：29只×16年真实日K+分红，工具当前线打标，分红复投，样本内校准（2026线回看历史）
+ * 结构：tiers{small/add/heavy}·waitGap{near/mid/far}·waitDur{near/mid/far}，各含 {ind|all}.{r1|r3|r5} → {n,mid,loss} */
+function trackRec() {
+  const g = (typeof window !== 'undefined') ? window : global;
+  return (g && g.TRACK_RECORD) || null;
+}
+/* 取统计：scope=ind 优先，all 兜底；路径 = bucket.scope[sub].hk；返回 {n,mid,loss} 或 null */
+function trackStat(bucket, scope, sub, hk) {
+  const tr = trackRec();
+  if (!tr || !bucket || !hk) return null;
+  const byScope = tr[bucket];
+  if (!byScope) return null;
+  const node = (byScope[scope] && byScope[scope][sub]) || (byScope.all && byScope.all[sub]) || null;
+  return (node && node[hk]) || null;
+}
+/* wait gap 分桶：gapAdd(pp) → near/mid/far */
+function waitGapKey(gap) {
+  if (gap == null) return null;
+  if (gap < 1) return 'near';
+  if (gap <= 3) return 'mid';
+  return 'far';
+}
+/* 触发档战绩行（大师 Q1/Q4：行业桶优先+全池附注；Q5 带样本量）
+ * 输入：行业+档位key(small/add/heavy/wait)+当前 gapAdd；输出 HTML 或 null */
+function tierTrackNote(ind, tierKey, gap) {
+  const tr = trackRec();
+  if (!tr || !tierKey) return null;
+  const isWait = tierKey === 'wait';
+  if (isWait) {
+    const gk = waitGapKey(gap);
+    if (!gk) return null;
+    const b5 = trackStat('waitGap', ind, gk, 'r5');
+    const b1 = trackStat('waitGap', ind, gk, 'r1');
+    const wd = trackStat('waitDur', ind, gk, null) ? null : null;
+    const wdNode = (tr.waitDur[ind] || tr.waitDur.all || {})[gk];
+    if (!b5) return null;
+    const label = gk === 'near' ? '接近触发' : gk === 'mid' ? '中间区' : '远离触发';
+    const upRate = b1 ? (100 - b1.loss) : null;   // 踏空率=1年上涨占比（Q6 纪律诚实双向）
+    const wdTxt = wdNode ? `；预计等待 P50 ${wdNode.p50} 天 / P90 ${wdNode.p90} 天` : '';
+    const upTxt = upRate != null ? `；1年上涨占比 ${upRate}%（踏空成本）` : '';
+    return `等待区·${label}（距线 ${gap != null ? gap.toFixed(1) + 'pp' : '—'}）：历史 5 年复投中位 <b>+${b5.mid}%</b>、亏损率 <b>${b5.loss}%</b>（n=${b5.n}）${wdTxt}${upTxt}`;
+  }
+  const st = trackStat('tiers', ind, tierKey, 'r5');
+  if (!st) return null;
+  return `${tierKey === 'small' ? '小仓' : tierKey === 'add' ? '加仓' : '重仓'}线历史（5年复投）：中位 <b>+${st.mid}%</b>、亏损率 <b>${st.loss}%</b>（n=${st.n}，样本内校准口径）`;
+}
+/* 触发档 1 年胜率替换（E：小仓≈随机旧结论作废→3-5年含分红口径） */
+function tierTrackShort(ind, tierKey) {
+  const tr = trackRec();
+  if (!tr) return null;
+  const s3 = trackStat('tiers', ind, tierKey, 'r3');
+  if (!s3) return null;
+  const label = tierKey === 'small' ? '小仓' : tierKey === 'add' ? '加仓' : '重仓';
+  return `${label}线历史 3 年复投中位 +${s3.mid}%、亏损率 ${s3.loss}%（n=${s3.n}）`;
+}
+
 /* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08 近似 1.55%，正式源待接入 backlog） */
 const TREASURY_NOW = 1.55;
 const TIER_LINE = {
@@ -1556,6 +1614,8 @@ window.DL = {
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
   reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, sigNote, SIG_STATS, ddNote, MAX_DD,
+  /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
+  trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */

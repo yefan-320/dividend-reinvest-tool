@@ -1462,21 +1462,25 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const el = $('#diagReportCard');
     if (!el) return;
     // P0-6：当前档位历史标注（三维表）——重仓→heavy/加仓→add/小仓→small；hard 已拦截不重复标
-    const sigNoteHtml = (ind, tierName, trap) => {
-      if (trap && trap.level === 'hard') return '';
-      const key = tierName.indexOf('重仓') >= 0 ? 'heavy' : tierName.indexOf('加仓') >= 0 ? 'add' : tierName.indexOf('小仓') >= 0 ? 'small' : null;
-      if (!key) return '';
-      const note = DL.sigNote(ind, key);
-      const dd = DL.ddNote(ind, key);   // D7：分时段最大浮亏（重仓/加仓档）
-      if (!note && !dd) return '';
-      const isSmall = key === 'small';
-      const ddTxt = dd ? ` · ${dd}` : '';
-      return `<div style="font-size:10px;color:${isSmall ? 'var(--muted)' : 'var(--sub)'};margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📊 ${isSmall ? '小仓线历史≈随机买入，非机会信号' : '信号可信度：'}${note || ''}${ddTxt}</div>`;
-    };
+    // v1.9.14 招行案例优化：wait 也分级显示（near/mid/far + 5年复投中位/亏损率 + 预计等待 + 踏空率）；
+    // E："小仓≈随机"旧结论作废→3-5年含分红复投口径；Q5 带样本量
     const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
     const last = series.filter(x => x.pct != null).pop();
     const dy = last ? last.dy : null;
     const pct = last ? last.pct : null;
+    const sigNoteHtml = (ind, tierName, trap, gapAdd) => {
+      if (trap && trap.level === 'hard') return '';
+      const key = tierName.indexOf('重仓') >= 0 ? 'heavy' : tierName.indexOf('加仓') >= 0 ? 'add' : tierName.indexOf('小仓') >= 0 ? 'small' : tierName.indexOf('等待') >= 0 ? 'wait' : null;
+      if (!key) return '';
+      const trNote = DL.tierTrackNote(ind, key, gapAdd);
+      const dd = DL.ddNote(ind, key);   // D7：分时段最大浮亏（重仓/加仓档）
+      if (!trNote && !dd) return '';
+      const isWait = key === 'wait';
+      const ddTxt = dd ? ` · ${dd}` : '';
+      const color = isWait ? 'var(--muted)' : 'var(--sub)';
+      const prefix = isWait ? '⏳' : '📊';
+      return `<div style="font-size:10px;color:${color};margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">${prefix} ${trNote || ''}${ddTxt}</div>`;
+    };
     // 覆盖率（P0-B 修复后口径）
     const cov = DL.coverageAt(divs, parseInt(DL.todayStr().slice(0, 4), 10));
     // 储备年数 = 每股未分配 ÷ 每股派息（M25 公式锁定）——未分配暂无接口，用 extra 传入
@@ -1492,6 +1496,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const cagr = DL.calcDivCAGR(divs);
     // 行业（ORG_TYPE 兜底，extra 传结构化行业）
     const industry = (extra && extra.industry) || null;
+    const tsNow = (dy != null && industry) ? DL.tierSpot(dy, industry, code) : null;
+    const gapAdd = tsNow ? tsNow.gapAdd : null;
     const periodLabel = DL.reportPeriodLabel(divs) || (extra && extra.period) || '—';
     // 结论引擎（v1.9.13：传 code 启用分位线三档）
     const v = DL.verdictEngine({
@@ -1531,14 +1537,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
         ${v.conflicts && v.conflicts.length ? `<div style="font-size:10px;margin-top:3px;color:#d9a45b">⚡ 矛盾提示：${v.conflicts.join('；')}（并列展示，请自行裁决）</div>` : ''}
         ${lineNoteHtml}
-        ${v.curTier && industry ? sigNoteHtml(industry, v.curTier.name, v.trap) : ''}
+        ${v.curTier && industry ? sigNoteHtml(industry, v.curTier.name, v.trap, gapAdd) : ''}
       </div>
       <table style="width:100%;font-size:11px;border-collapse:collapse">
         <tr>
           <td style="padding:4px;background:var(--card2);border:1px solid var(--line);border-radius:6px 0 0 6px;text-align:center"><div style="color:var(--muted);font-size:10px">① 状态</div><div>净利 ${netTxt}</div></td>
           <td style="padding:4px;background:var(--card2);border:1px solid var(--line);text-align:center"><div style="color:var(--muted);font-size:10px">② 可持续</div><div>覆盖 ${covTxt}</div><div>储备 ${reserveTxt} · 分红率 ${payoutTxt}</div></td>
           <td style="padding:4px;background:var(--card2);border:1px solid var(--line);text-align:center"><div style="color:var(--muted);font-size:10px">③ 质量</div><div>ROE ${roeTxt}</div><div>CAGR ${cagrTxt}</div></td>
-          <td style="padding:4px;background:var(--card2);border:1px solid var(--line);text-align:center"><div style="color:var(--muted);font-size:10px">④ 价格</div><div>股息率 ${dyTxt}</div><div>分位 ${pctTxt}</div>${priceTxt}</td>
+          <td style="padding:4px;background:var(--card2);border:1px solid var(--line);text-align:center"><div style="color:var(--muted);font-size:10px">④ 价格</div><div>股息率 ${dyTxt}</div><div>便宜度(375d) ${pctTxt}</div>${priceTxt}</td>
           <td style="padding:4px;background:var(--card2);border:1px solid var(--line);border-radius:0 6px 6px 0;text-align:center"><div style="color:var(--muted);font-size:10px">⑤ 风险</div><div style="font-size:10px">${v.q3.msg}</div></td>
         </tr>
       </table>`;

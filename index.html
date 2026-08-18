@@ -483,7 +483,8 @@ body{padding-bottom:64px}
 </section>
 
 <script src="demo-data.js?v=v1.9.6"></script>
-<script src="data-layer.js?v=v1.9.6"></script>
+<script src="data/track-record.js?v=v1.9.14"></script>
+<script src="data-layer.js?v=v1.9.14"></script>
 <script>
 /* ================= 工具函数 ================= */
 const APP_VERSION = 'v1.9.13';
@@ -693,7 +694,7 @@ const AXIS = { axisLine:{lineStyle:{color:'#3a4f46'}}, axisLabel:{color:'#8fa69c
 // v1.7.2: Object.assign({...}, AXIS) 会用 AXIS.axisLabel 覆盖前面自定义的 formatter → y轴长数字挤在一起。
 // 修法：各图 yAxis 用 axY(自定义formatter) 合并，不再直接 Object.assign。
 const axY = (extra = {}) => Object.assign({ type:'value' }, AXIS, { axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) }, { scale: extra.scale, axisLabel: Object.assign({}, AXIS.axisLabel, extra.axisLabel || {}) });
-const TOOLTIP = { trigger:'axis', backgroundColor:'#1b2a25', borderColor:'#2a3d36', textStyle:{color:'#e8efe9', fontSize:12}, axisPointer:{lineStyle:{color:'#d9a441'}} };
+const TOOLTIP = { trigger:'axis', backgroundColor:'#1b2a25', borderColor:'#2a3d36', textStyle:{color:'#e8efe9', fontSize:12}, axisPointer:{ snap:true, lineStyle:{color:'#d9a441'} } };
 
 function renderAll(res, name, res2){
   // v1.7.6 M9/大师条件：回测页 ETF 分红数据源限制标注（防止用户把“累计分红 0”误读为基金不分红）
