@@ -68,6 +68,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       b.classList.toggle('active', b.dataset.tab === name);
     });
     if (name === 'home') renderHome();
+    /* O4（2026-08-18）：切到对比 tab 时若列表为空且有自选 → 预填（renderCompare 只在首载跑一次，切 tab 需补；try 包裹防 TDZ） */
+    if (name === 'compare') {
+      try {
+        if (cmpState && !cmpState.list.length) {
+          const wl = DL.Watchlist.list();
+          if (wl.length) { cmpState.list = wl.slice(0, 5).map(x => ({ code: x.code, name: x.name || x.code })); cmpRenderList(); }
+        }
+      } catch (e) { }
+    }
   }
   function bindTabs() {
     document.querySelectorAll('.tabbar button').forEach(b => {
