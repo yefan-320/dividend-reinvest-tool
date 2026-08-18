@@ -396,7 +396,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (radar.wait.length) radarLines.push(`⚪ ${radar.wait.length} 只等待区 ${radar.wait.map(x => x.name).join('、')}`);
     nearAdd.sort((a, b) => a.gap - b.gap);
     let html = '';
-    if (radarLines.length) html += `<div style="margin-bottom:6px;font-size:12px">🔍 <b>机会雷达</b>：${radarLines.join('；')}</div>`;
+    if (radarLines.length) html += `<div style="margin-bottom:4px;font-size:12px">🔍 <b>机会雷达</b>：${radarLines.join('；')}</div><div class="hint" style="font-size:10px;margin-bottom:4px">位置≠建议——当前股息率在三档的哪个区，结合分位与财报底座判断</div>`;
     if (nearAdd.length) html += `<div class="hint">距加仓线最近：${nearAdd.slice(0, 3).map(x => `${x.name} 差 <b>${x.gap.toFixed(2)}pp</b>`).join(' · ')}（现价股息率 vs 行业加仓线）</div>`;
     html += alerts.length
       ? alerts.map(a => `<div class="alert-item">🔔 ${a}</div>`).join('')

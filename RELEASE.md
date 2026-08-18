@@ -15,6 +15,7 @@
 ## 发布后清单
 
 - [ ] **线上确认**：curl 线上文件 grep 版本号 + 本次修复特征代码
+- [ ] **线上与本地一致性核验**：curl 线上 index.html/views.js/data-layer.js 的 sha256 == 本地仓库 sha256（防"本地改了一堆、线上没同步"）
 - [ ] **用户视角走查**：密码锁/自选/诊断/回测 核心流程过一遍（可用 `test/user-live-walkthrough.js`）
 - [ ] **CHANGELOG 更新**：本次变更 + 版本号 + 日期
 
