@@ -1192,7 +1192,9 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
   // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
   window.addEventListener('load', () => {
-    if (params.get('code')) run('live');
+    const ucode = (params.get('code') || '').trim();
+    // P9（2026-08-18）：URL code 白名单格式校验——仅 6 位数字才自动回测（防参数注入/无效代码）
+    if (/^\d{6}$/.test(ucode)) run('live');
     else if (![...params.keys()].length) run('demo');   // 完全无参数=纯首屏才演示；分享链接（d/y/cmp/p/...）不跑，防覆盖链接警告/对比状态
   });
 })();

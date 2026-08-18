@@ -568,12 +568,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     try { holdings = JSON.parse(localStorage.getItem('divtool_holdings') || '{}'); } catch (e) {}
     const allDivs = [];
     const names = {};
+    const cagrs = [];   // E3：自选分红 CAGR 收集（保守口径）
     for (const it of wl.slice(0, 20)) {
       try {
         const divs = await DL.fetchDividendsOne(it.code);
         divs.forEach(d => { if (d.dps > 0 && !d.pending) { d.code = it.code; d.name = it.name || it.code; } });
         allDivs.push(...divs);
         names[it.code] = it.name || it.code;
+        const cagr = DL.calcDivCAGR(divs, 3);
+        if (cagr != null) cagrs.push(cagr);
       } catch (e) {}
     }
     const cf = DL.calcFutureCashflow(allDivs, holdings, today, 12);
@@ -636,15 +639,28 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const addDef = (() => { try { return parseFloat(localStorage.getItem('divtool_add_amt') || '0') || 0; } catch (e) { return 0; } })();
     const avgDy = (() => { const ds = wl.map(w => w.snapshot && w.snapshot.divYield).filter(x => x > 0); return ds.length ? ds.reduce((s, x) => s + x, 0) / ds.length : 0.05; })();
     const addYear = addDef * avgDy, addMonth = addYear / 12;
+    /* E3 分红里程碑：按自选平均 CAGR（保守口径）算月分红翻倍年数（72 法则精确式 ln2/ln(1+g)） */
+    const avgCagr = cagrs.length ? cagrs.reduce((s, x) => s + x, 0) / cagrs.length : null;
+    const doubleY = (avgCagr != null && avgCagr > 0) ? Math.log(2) / Math.log(1 + avgCagr) : null;
+    const etfRefId = 'divLifeEtf';
     const lifeHtml = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
-      <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 分红年报 · D12 消费覆盖 · E2 追加视角）</summary>
+      <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 年报 · D12 消费覆盖 · E2 追加 · E3 里程碑 · D11 ETF 参照）</summary>
         <div style="font-size:11px;color:var(--sub);margin:6px 0 4px">📅 近 ${Math.min(6, years.length)} 年实际分红收入（需填持仓股数）：</div>
         <div>${yearRows || '<span class="hint">填写上方持仓股数后显示历史分红收入</span>'}</div>
+        <div style="font-size:11px;margin-top:6px">🚀 分红里程碑：${doubleY ? `按近 3 年分红增速 ${(avgCagr * 100).toFixed(1)}% 持续（保守口径），月分红翻倍还需约 <b>${doubleY.toFixed(0)} 年</b>` : '<span class="hint">自选样本不足，无法估算增速（分红不增长时永远不翻倍）</span>'}</div>
+        <div id="${etfRefId}" style="font-size:11px;margin-top:4px"><span class="hint">红利 ETF 参照加载中…</span></div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">月生活支出（元）：</span><input id="divLifeExp" type="number" min="0" placeholder="如 15000" value="${expDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeExpSave">💾 算覆盖</button></div>
         <div style="font-size:11px;margin-top:4px">${covPct != null ? `当前年分红 <b>${(yearIncome / 10000).toFixed(2)}万</b>（月 ${(yearIncome / 12 / 10000).toFixed(2)}万）→ 覆盖月支出 <b style="color:var(--gold)">${covPct.toFixed(0)}%</b>；${gapRange}` : '<span class="hint">填月支出后显示覆盖率与缺口本金</span>'}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">提取参考（分红由持股产生，提取不影响下年分红基数）：提取 0/30/50/100% → 每年可消费 0 / ${(yearIncome * 0.3 / 10000).toFixed(2)} / ${(yearIncome * 0.5 / 10000).toFixed(2)} / ${(yearIncome / 10000).toFixed(2)} 万，剩余复投</div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">追加金额（元）：</span><input id="divLifeAdd" type="number" min="0" placeholder="如 50000" value="${addDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeAddSave">💾 算贡献</button><span style="font-size:10px;color:var(--muted)">按自选平均股息率 ${(avgDy * 100).toFixed(1)}%</span></div>
         <div style="font-size:11px;margin-top:4px">${addDef > 0 ? `追加 ${(addDef / 10000).toFixed(1)}万 → 年贡献分红 <b>${(addYear / 10000).toFixed(2)}万</b>（月 ${(addMonth / 10000).toFixed(2)}万）——1 年后起算，长期吃分红视角` : '<span class="hint">填追加金额后显示分红贡献</span>'}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="chip" id="divLifeReinvest" style="color:#4caf7d">🔄 分红→再投资（去扫描器）</button>
+          <button type="button" class="chip" id="divLifeExport">⬇️ 导出数据（换设备迁移）</button>
+          <button type="button" class="chip" id="divLifeImport">⬆️ 导入数据</button>
+          <input type="file" id="divLifeImportFile" accept="application/json" style="display:none">
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">导出=自选/持仓/决策日志/目标/支出/设置（JSON 带版本号，本地文件不上传）</div>
       </details>
     </div>`;
     el.innerHTML = `${holdInput}${targetInput}${targetHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
@@ -678,6 +694,70 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       try { localStorage.setItem('divtool_add_amt', String(v)); } catch (e) {}
       renderDivCalendar();
     };
+    // P2：分红资金闭环（D12 出口→扫描器再投资）
+    const reinBtn = $('#divLifeReinvest');
+    if (reinBtn) reinBtn.onclick = () => {
+      try { const h = document.querySelector('[data-tab="home"]'); if (h) h.click(); const d = $('#btnDiscover'); if (d) d.click(); } catch (e) {}
+    };
+    // P2 F3：多设备数据迁移（导出/导入 JSON 带版本号）
+    const exBtn = $('#divLifeExport');
+    if (exBtn) exBtn.onclick = () => {
+      try {
+        const data = {
+          v: 1, app: 'dividend-tool', exportedAt: DL.todayStr(),
+          watchlist: wl.map(w => ({ code: w.code, name: w.name || '' })),
+          holdings: (() => { try { return JSON.parse(localStorage.getItem('divtool_holdings') || '{}'); } catch (e) { return {}; } })(),
+          decisions: decLog(),
+          target: localStorage.getItem('divtool_div_target') || '',
+          monthlyExp: localStorage.getItem('divtool_monthly_exp') || '',
+          addAmt: localStorage.getItem('divtool_add_amt') || '',
+          mode: localStorage.getItem('divtool_zone_mode') || '',
+        };
+        const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dividend-tool-backup-' + DL.todayStr() + '.json'; a.click();
+      } catch (e) { try { toast('导出失败'); } catch (e2) {} }
+    };
+    const imBtn = $('#divLifeImport'), imFile = $('#divLifeImportFile');
+    if (imBtn) imBtn.onclick = () => { if (imFile) imFile.click(); };
+    if (imFile) imFile.onchange = async (e) => {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        if (!data || data.v !== 1 || data.app !== 'dividend-tool') { try { toast('文件版本不兼容'); } catch (e2) {} return; }
+        if (Array.isArray(data.watchlist)) { try { localStorage.setItem('divtool_watchlist_v1', JSON.stringify(data.watchlist)); } catch (e2) {} }
+        if (data.holdings) { try { localStorage.setItem('divtool_holdings', JSON.stringify(data.holdings)); } catch (e2) {} }
+        if (Array.isArray(data.decisions)) { try { localStorage.setItem(DEC_KEY, JSON.stringify(data.decisions.slice(0, 200))); } catch (e2) {} }
+        ['target', 'monthlyExp', 'addAmt'].forEach(k => { if (data[k] != null && data[k] !== '') { try { localStorage.setItem('divtool_' + k, data[k]); } catch (e2) {} } });
+        if (data.mode) { try { localStorage.setItem('divtool_zone_mode', data.mode); } catch (e2) {} }
+        try { toast('✅ 导入成功'); } catch (e2) {}
+        if (typeof renderHome === 'function') { try { renderHome(); } catch (e2) {} }
+        renderDivCalendar();
+      } catch (err) { try { toast('导入失败：' + err.message); } catch (e2) {} }
+    };
+    // P2 D11：红利 ETF 年化分红参照（近 12 月每份分红 ÷ 现价，异步填充失败静默）
+    (async () => {
+      const etfEl = document.getElementById(etfRefId);
+      if (!etfEl) return;
+      try {
+        const etfs = [['512890', '红利低波'], ['515080', '红利ETF'], ['510300', '沪深300']];
+        const rows = [];
+        for (const [code, name] of etfs) {
+          try {
+            const divs = await DL.fetchEtfDividends(code);
+            const snap = await DL.getStockQuotes([code]);
+            const price = snap[code] && snap[code].price;
+            if (!divs || !divs.length || !price) continue;
+            const start = new Date(Date.now() - 366 * 86400000).toISOString().slice(0, 10);
+            let sum = 0;
+            divs.forEach(d => { if (d.ex && d.ex >= start && d.ex <= DL.todayStr()) sum += d.dps; });
+            rows.push(name + ' <b>' + (sum / price * 100).toFixed(1) + '%</b>');
+          } catch (e) {}
+        }
+        etfEl.innerHTML = rows.length
+          ? '📊 红利ETF 年化分红参照（近12月每份分红÷现价）：' + rows.join(' · ') + ' <span style="color:var(--muted)">vs 自选平均 ' + (avgDy * 100).toFixed(1) + '%</span>'
+          : '<span class="hint">ETF 参照加载失败（数据源暂不可用）</span>';
+      } catch (e) { const el2 = document.getElementById(etfRefId); if (el2) el2.innerHTML = '<span class="hint">ETF 参照加载失败</span>'; }
+    })();
   }
 
   /* 扫描入口：决策台底部按钮 → 打开扫描子页（简单内嵌） */
@@ -1371,6 +1451,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       html += `<div class="hint">该标的暂无研究画像数据（40 只高股息池外）——默认按“80 直接买”保守处理；后续随研究扩展补充。</div>`;
     }
     html += `<div class="hint" style="margin-top:4px">口径：40 只高股息标的 2010-2026 实测（R12-R14）；年化等待收益=90档5年收益差÷等待年数；样本量见研究记录，非全部标的覆盖</div>`;
+    html += `<div class="hint" style="margin-top:2px">D10 实测（25991 组机会区间）：等 1 年 vs 立即买，3 年收益差均值 <b>+8pp</b>、58% 概率更优（分布 -67~+77pp 极宽）——分位≥80 已可买，等 90 档只是锦上添花，不是必需</div>`;
     el.innerHTML = html;
   }
 
