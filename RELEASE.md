@@ -4,6 +4,14 @@
 > ③ 8/18 P0-C TDZ 崩溃：unit 测试全过但打开诊断页即炸——**代码层验收≠页面级冒烟**
 > 每次推送 GitHub Pages 前逐项勾选，缺一项不得发布。
 
+## ⛔ 总闸（2026-08-20 主人令"以后必须不能犯"）
+
+**发布 = 唯一通道 `./scripts/release.sh <版本号>`，禁止手动 push 冒充发布。**
+
+- release.sh 会自动：APP_VERSION + 日期 + ?v= 缓存戳三同步 → 语法检查 → e2e → 提交打 tag 推送 → 文件级 sha 复核
+- 历史教训：机制早就存在（v1.8.7 建），但 v1.9.15 我手动改代码+手动 push，跳过 release.sh → 版本号漏更新被主人抓
+- 自查口令：push 前问自己"走 release.sh 了吗？"；没走=不算发布，先跑 release.sh（幂等，重复跑安全）
+
 ## 发布前清单
 
 - [ ] **版本号核对**：`index.html` 的 `APP_VERSION` == CHANGELOG 最新版本 == git commit 信息（三处一致）
