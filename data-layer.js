@@ -777,7 +777,7 @@ const TIER_CLASS_TABLE = {
   '601601': ['dull'], '600795': ['dull'], '000100': ['dull'], '601985': ['dull'], '600027': ['dull'], '600886': ['dull'],
 };
 const TIER_CLASS_LABEL = {
-  wait90: { label: '可等90', color: '#3aa76d', detail: '历史等90档平均7个月、10年收益+18~22pp——可等更极端（年化等待收益>20pp/年）' },
+  wait90: { label: '可等90型', color: '#3aa76d', detail: '详见下方权衡提示（建议词仅个股提示一处）' },
   direct: { label: '80直接买', color: '#8fa69c', detail: '历史等90档年化收益<10pp/年或数据不足——80档即买，等90不值' },
   neutral: { label: '中性', color: '#5aa9e6', detail: '等90档年化收益10-20pp/年——按自身风险偏好自决（数字见详情）' },
   trap: { label: '⚠分红陷阱', color: '#e05a5a', detail: '分红连续2年下降（报告期归组）——高股息率分位=分红下调信号，全档位降权，建议回避/小仓' },
@@ -857,7 +857,8 @@ function computeZone(pct, opts) {
   // 95+ 极值（两模式统一文案：剩余 20% 可自决追加-不建议）
   if (pct >= 95) {
     const posTxt = mode === 'flexible' ? '80%（封顶）' : '已加满';
-    return { zone: 'extreme', label: '95+ 极值确认', action: '当前仓位 ' + posTxt + ' · 历史 95+ 分位 3 年胜率 97/133 · 剩余 20% 现金可自决追加（不建议常规操作）', mode, pct, currentTier: tiers[tiers.length - 1], nextTier: null };
+    /* v1.9.15 情绪反色（大师 M2）：极值区=股息率历史高位=估值低位=买点区，非风险警示；仓位纪律保留、风险色删除 */
+    return { zone: 'extreme', label: '95+ 极值区（股息率历史高位=估值低位）', action: '当前仓位 ' + posTxt + ' · 历史 95+ 分位 3 年胜率 97/133 · 按档执行，剩余 20% 现金可自决追加（不建议常规操作）', mode, pct, currentTier: tiers[tiers.length - 1], nextTier: null };
   }
   // 已触发档（当前分位 ≥ 档位线的最高档）
   let current = null;
@@ -1096,7 +1097,8 @@ const RULE_STATS = {
   strong: [40.7, 70, 2205], buy: [37.6, 69, 4545], watch: [39.6, 74, 3225],
   avoid: [33.2, 67, 95], avoid_small: [17.4, 55, 32], wait: [null, null, 976],
 };
-const RULE_TIER_LABEL = { strong: '强烈建仓', buy: '可建仓', watch: '观望', wait: '等待', avoid: '回避', avoid_small: '回避/小仓' };
+const RULE_TIER_LABEL = { strong: '条件建仓（小仓）', buy: '可建仓', watch: '观望', wait: '等待', avoid: '回避', avoid_small: '回避/小仓' };
+/* v1.9.15 语义修正：strong 档文案（强烈建仓→条件建仓（小仓））——防'强烈'二字诱导重仓（大师验收动作，规则树/卡面/日志三处同步） */
 
 /* ---------- O1：行业基准表（初始版·2026-08-18 已回源样本） ----------
  * 用途：报告卡③质量趋势对比（ROE vs 行业）、买点目标股息率标定（M24 Q4 行业标定前初始版）
@@ -1303,11 +1305,12 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
   const buyP = bp(line), heavyP = bp(heavyLine);
   /* Q1（M38）：当前档位指示——现价股息率落在哪个区 */
   let curTier = null;
+  /* v1.9.15 词表分离（大师 M1）：估值系词（低估一档/低估二档/深度低估）——与图2 执行系词（80建/85加/95满）区分，防同名异物 */
   if (dy != null && midLine != null && !(tl && tl.pending)) {
-    if (dy >= heavyLine) curTier = { name: '重仓区', note: '已到重仓线 ' + heavyLine.toFixed(1) + '%' };
-    else if (dy >= line) curTier = { name: '加仓区', note: '已到加仓线 ' + line.toFixed(1) + '%' };
-    else if (dy >= midLine) curTier = { name: '小仓区', note: '已可小仓（≥' + midLine.toFixed(1) + '%），未到加仓线 ' + line.toFixed(1) + '%' };
-    else curTier = { name: '等待区', note: '未达小仓线 ' + midLine.toFixed(1) + '%；现价买入仍可吃分红（' + dy.toFixed(2) + '%），三档为加仓节奏参考非买入否决' };
+    if (dy >= heavyLine) curTier = { name: '深度低估', note: '已到深度低估线 ' + heavyLine.toFixed(1) + '%（溢价分位 P95）' };
+    else if (dy >= line) curTier = { name: '低估二档', note: '已到低估二档线 ' + line.toFixed(1) + '%（溢价分位 P90）' };
+    else if (dy >= midLine) curTier = { name: '低估一档', note: '已可低估一档（≥' + midLine.toFixed(1) + '%，溢价分位 P75），未到低估二档线 ' + line.toFixed(1) + '%' };
+    else curTier = { name: '等待', note: '未达低估一档线 ' + midLine.toFixed(1) + '%；现价买入仍可吃分红（' + dy.toFixed(2) + '%），三档为买入节奏参考非买入否决' };
   }
   /* P0-3/P0-4：陷阱过滤器接入（回放校准 v3：hard 仅守重仓档）——重仓硬排除 / 加仓软降级 */
   out.trap = null;
@@ -1315,10 +1318,10 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     const tr = trapFilter({ netProfitYoY, payout: coverage, dy, p90Line: line });
     if (tr.level === 'hard' && curTier && curTier.name === '重仓区') {
       out.trap = { level: 'hard', msg: tr.msg + '——重仓线拦截，降级观察' };
-      curTier = { name: '重仓区(陷阱拦截)', note: '陷阱确认：净利下滑+支付率过高，重仓线不生效，降级观察' };
+      curTier = { name: '深度低估(陷阱拦截)', note: '陷阱确认：净利下滑+支付率过高，深度低估线不生效，降级观察' };
     } else if (tr.level) {
       out.trap = { level: 'soft', msg: tr.msg + '——加仓线降为小仓' };
-      if (curTier && curTier.name === '加仓区') curTier = { name: '加仓区(观察)', note: '净利同比下滑，加仓线降为小仓，等年报确认' };
+      if (curTier && curTier.name === '低估二档') curTier = { name: '低估二档(观察)', note: '净利同比下滑，低估二档降为低估一档，等年报确认' };
     }
   }
   const tiers = [];
@@ -1326,9 +1329,9 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
    * v1.9.13：pending（线待补）不展示三档——只展示不触发 */
   if (!(tl && tl.pending)) {
     if (curTier) tiers.push({ type: 'cur', text: '📍 当前：' + curTier.name + '（' + curTier.note + '）' });
-    if (midLine != null) tiers.push({ type: 'small', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
-    if (buyP) tiers.push({ type: 'add', rate: line, price: buyP, hit: dy != null && dy >= line });
-    if (heavyP) tiers.push({ type: 'full', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
+    if (midLine != null) tiers.push({ type: 'small', label: '低估一档', rate: midLine, price: bp(midLine), hit: dy != null && dy >= midLine });
+    if (buyP) tiers.push({ type: 'add', label: '低估二档', rate: line, price: buyP, hit: dy != null && dy >= line });
+    if (heavyP) tiers.push({ type: 'full', label: '深度低估', rate: heavyLine, price: heavyP, hit: dy != null && dy >= heavyLine });
   }
   /* v1.9.13：线源标注（溢价分位 vs 行业参考）+ 语义行 + 过滤层黄灯（优先级：trap>红线>短样本>漂移）
    * 大师第5轮：过滤层只降级不改数；黄灯原因优先级排序，显示前 2 条 */
@@ -1360,19 +1363,19 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     };
     /* 矛盾检测（展示不裁决）：绝对高但分位低 / 分位极值但绝对低 / 财报负增长但分位极值 */
     out.conflicts = [];
-    if (absLevel === '高' && curTier && (curTier.name === '等待区' || curTier.name === '小仓区')) {
+    if (absLevel === '高' && curTier && (curTier.name === '等待' || curTier.name === '低估一档')) {
       out.conflicts.push('绝对股息率高于行业参考，但分位仅' + curTier.name + '——该股历史整体高息，绝对高≠相对机会');
     }
-    if (absLevel === '低' && curTier && (curTier.name === '重仓区' || curTier.name === '加仓区')) {
+    if (absLevel === '低' && curTier && (curTier.name === '深度低估' || curTier.name === '低估二档')) {
       out.conflicts.push('分位已到' + curTier.name + '，但绝对股息率低于行业参考——利率环境或该股历史低息所致');
     }
-    if (tl.quality === '负增长' && curTier && (curTier.name === '重仓区' || curTier.name === '加仓区')) {
+    if (tl.quality === '负增长' && curTier && (curTier.name === '深度低估' || curTier.name === '低估二档')) {
       out.conflicts.push('分位已到' + curTier.name + '，但分红负增长——陷阱风险（价值毁灭型高股息）');
     }
   }
   out.tiers = tiers;
   /* 文本形态（向后兼容：summary 等使用处） */
-  out.tiersTxt = tiers.map(t => t.type === 'cur' ? t.text : (t.type === 'small' ? '小仓' : t.type === 'add' ? '加仓' : '重仓') + '=' + t.rate.toFixed(1) + '%·' + t.price + ' 元' + (t.hit ? ' ✅' : '')).join(' / ');
+  out.tiersTxt = tiers.map(t => t.type === 'cur' ? t.text : (t.label || t.type) + '=' + t.rate.toFixed(1) + '%·' + t.price + ' 元' + (t.hit ? ' ✅' : '')).join(' / ');
   out.curTier = curTier;
   let summaryPrefix = '';
   if (out.trap) summaryPrefix = (out.trap.level === 'hard' ? '🚫 ' : '⚠️ ') + out.trap.msg + '；';
@@ -1504,7 +1507,7 @@ function tierTrackShort(ind, tierKey) {
   return `${label}线历史 3 年复投中位 +${s3.mid}%、亏损率 ${s3.loss}%（n=${s3.n}）`;
 }
 
-/* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08 近似 1.55%，正式源待接入 backlog） */
+/* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08-18 实测 10Y=1.681%，当前 1.55 为近似·正式源待接入 backlog；影响全站溢价线约 0.13pp，分位排名基本不变） */
 const TREASURY_NOW = 1.55;
 const TIER_LINE = {
   '000001': { name: '平安银行', ind: 'bank', p75: 4.35, p90: 5.07, p95: 5.28, p90_1y: 3.99, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, pending: false },
@@ -1521,7 +1524,7 @@ const TIER_LINE = {
   '600690': { name: '海尔智家', ind: 'consumer', p75: 2.19, p90: 3.79, p95: 4.07, p90_1y: 4.08, cagr: 27, payout: 51, quality: '高增长', redLine: false, pending: false },
   '600795': { name: '国电电力', ind: 'utility', p75: 2.79, p90: 3.38, p95: 3.51, p90_1y: 3.54, cagr: null, payout: 46, quality: '—', redLine: false, pending: false },
   '600886': { name: '国投电力', ind: 'utility', p75: 1.62, p90: 2.22, p95: 2.31, p90_1y: 2.31, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, pending: false },
-  '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, p90_1y: 3.87, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false },
+  '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, p90_1y: 3.87, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false, eventRisk: '澳优2026H1预亏6.85-7.85亿·中报8月底披露' },
   '600900': { name: '长江电力', ind: 'utility', p75: 1.78, p90: 2.16, p95: 2.23, p90_1y: 2.24, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, pending: false },
   '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, p90_1y: null, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: true },
   '601088': { name: '中国神华', ind: 'energy', p75: 5.85, p90: 6.49, p95: 6.64, p90_1y: 4.38, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, pending: false },
@@ -1542,6 +1545,29 @@ const TIER_LINE = {
 
 /* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——给定当前股息率+行业 → 落档 + 距加仓线差
  * 与 verdictEngine 同源（BENCH 零硬编码）；雷达展示用，不含价格换算（价格差易误导 M47 教训） */
+/* v1.9.15 高估保险丝（极端高估识别·大师终审定稿）：
+ * 规则：自身分位<5 且 绝对dy<2.2% → 硬卖提示（消费高分红股核心；2021后几乎不触发=罕见保险丝）
+ * 豁免：①bank（dy 常年>2.2，天然不触发；顶后跌20-22%非深跌）②energy（周期顶特征：神华2021-09顶时dy7.54%，绝对线失效）
+ *       ③低dy股（近3年dy中位<2.5%：茅台2012/平安2018型分位失效——需PE或相对估值辅助，卡面标注）
+ * 回测：43次买入平均 A永不卖+121.1% vs C保险丝+163.9%（18次改善）；PE>25条件回测更差(+142.9%)故不入规则
+ * 输出：{ active, msg, exempt } */
+function sellFuse(dy, pct, industry, code, divs, kline) {
+  if (dy == null || pct == null) return { active: false, msg: '', exempt: '数据不足' };
+  if (industry === 'bank' || industry === 'energy') return { active: false, msg: '', exempt: industry === 'bank' ? '银行豁免（dy天花板5-6%，信号不存在）' : '周期股豁免（周期顶特征：高dy见顶，保险丝不适用）' };
+  // 低dy股豁免：近3年 dy 中位 <2.5%（茅台2012/平安2018型分位失效）
+  let dyMed = null;
+  try {
+    if (kline && divs && divs.length) {
+      const series = calcRollingPercentile(kline, divs, 375);
+      const r3 = series.filter(x => x.dy != null && x.d >= '2023-01-01').map(x => x.dy).sort((a, b) => a - b);
+      if (r3.length >= 100) dyMed = r3[Math.floor(r3.length / 2)];
+    }
+  } catch (e) { }
+  if (dyMed != null && dyMed < 2.5) return { active: false, msg: '', exempt: '低dy股豁免（近3年dy中位<2.5%，分位失效，需PE/相对估值辅助）', dyMed: dyMed.toFixed(2) };
+  if (pct < 5 && dy < 2.2) return { active: true, msg: '极端高估保险丝激活：自身分位' + pct.toFixed(0) + ' + 股息率' + dy.toFixed(2) + '%（<2.2%）——历史该信号=真泡沫顶（伊利2013/美的2021/茅台2020），可考虑卖出；2021后罕见触发，勿常规操作', exempt: null };
+  return { active: false, msg: '', exempt: null };
+}
+
 /* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——分位线优先，行业线兜底
  * v1.9.13 分位定线（2026-08-18 三轮定案）：三档线=个股近3年 dy 分布分位（小仓P75/加仓P90/重仓P95）
  * ——分位线=市场对分红可持续增长信心的定价（线高=信心低，工行 6.57；线低=信心高，移动 4.97）
@@ -1615,7 +1641,7 @@ window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
-  tierSpot, sellSignalQuick, TIER_LINE,
+  tierSpot, sellSignalQuick, sellFuse, TIER_LINE,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
