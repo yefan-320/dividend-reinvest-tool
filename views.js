@@ -1067,21 +1067,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const chart = _yieldChart = echarts.init(el);
     const dates = Object.keys(kline).sort();
     if (!dates.length || !divs.length) { chart.dispose(); el.innerHTML = '<div class="hint">数据不足</div>'; return; }
-    // 逐年到账分红合计（报告期归组与到账年在此简化为自然年，与 simulate years 同口径）
-    const byYear = {};
-    divs.forEach(d => { if (!d.pending && d.ex) { const y = d.ex.slice(0, 4); byYear[y] = (byYear[y] || 0) + d.dps; } });
-    const data = dates.map(d => ({ d, y: (byYear[d.slice(0, 4)] || 0) / kline[d] * 100 })).filter(x => x.y > 0);
+    /* v1.9.16 修复（主人抓"图2股息率不对"）：曲线与标注口径统一=TTM 滚动（每点=该日往前366天到账分红÷当日价）
+     * 旧版曲线用"自然年到账"（2026年到账2.0→6.70%）、标注却用TTM（2.5→8.38%）→ 同图自相矛盾；
+     * 且"自然年到账"在年初无分红到账时曲线断档、年末集中跳变。TTM 滚动=平滑+与分位信号线同源 */
+    const data = [];
+    for (const d of dates) {
+      const t = DL.ttmDivsAt(divs, d);
+      if (t > 0) data.push({ d, y: t / kline[d] * 100 });
+    }
     if (!data.length) { chart.dispose(); el.innerHTML = '<div class="hint">暂无分红数据</div>'; return; }
     const vals = data.map(x => x.y).sort((a, b) => a - b);
     const pct = p => vals.length ? vals[Math.floor(p * (vals.length - 1))] : null;
     const q25 = pct(0.25), q75 = pct(0.75);
-    // v1.9.5：当前股息率统一 366 窗口 TTM 口径（与分位信号线一致，防两图“当前值”打架）
+    const lastDate = dates[dates.length - 1];
     let curTtm = null;
-    try {
-      const lastDate = dates[dates.length - 1];
-      const t = DL.ttmDivsAt(divs, lastDate);
-      if (t > 0) curTtm = t / kline[lastDate] * 100;
-    } catch (e) { }
+    try { const t = DL.ttmDivsAt(divs, lastDate); if (t > 0) curTtm = t / kline[lastDate] * 100; } catch (e) { }
     const cur = curTtm != null ? curTtm : (data.length ? data[data.length - 1].y : null);
     chart.setOption({
       backgroundColor: 'transparent',
@@ -1099,7 +1099,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (note) {
       // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
-      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=逐年滚动口径（历史视图）；决策用顶部信号线（TTM滚动分位）、关键数据（年化近2财年）`;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=TTM滚动口径（每点=该日前366天到账分红÷价，与顶部信号线同源）；年化近2财年=${(() => { try { const ad = DL.calcAnnualDivYield(divs, kline[dates[dates.length-1]]); return ad ? ad.yieldPct.toFixed(2) + '%' : '—'; } catch (e) { return '—'; } })()}`;
     }
   }
 
@@ -1185,11 +1185,17 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">估值档（溢价分位·近3年·图1口径）：<b style="color:${estSpot.cur === 'heavy' ? '#2e8b57' : 'var(--txt)'}">${estWord}</b>${estSpot.cur === 'heavy' ? '（深度低估=历史高溢价区，本卡按 95 满档执行）' : estSpot.cur === 'add' ? '（低估二档，加仓节奏参考）' : estSpot.cur === 'small' ? '（低估一档，建仓起点）' : ''}</div>`
           : '';
         const winSens = last.pct >= 93 && last.pct <= 97 ? ` · <span style="color:#d9a45b">⚠️窗口敏感·跨档边缘</span>` : '';
+        /* v1.9.16 主人令"做个5年10年"：长期复投视角入建仓区状态卡（旧版只在报告卡，主人看的这张没有） */
+        const longView = calcLongTermView(series, kline, divs, rollingDy);
+        const longHtml = longView && (longView[1250] || longView[2500])
+          ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📈 长期复投视角（当前股息率档·历史表现）：5年 ${longView[1250] ? longView[1250].winP.toFixed(0) + '%胜率·均值' + (longView[1250].avg >= 0 ? '+' : '') + longView[1250].avg.toFixed(1) + '%（n=' + longView[1250].n + '）' : '样本不足'} · 10年 ${longView[2500] ? longView[2500].winP.toFixed(0) + '%·' + (longView[2500].avg >= 0 ? '+' : '') + longView[2500].avg.toFixed(1) + '%（n=' + longView[2500].n + '）' : '样本不足'}（含分红·不复投·复投更高）</div>`
+          : '';
         zel.innerHTML = `<div class="zone-row">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-weight:600;color:${zoneColor}">${z.label}</span>
             <span>当前 <b>${last.pct.toFixed(0)}%</b> 分位（${rangeWord}）${winSens}<span style="font-size:9px;color:var(--sub);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px">自身分位·近375日·主信号</span></span>
           </div>
+          ${longHtml}
           ${estLink}
           <div style="display:flex;gap:6px;margin-bottom:8px">
             <button type="button" class="mode-chip ${mode === 'conservative' ? 'on' : ''}" data-mode="conservative">🛡 保守（${eco.ecoStart} 起）</button>
