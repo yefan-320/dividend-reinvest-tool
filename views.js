@@ -241,7 +241,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
               const yb = DL.BENCH[ind];
               const p90 = yb ? yb.yieldMid + yb.yieldUp : null;
               const payout = DL.coverageAt(divs, parseInt(DL.todayStr().slice(0, 4), 10));
-              trap = DL.trapFilter({ netProfitYoY: f10.netProfitYoY, payout, dy: last.dy, p90Line: p90 });
+              const payoutHigh = payout != null && payout > 0.9;   // v1.9.17：支付率>90%→扣非重算（防理财虚增误判，宇通案例）
+              trap = DL.trapFilter({ netProfitYoY: f10.netProfitYoY, deductYoY: f10.deductYoY, payout, payoutHigh, dy: last.dy, p90Line: p90 });
             }
           } catch (e) { /* F10 失败静默 */ }
           items.push({ code: c.code, name: c.name || c.code, pct: last.pct, zone: z.zone, label: z.label, ecoType: eco.type, ecoStart: _ecoStart, pos: histPos, target: z.currentTier ? z.currentTier.pos : 0, cagr, warn, trend, tcls, series, kline, trap });
@@ -965,7 +966,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       $('#diagTitle').textContent = '🔬 ' + (name === code ? '' : name + ' ') + code;
       const [divs, kline] = await Promise.all([
         DL.fetchDividendsOne(code),
-        DL.getKline(code, new Date(Date.now() - diagYears * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
+        /* v1.9.17：K线拉取范围 = max(diagYears, 10) 年——长期复投视角（5年/10年）需要 10 年数据，
+         * 旧版只拉 diagYears（默认5年）→ 10年 永远"样本不足"，主人抓"做个5年10年怎么没优化" */
+        DL.getKline(code, new Date(Date.now() - Math.max(diagYears, 10) * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
       ]);
       if (seq !== diagSeq) return;   // v1.9.0 竞态修复
       // BUG修复(2026-08-18)：snap 复用同根因——诊断其他股票时若 snap 缺该 code，合并拉取保证 PE/PB/价格齐全
@@ -1038,6 +1041,16 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
               reserve: f10.mgwfplr,
               period: f10.reportDate,
               source: '东财F10 ' + (f10.cached ? '缓存(' + f10.cachedAt + ')' : '实时'),
+              /* v1.9.17 财报证据层（宇通教训）：扣非/覆盖率/ROE退化/毛利率/负债率——L2数据源，进证据行不进决策 */
+              deductNetProfit: f10.deductNetProfit,
+              deductYoY: f10.deductYoY,
+              roeDownYears: f10.roeDownYears,
+              grossMargin: f10.grossMargin,
+              netMargin: f10.netMargin,
+              ocf: f10.ocf,
+              ocfPerShare: f10.ocfPerShare,
+              totalShare: f10.totalShare,
+              liabilityRatio: f10.liabilityRatio,
             };
           }
         } catch (e) { /* F10 失败→静态兜底 */ }
@@ -1554,6 +1567,32 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       netProfitYoY: (extra && extra.netProfitYoY) || null,
     });
     const roeTxt = (extra && extra.roe != null) ? extra.roe.toFixed(1) + '%' : '<span style="color:var(--muted)">待接入</span>';
+    /* v1.9.17 财报证据行（宇通教训）：扣非双口径/覆盖率/ROE退化/毛利率/负债率——证据层只展示，不进决策
+     * 数据源分级：L2-F10（非财报原文），缺字段=显示"数据不足"不假装有（8/18 原则） */
+    const deductTxt = (extra && extra.deductNetProfit != null)
+      ? ((extra.deductNetProfit >= 100 ? extra.deductNetProfit.toFixed(0) + '亿' : extra.deductNetProfit.toFixed(1) + '亿') + (extra.deductYoY != null ? ' (' + (extra.deductYoY >= 0 ? '+' : '') + extra.deductYoY.toFixed(1) + '%)' : ''))
+      : null;
+    // v1.9.17 分红/OCF 覆盖率（分红总额 ÷ 经营现金流）：dps(元)×总股本÷OCF(亿)——之前用 dps/ocf 单位错配（2.5/31.97=8%假象，实际 55.35/31.97=173%）
+    // 总股本从 F10 TOTAL_SHARE 拿；无总股本时用 OCF 的每股口径（MGJYXJJE）回退
+    const ocfCovTxt = (extra && extra.ocf != null && extra.ocf > 0 && dps > 0)
+      ? (extra.totalShare != null ? (dps * extra.totalShare / 1e8 / extra.ocf * 100) : (extra.ocfPerShare != null ? (dps / extra.ocfPerShare * 100) : null))
+      : null;   // <100%=分红靠家底补（经营现金流不够分）
+    const roeDownTxt = (extra && extra.roeDownYears != null && extra.roeDownYears >= 2) ? `⚠️ ROE连降${extra.roeDownYears}年` : null;
+    const finEvidParts = [];
+    if (extra && extra.deductNetProfit != null) {
+      finEvidParts.push(`扣非 <b>${deductTxt}</b>`);
+      if (extra.netProfit != null && extra.deductNetProfit != null && extra.netProfit > 0) {
+        const npRatio = (extra.netProfit - extra.deductNetProfit) / extra.netProfit * 100;
+        if (npRatio > 15) finEvidParts.push(`<span style="color:#e0a030">非经常占 ${npRatio.toFixed(0)}%</span>`);   // 理财/补助虚增嫌疑
+      }
+    }
+    if (ocfCovTxt != null) finEvidParts.push(`分红/OCF <b>${ocfCovTxt.toFixed(0)}%</b>${ocfCovTxt < 100 ? ' <span style="color:#e0a030">(靠家底)</span>' : ''}`);
+    if (extra && extra.grossMargin != null) finEvidParts.push(`毛利率 ${extra.grossMargin.toFixed(1)}%`);
+    if (extra && extra.liabilityRatio != null) finEvidParts.push(`负债率 ${extra.liabilityRatio.toFixed(1)}%`);
+    if (roeDownTxt) finEvidParts.push(`<span style="color:#e0a030">${roeDownTxt}</span>`);
+    const finEvidHtml = finEvidParts.length
+      ? `<div style="font-size:10px;color:var(--muted);margin:4px 0;padding:5px 8px;background:var(--card2);border-radius:6px;border:1px solid var(--line)">📊 财报证据<span style="font-size:9px;opacity:.7">（L2-F10·${(extra && extra.period) || '—'}·进证据不进决策）</span>：${finEvidParts.join(' · ')}</div>`
+      : '';
     const netTxt = (extra && extra.netProfit != null) ? (extra.netProfit >= 100 ? extra.netProfit.toFixed(0) + ' 亿' : extra.netProfit.toFixed(1) + ' 亿') : '<span style="color:var(--muted)">待接入</span>';
     const cagrTxt = cagr != null ? (cagr * 100).toFixed(1) + '%' : '—';
     const covTxt = cov != null ? '覆盖 ' + (1 / cov).toFixed(1) + ' 倍' : '<span style="color:var(--muted)">数据不足</span>';
@@ -1573,6 +1612,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <div style="font-size:10px;color:var(--muted)">结论由引擎生成 · 可回源</div>
       </div>
       <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote} · <span style="border:1px solid var(--line);border-radius:4px;padding:0 4px">溢价分位·近3年·估值参考</span></div>
+      ${finEvidHtml}
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
         ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}${v.trap.level === 'hard' ? ' · 💱 换仓参考：继续持有=吃当前股息率（覆盖 ' + (cov != null ? (1 / cov).toFixed(1) + ' 倍' : '—') + '）；如需换仓可到决策台扫描对比更健康标的——注意换仓有交易成本+浮盈税（A股印花税 0.05%+佣金），历史数据非承诺' : ''}</div>` : ''}
         ${v.filters && v.filters.length ? `<div style="font-size:10px;margin-bottom:4px;color:#d9a45b;background:rgba(217,164,91,.08);border:1px solid rgba(217,164,91,.3);border-radius:6px;padding:3px 6px">🟡 信号降级：仅参考 — ${v.filters.map(f => f.txt).join('；')}</div>` : ''}

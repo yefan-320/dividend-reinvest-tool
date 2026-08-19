@@ -1161,7 +1161,10 @@ async function fetchF10Annual(code, tryN = 1) {
   // P7（2026-08-18）：财报季感知 TTL——4 月（年报集中披露）/8 月（中报）缩到 1 天，其余 7 天（防陷阱预警用旧数据延迟一周）
   const _f10TtlMs = (() => { const m = new Date().getMonth() + 1; return (m === 4 || m === 8) ? 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000; })();
   if (hit && Date.now() - hit.ts < _f10TtlMs) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
-  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=100&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
+  // v1.9.17 修复：SECUCODE 需要带交易所后缀（600066.SH / 000333.SZ），纯数字 code 直接过滤会拿不到数据（既有 bug：
+  // 报告卡 F10 一直静默失败靠静态数据兜底；6 开头=沪.SH，0/3 开头=深.SZ）
+  const secuCode = /^\d+$/.test(code) ? code + (/^6/.test(code) ? '.SH' : '.SZ') : code;
+  const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${secuCode}%22)&pageNumber=1&pageSize=100&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
   try {
     const [r, r2] = await Promise.all([
       fetch(url, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
@@ -1175,7 +1178,14 @@ async function fetchF10Annual(code, tryN = 1) {
     const annuals = rows.filter(x => /12-31/.test(x.REPORT_DATE || '')).map(x => ({
       reportDate: (x.REPORT_DATE || '').slice(0, 10),
       netProfit: x.PARENTNETPROFIT != null ? parseFloat(x.PARENTNETPROFIT) / 1e8 : null,   // 元→亿
+      deductNetProfit: x.KCFJCXSYJLR != null ? parseFloat(x.KCFJCXSYJLR) / 1e8 : null,     // 扣非净利·元→亿（v1.9.17 财报证据层）
       roe: x.ROEJQ != null ? parseFloat(x.ROEJQ) : null,
+      grossMargin: x.XSMLL != null ? parseFloat(x.XSMLL) : null,        // 毛利率%（v1.9.17）
+      netMargin: x.XSJLL != null ? parseFloat(x.XSJLL) : null,         // 销售净利率%（v1.9.17）
+      ocf: x.NETCASH_OPERATE_PK != null ? parseFloat(x.NETCASH_OPERATE_PK) / 1e8 : null,  // 经营现金流·元→亿（v1.9.17）
+      ocfPerShare: x.MGJYXJJE != null ? parseFloat(x.MGJYXJJE) : null,  // 每股经营现金流·元（v1.9.17）
+      liabilityRatio: x.ZCFZL != null ? parseFloat(x.ZCFZL) : null,    // 资产负债率%（v1.9.17）
+      dpsUndistributed: x.MGWFPLR != null ? parseFloat(x.MGWFPLR) : null,  // 每股未分配利润·元（v1.9.17）
     }));
     const annual = annuals[0] || null;   // 最近完整年报
     const annualRow = rows.find(x => /12-31/.test(x.REPORT_DATE || ''));   // 原始行（mgwfplr/ORG_TYPE 回源）
@@ -1185,17 +1195,38 @@ async function fetchF10Annual(code, tryN = 1) {
     if (annuals[0] && annuals[1] && annuals[0].netProfit != null && annuals[1].netProfit != null && annuals[1].netProfit !== 0) {
       netProfitYoY = (annuals[0].netProfit / annuals[1].netProfit - 1) * 100;
     }
+    // 扣非同比：最新年报 vs 上一年报（%），任一缺失/基期为 0 → null（v1.9.17 财报证据层·trap 扣非重算用）
+    let deductYoY = null;
+    if (annuals[0] && annuals[1] && annuals[0].deductNetProfit != null && annuals[1].deductNetProfit != null && annuals[1].deductNetProfit !== 0) {
+      deductYoY = (annuals[0].deductNetProfit / annuals[1].deductNetProfit - 1) * 100;
+    }
+    // ROE 趋势：连续 N 年下滑判定（v1.9.17 质量层·巴菲特 ROE 退化信号）
+    let roeDownYears = 0;
+    for (let i = 0; i + 1 < annuals.length; i++) {
+      if (annuals[i].roe != null && annuals[i + 1].roe != null && annuals[i].roe < annuals[i + 1].roe) roeDownYears++;
+      else break;
+    }
     const out = {
       roe: annual.roe,
       netProfit: annual.netProfit,
       netProfitYoY,       // P0-3：最新完整年报净利同比（%）
-      annuals,            // P0-3：年报序列（降序，{reportDate,netProfit,roe}）
+      deductNetProfit: annual.deductNetProfit,   // v1.9.17：扣非净利（亿）
+      deductYoY,                                // v1.9.17：扣非同比（%）
+      roeDownYears,                             // v1.9.17：ROE 连续下滑年数（质量层）
+      grossMargin: annual.grossMargin,          // v1.9.17：毛利率（%）
+      netMargin: annual.netMargin,              // v1.9.17：销售净利率（%）
+      ocf: annual.ocf,                          // v1.9.17：经营现金流（亿）
+      ocfPerShare: annual.ocfPerShare,          // v1.9.17：每股经营现金流（元）
+      liabilityRatio: annual.liabilityRatio,    // v1.9.17：资产负债率（%）
+      annuals,            // P0-3：年报序列（降序，{reportDate,netProfit,roe,...}）
       orgType: annualRow ? (annualRow.ORG_TYPE || '') : '',
       csrcIndustry: csrc,   // 证监会行业（第二判据，Q1）
       reportDate: annual.reportDate,
     };
     // mgwfplr：从原始行回源（annuals 映射未保留该字段）
     if (annualRow) out.mgwfplr = annualRow.MGWFPLR != null ? parseFloat(annualRow.MGWFPLR) : null;
+    // v1.9.17：总股本（分红/OCF 覆盖率精确口径：dps×总股本÷OCF）
+    if (annualRow) out.totalShare = annualRow.TOTAL_SHARE != null ? parseFloat(annualRow.TOTAL_SHARE) : null;
     _f10Cache.set(key, { ts: Date.now(), data: out });
     return Object.assign({ cached: false }, out);
   } catch (e) {
@@ -1238,13 +1269,24 @@ function industryOf(secuType) {
  *   hard：净利同比<-10%（毁灭信号）且 支付率>50%（覆盖<2）且 dy>=P90线（高股息画像）——仅守重仓档（引擎层落实）
  *   soft：净利同比<0 但不满足 hard → 观察型（加仓降级小仓）
  * 周期豁免：净利小负（-10% 内）不判 hard——神华 2020/2021 周期底部天然豁免；煤炭 2015 同理 */
-function trapFilter({ netProfitYoY, payout, dy, p90Line }) {
-  if (netProfitYoY == null || !(netProfitYoY < 0)) return { level: null, msg: null };
-  const highYield = p90Line != null ? (dy != null && dy >= p90Line) : (dy != null && dy >= 5);
-  if (netProfitYoY < -10 && highYield && payout != null && payout > 0.5) {
-    return { level: 'hard', msg: `陷阱确认：最新年报净利同比 ${netProfitYoY.toFixed(1)}% 下滑 + 支付率 ${(payout * 100).toFixed(0)}%（覆盖<2）` };
+function trapFilter({ netProfitYoY, payout, dy, p90Line, deductYoY, payoutHigh }) {
+  // v1.9.17 财报证据层·扣非重算：支付率>90%（吃老本风险）时优先用扣非同比判断净利趋势——
+  // 归母可能被理财收益/政府补助虚增（宇通：归母-3.52%但扣非+15.83%，用归母会误判）；
+  // 反过来归母正增长但扣非负增长=利润质量差（理财撑数），也要用扣非戳穿。
+  const useDeduct = payoutHigh || (payout != null && payout > 0.9);
+  const trendYoY = (useDeduct && deductYoY != null) ? deductYoY : netProfitYoY;
+  if (trendYoY == null || !(trendYoY < 0)) {
+    // 扣非口径下不触发，但归母口径下滑→提示质量差（软信号，不拦截）
+    if (useDeduct && netProfitYoY != null && netProfitYoY < 0 && deductYoY != null && deductYoY >= 0) {
+      return { level: 'soft', msg: `观察：归母同比 ${netProfitYoY.toFixed(1)}% 下滑但扣非 ${deductYoY.toFixed(1)}%（理财/补助虚增嫌疑，盯质量）` };
+    }
+    return { level: null, msg: null };
   }
-  return { level: 'soft', msg: `观察：最新年报净利同比 ${netProfitYoY.toFixed(1)}% 下滑（覆盖尚可，盯年报）` };
+  const highYield = p90Line != null ? (dy != null && dy >= p90Line) : (dy != null && dy >= 5);
+  if (trendYoY < -10 && highYield && payout != null && payout > 0.5) {
+    return { level: 'hard', msg: `陷阱确认：${useDeduct ? '扣非' : '净利'}同比 ${trendYoY.toFixed(1)}% 下滑 + 支付率 ${(payout * 100).toFixed(0)}%（覆盖<2）` };
+  }
+  return { level: 'soft', msg: `观察：${useDeduct ? '扣非' : '净利'}同比 ${trendYoY.toFixed(1)}% 下滑（覆盖尚可，盯年报）` };
 }
 
 function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, price, dy, pct, industry, roe, roeTrend, dividendCagr, code, netProfitYoY }) {
