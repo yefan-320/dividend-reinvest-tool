@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* v1.9.5 e2e：去平滑 + 口径标注实测
- * 断言：1) 信号线 tooltip 文本含"滚动 366 天 TTM"且无"平滑" 2) 带状图 note 含口径标注（逐年滚动+TTM）
+ * 断言：1) 信号线 tooltip 文本含"滚动 366 天 TTM"且无"平滑" 2) 带状图 note 含口径标注（TTM滚动+年化近2财年，v1.9.16 废弃逐年滚动）
  * 3) diagStats 标"当前股息率(年化)" 4) 无 console 错误 */
 const http = require('http');
 const fs = require('fs');
@@ -115,11 +115,11 @@ async function main() {
   check('tooltip 含"滚动 366 天 TTM"', tip.includes('滚动 366 天 TTM'), tip.replace(/<[^>]+>/g, ''));
   check('tooltip 无"平滑"字样', !tip.includes('平滑'), tip.replace(/<[^>]+>/g, ''));
 
-  // 2. 带状图 note 口径标注
-  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('逐年滚动')`);
+  // 2. 带状图 note 口径标注（v1.9.16：口径统一为 TTM 滚动——旧“逐年滚动”已废弃）
+  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('TTM滚动口径')`);
   const noteTxt = await evalJS(`document.getElementById('diagYieldNote').textContent`);
-  check('带状图 note 含口径标注（逐年滚动+TTM）', note && noteTxt.includes('逐年滚动') && noteTxt.includes('TTM'), noteTxt.slice(0, 80));
-  check('带状图 note 含逐年滚动标注', noteTxt.includes('逐年滚动'), noteTxt.slice(0, 80));
+  check('带状图 note 含口径标注（TTM滚动+年化近2财年）', note && noteTxt.includes('TTM滚动口径') && noteTxt.includes('年化近2财年'), noteTxt.slice(0, 80));
+  check('带状图 note 无旧“逐年滚动”字样', !noteTxt.includes('逐年滚动'), noteTxt.slice(0, 80));
 
   // 3. diagStats 年化口径标注
   const stats = await evalJS(`document.getElementById('diagStats').textContent`);
