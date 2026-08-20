@@ -257,28 +257,36 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
       }
       state[code] = Object.assign({}, state[code], { fin: curFin });
     }
-    // 最近年度 DPS（工具同源：fetchDividendsOne 全历史分红 → 报告期归组）
-    let dps = null, dy = null;
+    // 分红口径（工具同源 v1.9.27：parseDivs→去重→送转对齐→特别分红拆分→近2财年平均）
+    // ⚠️ 2026-08-21 主人抓：旧实现裸算（REPORT_DATE 最近一年累加、无前瞻/无清洗/无特别分红拆分）
+    //   → 与工具诊断页 dy 对不上（兖矿2022特别分红虚高/宇通已公告未派发不计入）= watch 推送档位≠工具档位
+    let dps = null, dy = null, divYears = 0;
     try {
       const url = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=ALL&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1&filter=(SECURITY_CODE%3D%22${code}%22)`;
       const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/' } });
       const j = await r.json();
       const rows = (j.result && j.result.data) || [];
-      const byY = {};
-      rows.forEach(x => { const report = (x.REPORT_DATE || '').slice(0, 10); const y = report.slice(0, 4); if (x.PRETAX_BONUS_RMB) byY[y] = (byY[y] || 0) + (parseFloat(x.PRETAX_BONUS_RMB) || 0) / 10; });
-      const ys = Object.keys(byY).sort();
-      if (ys.length) dps = byY[ys[ys.length - 1]];
-      // v5 成长股通道：分红年份数（连续分红年数）
-      var divYears = ys.length;
+      if (rows.length) {
+        let divs = DL.dedupDividends(DL.parseDivs(rows));
+        divs = DL.splitSpecialDivs(DL.alignSendZhuan(divs));
+        const years = new Set(divs.filter(d => d.dps > 0 && !d.pending && d.report).map(d => d.report.slice(0, 4)));
+        divYears = years.size;   // 成长股通道：连续分红年数
+        const price = quotes[code] && quotes[code].price > 0 ? quotes[code].price : null;
+        if (price) {
+          const cy = DL.calcAnnualDivYield(divs, price);
+          if (cy) { dps = cy.annualDps; dy = cy.yieldPct; }
+        }
+      }
     } catch (e) {}
     if (dps != null && dps > 0 && quotes[code] && quotes[code].price > 0) dy = dps / quotes[code].price * 100;
     const tierLine = DL.TIER_LINE && DL.TIER_LINE[code] ? DL.TIER_LINE[code] : null;
     const treasury = DL.TREASURY_NOW != null ? DL.TREASURY_NOW : 1.68;
     // 变化检测用上一次状态（放最前）
     const prev = state[code];
-    // 近60日K线（趋势确认用；缓存优先）
+    // 近90日K线（趋势确认用；缓存优先）——2026-08-21 修：原 getKline(code, 90) 把数字当 start 传
+    // （腾讯段不拉→回退新浪 2.8 年数据，趋势/停牌判断窗口全错）；签名=(code, start, end, market)
     let kline = null;
-    try { kline = await DL.getKline(code, 90); } catch (e) {}
+    try { kline = await DL.getKline(code, DL.daysAgo(90), DL.todayStr()); } catch (e) {}
     // 盲区15：停牌检测——K线尾段连续≥5日收盘价不变 → 停牌（跳过判定）
     let susp = false;
     if (kline && kline.length >= 8) {
