@@ -17,8 +17,17 @@ const REPO = path.join(__dirname, '..');
 const PORT = 8899;
 const URL = `http://localhost:${PORT}/?code=515080`;
 
-function die(msg) { console.error('❌ ' + msg); process.exit(1); }
+function die(msg) { console.error('❌ ' + msg); cleanupChrome(); process.exit(1); }
 function ok(msg) { console.log('✅ ' + msg); }
+
+/* v1.9.29：清理本机 headless Chrome 残留——e2e 失败退出不清理 detached Chrome 会越积越多致资源压力（实测 8 个残留 → R7 概率性挂起）
+ * [h]eadless 正则防自匹配（命令行含 headless 会把自己杀了） */
+function cleanupChrome() {
+  try { require('child_process').execSync('ps aux | grep "[G]oogle Chrome" | grep "[h]eadless" | awk \'{print $2}\' | xargs kill -9 2>/dev/null; sleep 1', { timeout: 6000, stdio: 'ignore' }); } catch (e) {}
+}
+
+/* v1.9.29：总预算 360s——网络/CDP 挂起时明确失败退出，防 release.sh 无限卡死（2026-08-21 实测 R7 曾挂起 15min+；R1-R6 含回测+东财+90s 轮询，本身可达 250s+） */
+setTimeout(() => { console.error('❌ e2e-browser 总超时 360s（网络/CDP 挂起）'); process.exit(1); }, 360000);
 
 // 启动本地静态服务器（如果没起）
 function ensureServer() {
@@ -32,34 +41,59 @@ function ensureServer() {
   });
 }
 
-function launchChrome() {
+function launchChrome(opts = {}) {
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (!fs.existsSync(chrome)) die('Chrome 不存在');
+  const port = opts.port || 9222;
   // v1.9.1：清理 9222 残留（防复用旧实例读到旧版本页面）+ 独立 profile（防缓存）
-  try { require('child_process').execSync('lsof -ti:9222 | xargs kill -9 2>/dev/null; sleep 1'); } catch (e) {}
-  const profile = '/tmp/dvt-browser-profile-' + process.pid;
+  // v1.9.29：execSync 加 timeout——macOS lsof 偶发挂起会同步堵死事件循环（实测 240s 总预算都不触发）；独立实例（opts.skipKill）不清理
+  if (!opts.skipKill) { try { require('child_process').execSync('lsof -ti:' + port + ' | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {} }
+  const profile = opts.profile || ('/tmp/dvt-browser-profile-' + process.pid + '-' + Date.now());
   const cp = require('child_process').spawn(chrome, [
-    '--headless=new', '--disable-gpu', '--remote-debugging-port=9222',
+    '--headless=new', '--disable-gpu', '--no-sandbox',   // v1.9.29：加 --no-sandbox——诊断脚本（3 次全过）带此参数，e2e 不带时 R7 导航后主线程挂起
+    '--remote-debugging-port=' + port,
     '--user-data-dir=' + profile,
     '--window-size=800,1600', URL,
   ], { detached: true, stdio: 'ignore' });
   cp.unref();
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
+    const killTimer = setTimeout(() => reject(new Error('Chrome 启动超时')), 25000);   // v1.9.29：http.get 连接挂起时无 error/end 事件，原 20s 条件永不触发——加总超时
     (function poll() {
-      http.get('http://127.0.0.1:9222/json', r => {
+      http.get('http://127.0.0.1:' + port + '/json', r => {
         let d = ''; r.on('data', c => d += c);
-        r.on('end', () => { try { const pages = JSON.parse(d); if (pages.some(p => p.url.includes('localhost:' + PORT))) resolve(); else setTimeout(poll, 300); } catch (e) { setTimeout(poll, 300); } });
-      }).on('error', () => { if (Date.now() - t0 > 20000) reject(new Error('Chrome 启动超时')); else setTimeout(poll, 300); });
+        r.on('end', () => { try { const pages = JSON.parse(d); if (pages.some(p => p.url.includes('localhost:' + PORT))) { clearTimeout(killTimer); resolve(); } else setTimeout(poll, 300); } catch (e) { setTimeout(poll, 300); } });
+      }).on('error', () => { if (Date.now() - t0 > 20000) { clearTimeout(killTimer); reject(new Error('Chrome 启动超时')); } else setTimeout(poll, 300); });
     })();
   });
 }
 
-function cdpConnect() {
-  return new Promise((resolve, reject) => {
-    http.get('http://127.0.0.1:9222/json', r => {
+/* v1.9.29：CDP Browser.close 优雅关闭实例（不依赖 lsof/xargs——macOS lsof 偶发挂起会同步堵死事件循环） */
+function closeChrome(port) {
+  return new Promise(resolve => {
+    const killTimer = setTimeout(resolve, 8000);
+    http.get('http://127.0.0.1:' + port + '/json/version', r => {
       let d = ''; r.on('data', c => d += c);
       r.on('end', () => {
+        try {
+          const v = JSON.parse(d);
+          const ws = new (require('/Users/macbookpro/.npm-global/lib/node_modules/openclaw/node_modules/ws'))(v.webSocketDebuggerUrl);
+          ws.onopen = () => { try { ws.send(JSON.stringify({ id: 1, method: 'Browser.close' })); } catch (e) {} setTimeout(() => { try { ws.close(); } catch (e) {} clearTimeout(killTimer); resolve(); }, 800); };
+          ws.onerror = () => { clearTimeout(killTimer); resolve(); };
+        } catch (e) { clearTimeout(killTimer); resolve(); }
+      });
+    }).on('error', () => { clearTimeout(killTimer); resolve(); });
+  });
+}
+
+function cdpConnect(port) {
+  port = port || 9222;
+  return new Promise((resolve, reject) => {
+    const killTimer = setTimeout(() => reject(new Error('CDP 连接超时 15s')), 15000);   // v1.9.29：http.get 连接挂起时无 error/end，原实现无限等
+    http.get('http://127.0.0.1:' + port + '/json', r => {
+      let d = ''; r.on('data', c => d += c);
+      r.on('end', () => {
+        clearTimeout(killTimer);
         const page = JSON.parse(d).find(t => t.url.includes('localhost:' + PORT));
         if (!page) return reject(new Error('页面未找到'));
         const ws = new (require('/Users/macbookpro/.npm-global/lib/node_modules/openclaw/node_modules/ws'))(page.webSocketDebuggerUrl);
@@ -76,7 +110,9 @@ function cdpConnect() {
 }
 
 async function evalIn(cdp, expr) {
-  const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+  /* v1.9.29：CDP 调用 20s 超时（页面主线程挂起时不再无限等） */
+  const timeout = new Promise((res, rej) => setTimeout(() => rej(new Error('CDP eval 超时 20s: ' + String(expr).slice(0, 60))), 20000));
+  const r = await Promise.race([cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }), timeout]);
   if (r.result && r.result.exceptionDetails) {
     const ed = r.result.exceptionDetails;
     const desc = (ed.exception && ed.exception.description) || ed.text || 'unknown';
@@ -278,6 +314,14 @@ async function main() {
   ok('R6 对比页累计分红曲线末点 = 表格累计分红（' + (cmpProbe.rows || []).map(r => r.name + ' ' + r.div).join(' / ') + '）');
 
   // R7 URL 往返（v1.8.11 大师 M6：分享链接回归重灾区）
+  // v1.9.29：R1-R6 连续导航后同一 Chrome 实例的主线程会挂起（实测 20s CDP 超时，BFCache 禁用/清场/重启均不稳定）——
+  // R7 测的是 URL 参数解析（y=20 回填、d 链接回填），与连续导航无关；改用独立实例（9233 端口+新 profile，不 kill 任何进程）语义完全等价且稳定
+  console.log('   R7 用独立 Chrome 实例（9233，先关旧实例释放资源）…');
+  cdp.close();
+  await closeChrome(9222);   // v1.9.29：并行 Chrome 实例会 CPU 争抢致 20 年数据渲染 >20s——先优雅关闭旧实例
+  await new Promise(r => setTimeout(r, 1200));
+  await launchChrome({ port: 9233, profile: '/tmp/dvt-r7-' + Date.now(), skipKill: true });
+  cdp = await cdpConnect(9233);
   // ① 旧 y=20 链接：周期=20年、无按钮点亮、日期输入回填计算出的起点
   const oldUrl = 'http://localhost:' + PORT + '/?cmp=600036&y=20&m=0&p=1000000&r=1&s=0&v=' + verStr;
   await cdp.send('Page.navigate', { url: oldUrl });
@@ -292,6 +336,12 @@ async function main() {
   }
   if (!r7a || !r7a.startDate) die('R7-①: 老链接 y=20 日期未回填（' + (r7a && r7a.startDate || 'null') + '）');
   ok('R7-① 老链接 y=20：按钮全不亮 + 日期回填 ' + r7a.startDate + '（约20年前）');
+  // v1.9.29：R7-② 也换独立实例（9234）——同一实例连续导航必然挂起（R7-① 已验证）；先关 9233 释放资源
+  cdp.close();
+  await closeChrome(9233);
+  await new Promise(r => setTimeout(r, 1200));
+  await launchChrome({ port: 9234, profile: '/tmp/dvt-r7b-' + Date.now(), skipKill: true });
+  cdp = await cdpConnect(9234);
   // ② 新 d 链接：日期回填 + 图起点 = d
   const dUrl = 'http://localhost:' + PORT + '/?cmp=600036&d=2020-01-02&m=0&p=1000000&r=1&s=0&v=' + verStr;
   await cdp.send('Page.navigate', { url: dUrl });
@@ -316,6 +366,7 @@ async function main() {
 
   console.log('\n===== e2e 全部通过 =====');
   cdp.close();
+  cleanupChrome();
   process.exit(0);
 }
 
