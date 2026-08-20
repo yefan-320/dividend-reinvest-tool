@@ -194,7 +194,7 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   const quotes = await getQuotes(codes);
   let state = {};
   try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
-  const report = { ts: new Date().toISOString(), items: [], changes: [], portfolio: null };
+  const report = { ts: (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + "T" + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0"); })(), items: [], changes: [], portfolio: null };
   // v5 补漏：国债利率漂移>50bp → 触发价全部重算（含已命中，标注"利率重算"）
   let rateShift = false, rateNote = '';
   try {
