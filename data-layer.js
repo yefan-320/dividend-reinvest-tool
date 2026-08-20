@@ -573,6 +573,7 @@ const Watchlist = {
  * 年末派息后窗口只剩 1 笔 → 2.2% 腰斩）。同口径跨公司可比。 */
 function calcAnnualDivYield(divs, price) {
   if (!price || price <= 0) return null;
+  divs = alignSendZhuan(divs);   // F8 送转对齐（2026-08-20）
   const years = {};
   divs.forEach(d => {
     if (d.pending || !d.ex || !d.report) return;
@@ -591,6 +592,31 @@ function calcAnnualDivYield(divs, price) {
 /* ---------- v1.9.0 核心计算函数（22轮红利讨论落地） ---------- */
 
 /* 报告期归组：按 REPORT_DATE 年份汇总每股分红（含中期+末期），返回 {year: dps} 排序升序 */
+/* F8 送转勘误（2026-08-20 方案 v9.2 落地）：送转年后 DPS 按新股本公告 → 与送转年前不可比
+ * 实测案例：宁德时代 2022年报 10转8（DPS 2.52，除权前股本24.4亿）→ 2023年报 DPS 2.011（股本44亿）
+ *   用 DPS 看分红 -20%（假下降）；总分红口径 +44%（61.5→88.5亿）——工具原算法 dy 虚降 20% → 触发失真
+ * 修复：折算到"当前股本"口径——送转除权日之前（含该笔自身）的 DPS 除以累计送转因子
+ * 输出：对齐后的副本数组（不修改原数组）
+ */
+function alignSendZhuan(divs) {
+  const list = (divs || [])
+    .filter(d => !d.pending && d.ex && d.dps > 0)
+    .map(d => ({ ...d }))
+    .sort((a, b) => (a.ex || '') < (b.ex || '') ? -1 : 1);
+  let factor = 1; // 当前股本倍数（1=最新股本）
+  for (let i = list.length - 1; i >= 0; i--) {
+    const d = list[i];
+    if (d.bonus > 0) {
+      factor *= (1 + d.bonus);      // 该笔之前的更旧股本
+      d.dps = d.dps / (1 + d.bonus); // 该笔自身按旧股本公告 → 折算
+      d.bonus = 0;                  // 已折算 → 清 0（幂等：二次对齐不再重复折算）
+    } else {
+      d.dps = d.dps / factor;        // 折算到当前股本口径
+    }
+  }
+  return list;
+}
+
 function calcReportYearDivs(divs) {
   const years = {};
   divs.forEach(d => {
@@ -625,6 +651,7 @@ const _ttmCache = new WeakMap();   // 按 divs 数组引用缓存（不同标的
 function ttmDivsAtMode(divs, dateStr) {
   let c = _ttmCache.get(divs);
   if (!c) {
+    divs = alignSendZhuan(divs);   // F8 送转对齐（2026-08-20）
     const sorted = divs.filter(d => d.ex && d.dps > 0).sort((a, b) => a.ex < b.ex ? -1 : 1);
     const byRepYear = {};
     divs.forEach(d => {
@@ -1871,7 +1898,7 @@ window.DL = {
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
-  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, computeZone, BENCH, roeBand,
   reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD,
   /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
