@@ -631,17 +631,34 @@ function splitSpecialDivs(divs) {
   const byY = {};
   list.forEach(d => { if (d.report && !d.pending && d.dps > 0) { const y = d.report.slice(0, 4); byY[y] = (byY[y] || 0) + d.dps; } });
   const years = Object.keys(byY).map(Number).sort((a, b) => a - b);
-  const vals = years.map(y => byY[y]).filter(v => v > 0);
-  if (vals.length < 4) { list.forEach(d => d.regular = d.dps); return list; } // 样本不足不拆
-  const sorted = [...vals].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)];
+  if (years.length < 4) { list.forEach(d => d.regular = d.dps); return list; } // 样本不足不拆
+  // 2026-08-21 F4 重写（原“全历史中位数×2”误伤长期递增股——招行近5年全被拆成特别分红）：
+  //   正确判据=当年 DPS vs 相邻年（前后各≤2年）均值，跳升 ≥80% 才算特别分红（兖矿 2022: 3.07 vs 邻年 1.55 = 2.0x ✓；招行 2024: 2.0 vs 邻年 1.97 = 1.02x ✗）
+  const idx = {}; years.forEach((y, i) => idx[y] = i);
+  const isSpecial = {};
+  years.forEach((y, i) => {
+    const v = byY[y];
+    const neighbors = [];
+    for (let j = Math.max(0, i - 2); j <= Math.min(years.length - 1, i + 2); j++) {
+      if (j !== i) neighbors.push(byY[years[j]]);
+    }
+    const nb = neighbors.filter(x => x > 0);
+    const nbAvg = nb.length ? nb.reduce((s, x) => s + x, 0) / nb.length : 0;
+    isSpecial[y] = nbAvg > 0 && v > nbAvg * 1.8;   // 跳升≥80%
+  });
   list.forEach(d => {
     if (!d.report || d.pending || !(d.dps > 0)) { d.regular = d.dps; return; }
     const y = d.report.slice(0, 4);
-    const ySum = byY[y] || d.dps;
-    if (ySum > median * 2) {
-      // 该报告期含特别分红：经常性=中位数，特别=ySum−中位数（按比例摊到该期各笔）
-      const ratio = ySum > 0 ? median / ySum : 1;
+    if (isSpecial[y]) {
+      // 该报告期含特别分红：经常性=邻年均值，特别=当年−邻年均值（按比例摊到该期各笔）
+      const nb = [];
+      const i = idx[y];
+      for (let j = Math.max(0, i - 2); j <= Math.min(years.length - 1, i + 2); j++) {
+        if (j !== i) nb.push(byY[years[j]]);
+      }
+      const nbF = nb.filter(x => x > 0);
+      const base = nbF.length ? nbF.reduce((s, x) => s + x, 0) / nbF.length : 0;
+      const ratio = base > 0 && byY[y] > 0 ? base / byY[y] : 1;
       d.regular = d.dps * ratio;
       d.special = d.dps - d.regular;
     } else {
@@ -701,12 +718,21 @@ function ttmDivsAtMode(divs, dateStr) {
     _ttmCache.set(divs, c);
   }
   const yearNow = parseInt(dateStr.slice(0, 4), 10);
+  // 2026-08-21 bugfix：B 口径只计“已全部到账”的最近完整财年——
+  //   宇通 2023-01 虚高 13% 根因（2022 末期 ex=2023-05-19 未到账却计入）；
+  //   招行 2026-06-24 锚点 5.48% 验证（2025 末期未到账→应取 2024 财年 2.0 元）
   const completeYears = Object.keys(c.byRepYear).map(Number)
     .filter(y => c.byRepYear[y].hasAnnual && y < yearNow)
     .sort((a, b) => b - a);
   if (completeYears.length) {
-    const bVal = c.byRepYear[completeYears[0]].sum;
-    if (bVal > 0) return { v: bVal, mode: 'B' };
+    for (const y of completeYears) {
+      const yrDivs = divs.filter(d => d.report && d.report.startsWith(String(y)) && d.dps > 0);
+      const allPaid = yrDivs.length > 0 && yrDivs.every(d => d.ex && d.ex <= dateStr);
+      if (allPaid) {
+        const bVal = yrDivs.reduce((s, d) => s + (d.regular != null ? d.regular : d.dps), 0);
+        if (bVal > 0) return { v: bVal, mode: 'B' };
+      }
+    }
   }
   const sorted = c.sorted;
   if (!sorted.length) return { v: 0, mode: 'A' };

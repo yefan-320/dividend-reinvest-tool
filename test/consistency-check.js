@@ -30,6 +30,21 @@ function chk(name, cond, detail) {
   const TL2IND = { manufacture: 'consumer', telecom: 'telecom' };
   const unmapped = Object.entries(DL.TIER_LINE || {}).filter(([, v]) => !DL.SIG_STATS[TL2IND[v.ind] || v.ind]).map(([c]) => c);
   chk('TIER_LINE 行业全部可映射', unmapped.length === 0, unmapped.join(','));
+
+  // 2c. 股息率锚点校验（2026-08-21 抓 bug：F4 误伤+未到账计入）
+  const anchor = (code, d, expect, tol) => {
+    try {
+      const karr = (cache[code + ':k'] || []);
+      const divs = cache[code + ':d'] || [];
+      const kline = {};
+      karr.forEach(x => { const c = parseFloat(x.close); if (c > 0) kline[x.d] = c; });
+      const series = DL.calcRollingPercentile(kline, divs, 375);
+      const s = series.find(x => x.d === d);
+      return s && s.dy != null && Math.abs(s.dy - expect) < tol;
+    } catch (e) { return false; }
+  };
+  chk('股息率锚点(招行2026-06-24≈5.44%)', anchor('600036', '2026-06-24', 5.44, 0.6), '');
+  chk('股息率锚点(宇通2023-01-03≈6.6%非13%)', anchor('600066', '2023-01-03', 6.62, 0.8), '');
   // 2b. 分红单位校验（2026-08-20 抓 bug：宇通/移动缓存=每10股未除10 → 2025归组>10 即异常）
   // 注意：茅台 27.6 元/股是真实每股（每10股派276），不是 bug——仅当 10<dps<100 且近3年比值骤变才报警
   const badUnit = Object.keys(DL.TIER_LINE || {}).filter(c => {
