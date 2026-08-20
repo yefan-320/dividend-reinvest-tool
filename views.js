@@ -1638,9 +1638,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             const cur = kline[kline.length - 1];
             if (cur && cur.close != null && cur.close <= low60 * 1.02) trendOk = false;
           }
-          const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig });
-          const col = ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a45b' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)');
-          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + '<span style="font-weight:400;font-size:10px;color:var(--sub)"> — ' + ts.reason + '</span></div>';
+          const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig, industry, finGood: !!(extra && extra.deductNetProfit != null && extra.deductNetProfitPrev != null && extra.deductNetProfitPrev > 0 && extra.deductNetProfit > extra.deductNetProfitPrev), valuation: null });
+          const col = ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a45b' : ts.action === 'watch' ? '#d9a45b' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)');
+          const lvNote = ts.level ? ` <span style="font-weight:400;font-size:10px;color:var(--sub)">等级 ${ts.level} · 建议强度 ${ts.strength}</span>` : '';
+          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + lvNote + '<span style="font-weight:400;font-size:10px;color:var(--sub)"> — ' + ts.reason + '</span></div>';
         })()}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : (t.label || t.type) + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
         ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}

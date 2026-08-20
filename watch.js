@@ -123,8 +123,11 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
       netProfitYoY: a[0].netProfitYoY,
     });
   }
-  // 买卖指令引擎（2026-08-20 主人令：工具明确提示买卖）
-  let ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals: indSignals });
+  // 买卖指令引擎（2026-08-20 主人令：工具明确提示买卖；08-20 晚等级制：L1-L5/S1-S3）
+  const a0 = (f && f.annuals && f.annuals[0]) || null;
+  const a1 = (f && f.annuals && f.annuals[1]) || null;
+  const finGood = !!(a0 && a1 && a1.deductNetProfit != null && a1.deductNetProfit > 0 && a0.deductNetProfit > a1.deductNetProfit);
+  let ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals: indSignals, industry: (f && (f.industry || f.csrcIndustry)) || '', finGood, valuation: null });
   // 标的分层（大师最终方案）：事件层（伊利/平安）只监控不自动买卖——买入信号降级为提示
   const layer = DL.TRADE_LAYER[code] || 'auto';
   if (layer === 'event' && ts.action.startsWith('buy_')) {

@@ -1438,49 +1438,103 @@ const BUY_CFG = {
   '000333': { minTier: 'p95', trend: true },   // 美的
 };
 
-/* 买卖指令引擎（2026-08-20 主人令：工具明确提示买卖，不是数据报表）
- * 输入：code、dy（当前股息率%）、tier（分位档 p75/p90/p95/null）、trendOk（趋势确认：非创新低）、
- *       finOk（财报双闸过）、lastBuyDays（距上次买入触发天数，冷却60日）、industrySignals（行业校准信号结果）
- * 输出：{ action, text, reason, evidence }
- *   action: buy_heavy=重仓买 / buy_add=加仓买 / buy_probe=试探买 / hold=持有 / reduce=减半 / sell=清仓
- * 优先级：卖出信号(hard/soft) > 买入触发(定制档位) > 持有
+/* 买卖等级引擎 v2（2026-08-20 主人批评"一买就重仓"→ 大师两轮 A 定稿等级制）
+ * 输入：code、dy（当前股息率%）、tier（分位档 p75/p90/p95/null）、trendOk（趋势确认）、
+ *       finOk（财报双闸过）、finGood（财报好：扣非同比>0，可选）、lastBuyDays（距上次买入触发天数，冷却60日）、
+ *       industrySignals（行业校准信号结果）、industry（行业中文名，背书用）、valuation（PB分位 pct，可选）
+ * 输出：{ action, text, reason, evidence, level, strength }
+ *   action: buy_L1..buy_L5=等级买入 / hold=持有 / watch=S1观察 / reduce=S2减半 / sell=S3清仓
+ * 等级体系（大师 A 定稿）：
+ *   买入 5 级：L1观察(0%) → L2试探(1/6) → L3小仓(1/3) → L4加仓(2/3) → L5重仓(上限)
+ *   卖出 3 级：S1观察(0.15-0.2) → S2减半(0.3-0.5) → S3清仓(1.0)
+ * 铁律：
+ *   1. 财报否决（finOk=false 禁买，即使 P95）
+ *   2. 首触降档（主人 08-19 铁律落地）：个股 P95 历史触发 0 次 或 行业无背书 → 最高 L3，等验证
+ *   3. 双背书（个股触发≥1 且 行业 heavy 胜率≥80% n≥10）才可 L4/L5
+ *   4. 等级=风险提示+建议强度，最终动作主人拍板
  */
-function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals }) {
+const P95_TRIGGERS = {  // 个股 P95 线历史触发次数（2026-08-20 实测 rule-tree-cache 全历史，含宇通/移动补拉）
+  '600036': 20, '601398': 20, '000333': 2, '600066': 1, '600887': 1, '600941': 1, '601318': 0,
+};
+function indKeyOf(industry) {
+  const t = (industry || '').toLowerCase();
+  if (t.includes('银行') || t.includes('货币金融')) return 'bank';
+  if (t.includes('保险')) return 'insurer';
+  if (t.includes('电信') || t.includes('移动') || t.includes('通信')) return 'telecom';
+  if (t.includes('食品') || t.includes('饮料') || t.includes('酒') || t.includes('农副') || t.includes('医药') || t.includes('汽车') || t.includes('家电') || t.includes('电气')) return 'consumer';
+  if (t.includes('电力') || t.includes('燃气') || t.includes('公用')) return 'utility';
+  if (t.includes('煤炭') || t.includes('石油') || t.includes('开采') || t.includes('有色')) return 'energy';
+  return null;
+}
+function hasBacking(code, industry) {
+  const st = SIG_STATS[indKeyOf(industry)] && SIG_STATS[indKeyOf(industry)].heavy;
+  const indOk = !!(st && parseFloat(st.all) >= 80 && st.n >= 10);
+  const stockOk = (P95_TRIGGERS[code] || 0) >= 1;
+  return { indOk, stockOk, ok: indOk && stockOk };
+}
+function levelFromScore(score, backing) {
+  if (score >= 5 && backing.ok) return 'L5';
+  if (score === 4 && backing.ok) return 'L4';
+  if (score >= 3) return 'L3';
+  if (score === 2) return 'L2';
+  return 'L1';
+}
+function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals, industry, finGood, valuation }) {
   const cfg = BUY_CFG[code] || { minTier: 'p75' };
-  const lvl = { p75: 0, p90: 1, p95: 2 };
-  // 1. 卖出优先：行业校准信号（财报恶化=卖出主依据）
+  const lvl = { p75: 1, p90: 2, p95: 3 };
+  const backing = hasBacking(code, industry);
+  // 1. 卖出优先：行业校准信号（财报恶化=卖出主依据）→ S1/S2/S3 等级
   if (industrySignals && industrySignals.level === 'hard') {
-    return { action: 'sell', text: '🔴 卖出（清仓）', reason: industrySignals.msg, evidence: '财报硬红灯（行业校准）' };
+    return { action: 'sell', level: 'S3', strength: '1.0', text: '🔴 S3 清仓（强度 1.0）', reason: industrySignals.msg, evidence: '财报硬红灯（行业校准）' };
   }
   if (industrySignals && industrySignals.level === 'soft') {
-    return { action: 'reduce', text: '🟠 卖出（减半）', reason: industrySignals.msg, evidence: '财报软恶化（行业校准）' };
+    return { action: 'reduce', level: 'S2', strength: '0.3-0.5', text: '🟠 S2 减半（建议卖出 30-50%）', reason: industrySignals.msg, evidence: '财报软恶化（行业校准）' };
   }
-  // 2. 买入触发：财报确认（主依据·硬闸）→ 价格分位（定时机）
+  if (industrySignals && industrySignals.level === 'watch') {
+    return { action: 'watch', level: 'S1', strength: '0.15-0.2', text: '🟡 S1 观察（强度 0.15-0.2）', reason: industrySignals.msg, evidence: '财报单信号（行业校准）' };
+  }
+  // 2. 买入触发：财报确认（主依据·硬闸）→ 价格分位（定时机）→ 等级（证据强度动态）
   const minLvl = lvl[cfg.minTier];
   const curLvl = tier ? lvl[tier] : -1;
   if (tier && curLvl >= minLvl) {
     // 财报确认硬闸：不过关=禁止买入（即使 P95）——主人令：买卖依据财报
     if (finOk === false) {
-      return { action: 'hold', text: '❌ 禁止买入（财报不过关）', reason: `dy已到${tier.toUpperCase()}但财报确认失败：${(finChecks || []).join('；')}`, evidence: '财报确认闸（主依据）' };
+      return { action: 'hold', level: null, strength: '0%', text: '❌ 禁止买入（财报不过关）', reason: `dy已到${tier.toUpperCase()}但财报确认失败：${(finChecks || []).join('；')}`, evidence: '财报确认闸（主依据）' };
     }
     // 冷却：距上次买入 <60 交易日 → 提示但不动
     if (lastBuyDays != null && lastBuyDays < 60) {
-      return { action: 'hold', text: '🟡 持有（冷却中）', reason: `已触发${tier.toUpperCase()}但距上次买入仅${lastBuyDays}日（冷却60日）`, evidence: '冷却期' };
+      return { action: 'hold', level: null, strength: '0%', text: '🟡 持有（冷却中）', reason: `已触发${tier.toUpperCase()}但距上次买入仅${lastBuyDays}日（冷却60日）`, evidence: '冷却期' };
     }
     // 趋势确认（配置开启）
     if (cfg.trend && !trendOk) {
-      return { action: 'hold', text: '🟡 等待（趋势未确认）', reason: `dy已到${tier.toUpperCase()}但仍在下跌通道（60日新低附近），等企稳`, evidence: '趋势确认' };
+      return { action: 'hold', level: null, strength: '0%', text: '🟡 等待（趋势未确认）', reason: `dy已到${tier.toUpperCase()}但仍在下跌通道（60日新低附近），等企稳`, evidence: '趋势确认' };
     }
     // 加严双闸（配置开启，宇通）
     if (cfg.gate && !trendOk) {
-      return { action: 'hold', text: '🟡 等待（加严双闸）', reason: '宇通定制：需趋势确认+财报双闸全过', evidence: '宇通专属规则' };
+      return { action: 'hold', level: null, strength: '0%', text: '🟡 等待（加严双闸）', reason: '宇通定制：需趋势确认+财报双闸全过', evidence: '宇通专属规则' };
     }
-    if (tier === 'p95') return { action: 'buy_heavy', text: '✅ 买入（重仓档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P95`, evidence: '财报确认✅+价格P95' };
-    if (tier === 'p90') return { action: 'buy_add', text: '✅ 买入（加仓档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P90`, evidence: '财报确认✅+价格P90' };
-    return { action: 'buy_probe', text: '🟢 买入（试探档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P75`, evidence: '财报确认✅+价格P75' };
+    // 等级制：证据强度打分 → 等级（大师 A 定稿映射）
+    // 价格档位：P75=1 / P90=2 / P95=3；财报：过=+0 好=+1 差=-2否决；行业：无=0 好=+1 硬红灯否决；估值：中=0 低=+1 高=-1
+    let score = lvl[tier];
+    if (finGood) score += 1;
+    if (industrySignals && industrySignals.level == null) score += 1;
+    if (valuation != null && valuation.pct != null) {
+      if (valuation.pct < 30) score += 1;
+      else if (valuation.pct > 70) score -= 1;
+    }
+    const L = levelFromScore(score, backing);
+    const L_NAME = { L1: '观察', L2: '试探', L3: '小仓', L4: '加仓', L5: '重仓' }[L];
+    const L_STR = { L1: '0%', L2: '1/6', L3: '1/3', L4: '2/3', L5: '上限' }[L];
+    const L_ICON = { L1: '👁️', L2: '🟢', L3: '🟢', L4: '🟢', L5: '✅' }[L];
+    const degradeNote = (score >= 4 && !backing.ok)
+      ? `（首触降档：P95历史触发${P95_TRIGGERS[code] || 0}次${backing.indOk ? '' : '+行业无背书（胜率<80%或n<10）'}，最高L3，等验证）`
+      : '';
+    const tierNote = `dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 ${tier.toUpperCase()}`;
+    const evParts = [tierNote, finGood ? '财报好' : '财报过', industrySignals && industrySignals.level == null ? '行业无恶化' : '', valuation != null && valuation.pct != null ? (valuation.pct < 30 ? '估值低估' : valuation.pct > 70 ? '估值高估' : '估值中性') : '', backing.ok ? '双背书✅' : `无背书（触发${P95_TRIGGERS[code] || 0}次${backing.indOk ? '' : '/行业无背书'}）`].filter(Boolean);
+    return { action: 'buy_' + L, level: L, strength: L_STR, text: `${L_ICON} ${L} ${L_NAME}（建议 ${L_STR}）`, reason: `证据${score}分：${evParts.join('+')}${degradeNote}`, evidence: '财报确认✅+价格分位+证据强度' };
   }
   // 3. 默认持有
-  return { action: 'hold', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };
+  return { action: 'hold', level: null, strength: '0%', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };
 }
 
 /* F6 估值双锚·PB 分位（2026-08-20 实测：PB>P95 触发后 1 年下跌率 66% 有效卖出；P75 无效）
@@ -1968,7 +2022,7 @@ window.DL = {
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, splitSpecialDivs, calcPbPercentile, computeZone, BENCH, roeBand,
-  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD,
+  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD, P95_TRIGGERS, indKeyOf, hasBacking,
   /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
