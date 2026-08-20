@@ -238,6 +238,36 @@ async function fetchDividendsAll(fromDate) {
   } while (pn <= pages);
   return dedupDividends(parseDivs(all));
 }
+/* ---------- 清洗层三级（2026-08-21 大师裁决 B：单位/行业/逻辑三级） ----------
+ * 1. 单位级（硬拦截）：dps 单笔 > 30 元 → 疑似“每10股未除10”（茅台 27.6 是真实每股，上限 30 放过）
+ *    且与历史均值比 >8 倍 → 必错，剔除（8/20 宇通/移动 618% 根因）
+ * 2. 行业级（警告标注）：股息率超行业合理区间 → 标注 suspicious（不剔除，防误杀真高息）
+ * 3. 逻辑级（硬拦截）：除息日非法、DPS 为负/超限 → 必错，剔除
+ */
+function sanitizeDividends(code, divs) {
+  const out = (divs || []).map(d => ({ ...d }));
+  const valid = out.filter(d => d.ex && d.dps > 0);
+  if (!valid.length) return out;
+  // 逻辑级：除息日格式 + dps 范围
+  const logical = valid.filter(d => {
+    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(d.ex || '');
+    const okDps = d.dps > 0 && d.dps < 1000;
+    return okDate && okDps;
+  });
+  // 单位级：单笔异常大 → 对比历史均值（8/20 漏除10 根因：单笔 10x 历史）
+  const mean = logical.reduce((s, d) => s + d.dps, 0) / Math.max(1, logical.length);
+  const unitOk = logical.filter(d => d.dps <= 30 || d.dps <= mean * 8);
+  // 行业级：股息率合理区间（警告不剔除）——按 TIER_LINE 行业
+  const ind = (DL.TIER_LINE && DL.TIER_LINE[code] && DL.TIER_LINE[code].ind) || '';
+  const IND_RANGE = { bank: [0, 8], consumer: [0, 10], manufacture: [0, 10], telecom: [0, 8], energy: [0, 15], utility: [0, 12] };
+  const range = IND_RANGE[DL.SIG_STATS && DL.SIG_STATS[ind] ? ind : ''] || [0, 15];
+  const withSusp = unitOk.map(d => {
+    if (d.exPrice && d.dps / d.exPrice * 100 > range[1] * 3) d.suspicious = true;
+    return d;
+  });
+  return withSusp;
+}
+
 async function fetchDividendsOne(code) {
   // 单股全历史分红（回测用，保留全部历史）
   // 2026-08-17 C1：ETF/基金代码（5xx 沪ETF/LOF、159/16x 深ETF/LOF）直接走基金公告源（股票接口无 ETF 数据）
@@ -254,8 +284,9 @@ async function fetchDividendsOne(code) {
     `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=${DIV_COLS}&pageNumber=1&pageSize=200&sortColumns=EX_DIVIDEND_DATE&sortTypes=-1&filter=${encodeURIComponent(filter)}`, 'callback'));
   const rows = (d && d.result && d.result.data) || [];
   const out = dedupDividends(parseDivs(rows));
-  cacheSet('dv:' + code, { ts: Date.now(), data: out });   // P2-30: 供除权日缓存失效检查
-  return out;
+  const cleaned = sanitizeDividends(code, out);   // 2026-08-21 清洗层三级（大师裁决 B）
+  cacheSet('dv:' + code, { ts: Date.now(), data: cleaned });   // P2-30: 供除权日缓存失效检查
+  return cleaned;
 }
 
 /* ---------- ETF/基金分红（东财基金公告源，2026-08-17 C1 接入） ----------
@@ -2097,7 +2128,7 @@ function sellSignalQuick(divs) {
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
-  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, calcAnnualDivYield,
+  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield,
   tierSpot, sellSignalQuick, sellFuse, TIER_LINE,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,

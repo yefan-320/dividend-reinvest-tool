@@ -72,6 +72,15 @@ if [ -f test/e2e-v195.js ]; then
   echo "==> e2e-v195 口径标注实测（6 断言）…"
   node test/e2e-v195.js || { echo "!! e2e-v195 失败，中止发布"; exit 1; }
 fi
+# v1.9.26 股息率根治（大师裁决）：锚点库+6案例单测——每次发布必跑，口径改动过不了=禁止提交
+if [ -f test/anchors.js ]; then
+  echo "==> 股息率锚点库（7 锚点，bug 尸检报告只增不删）…"
+  node test/anchors.js || { echo "!! 锚点库失败，中止发布"; exit 1; }
+fi
+if [ -f test/div-cases.js ]; then
+  echo "==> 口径边界 6 案例单测…"
+  node test/div-cases.js || { echo "!! 口径单测失败，中止发布"; exit 1; }
+fi
 if [ -f test/e2e-v196.js ]; then
   echo "==> e2e-v196 用户视角回归（搜索框/真实输入/扫描mock/结论行/回本进度 10 断言）…"
   node test/e2e-v196.js || { echo "!! e2e-v196 失败，中止发布"; exit 1; }
