@@ -939,7 +939,7 @@ const TIER_CLASS_LABEL = {
   direct: { label: '80直接买', color: '#8fa69c', detail: '历史等90档年化收益<10pp/年或数据不足——80档即买，等90不值' },
   neutral: { label: '中性', color: '#5aa9e6', detail: '等90档年化收益10-20pp/年——按自身风险偏好自决（数字见详情）' },
   trap: { label: '⚠分红陷阱', color: '#e05a5a', detail: '分红连续2年下降（报告期归组）——高股息率分位=分红下调信号，全档位降权，建议回避/小仓' },
-  dull: { label: '低估值钝化', color: '#d9a45b', detail: '分红健康但90档后价格长期不修复——等90意义小，80档建仓长期持有等均值回归' },
+  dull: { label: '低估值钝化', color: '#d9a441', detail: '分红健康但90档后价格长期不修复——等90意义小，80档建仓长期持有等均值回归' },
 };
 function classifyTier(code) {
   const row = TIER_CLASS_TABLE[code];

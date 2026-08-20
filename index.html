@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>红利复投工具</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
 <script src="vendor/echarts.min.js"></script>
@@ -26,7 +26,7 @@ window.REPORT_CARD_EXTRA = {
 <style>
 :root{
   --bg:#0e1412; --card:#16211d; --card2:#1b2a25; --line:#2a3d36;
-  --gold:#d9a441; --green:#3fbf7f; --red:#e06666; --blue:#5aa9e6;
+  --gold:#d9a441; --green:#4caf7d; --red:#e05a5a; --blue:#5aa9e6;
   --txt:#e8efe9; --sub:#8fa69c;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -48,7 +48,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .hint{font-size:12px;color:var(--sub);margin-top:6px;min-height:14px;line-height:1.55}   /* v1.9.6 P2-2：字号 11→12、行距优化（视觉模型抓“说明文字过小拥挤”） */
 .hint.ok{color:var(--green)} .hint.err{color:var(--red)}
 .quick{display:flex;gap:6px;margin-top:6px}
-.quick button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--sub);border-radius:6px;padding:5px 0;font-size:11px;cursor:pointer}
+.quick button{flex:1;background:var(--card2);border:1px solid var(--line);color:var(--sub);border-radius:6px;padding:5px 0;font-size:11px;cursor:pointer;min-height:44px}
 .quick button:active{background:var(--line);color:var(--txt)}
 .gauge-row{display:flex;gap:10px}
 .gauge-box{flex:1;text-align:center}
@@ -105,7 +105,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 
 /* ===== v1.7.0 UI 美化（大师清单：卡片层级/数字规范/线型辅助） ===== */
 #tab-home .card:nth-of-type(2),
-#tab-home .card:nth-of-type(3){border:1px solid rgba(212,160,23,.3)}
+#tab-home .card:nth-of-type(3){border:1px solid rgba(217,164,65,.3)}
 .stat .v,.tbl td,.tbl th,.wl-main,.scan-row b{font-variant-numeric:tabular-nums}
 .stat .v{letter-spacing:.2px}
 #btnScan{margin-top:12px}
@@ -117,11 +117,13 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .tabbar button{flex:1;padding:10px 0;background:transparent;border:none;color:var(--sub);font-size:12px;cursor:pointer;transition:color .2s}
 .tabbar button.active{color:var(--gold);font-weight:700}
 body{padding-bottom:64px}
-.chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;margin:3px}
-.mode-chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:4px 10px;font-size:11px;cursor:pointer}
+.chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;margin:3px;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+.mode-chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:4px 10px;font-size:11px;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
 .mode-chip.on{background:var(--gold);color:#111;border-color:var(--gold);font-weight:600}
 .wl-card{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
 .wl-card:active{transform:scale(.98)}
+/* D9（2026-08-21）：键盘焦点可见（无障碍） */
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:4px}
 .wl-head{display:flex;align-items:center;gap:8px}
 .wl-code{color:var(--sub);font-size:11px}
 .wl-del{margin-left:auto;background:none;border:none;color:var(--sub);font-size:14px;cursor:pointer}
@@ -135,7 +137,7 @@ body{padding-bottom:64px}
 .rhythm-row{font-size:12px;padding:3px 0}
 .rhythm-year{display:inline-block;width:44px;color:var(--sub)}
 .rhythm-m{display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin:1px;font-size:11px}
-.risk-badge{background:rgba(224,102,102,.15);color:var(--red);border:1px solid rgba(224,102,102,.4);border-radius:4px;padding:0 5px;font-size:10px;margin-left:4px}
+.risk-badge{background:rgba(224,94,90,.15);color:var(--red);border:1px solid rgba(224,94,90,.4);border-radius:4px;padding:0 5px;font-size:11px;margin-left:4px}
 
 </style>
 </head>
@@ -147,7 +149,7 @@ body{padding-bottom:64px}
   <div style="font-size:11px;color:#5f7a6e;max-width:280px;text-align:center;line-height:1.5">密码锁仅防路人/误触（浏览器端校验），不防懂技术者；持仓与自选数据存本机浏览器，不上传</div>
   <input id="lockPwd" type="password" placeholder="访问密码" style="width:220px;padding:10px 14px;background:#16211d;border:1px solid #2a3d36;border-radius:10px;color:#e8efe9;font-size:15px;text-align:center;outline:none">
   <button id="lockBtn" style="padding:10px 34px;background:#d9a441;color:#0d1a14;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">进 入</button>
-  <div id="lockMsg" style="color:#e06666;font-size:12px;min-height:16px"></div>
+  <div id="lockMsg" style="color:#e05a5a;font-size:12px;min-height:16px"></div>
 </div>
 <script>
 /* 密码锁：SHA-256 校验（防明文）+ localStorage 30 天免密 */
@@ -193,6 +195,8 @@ body{padding-bottom:64px}
 
 <!-- ===== 决策台 tab（v1.7.0 新增） ===== -->
 <section id="tab-home" class="tab-panel">
+  <div id="onboardGuide" style="display:none"></div>
+  <div id="dailyBar" style="display:none"></div>
   <div id="zoneBanner"></div>
   <div class="card">
     <h2>🔍 搜索</h2>
@@ -480,19 +484,19 @@ body{padding-bottom:64px}
       <span style="font-size:12px">🧪 金字塔模拟器（自定义档位方案加入对比）：</span>
       <input id="pfbtCustom" type="text" placeholder="如 80:33,85:33,90:34（档位:权重%）" value="" style="flex:1;min-width:180px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px">
       <button type="button" class="chip" id="pfbtCustomAdd">➕ 加入对比</button>
-      <span style="font-size:10px;color:var(--muted)">预设：<button type="button" class="chip pfbt-preset" data-p="85:33,90:33,95:34">85金字塔</button> <button type="button" class="chip pfbt-preset" data-p="90:100">90单档</button> <button type="button" class="chip pfbt-preset" data-p="80:100">80单档</button> <button type="button" class="chip pfbt-preset" data-p="80:50,90:50">80+90半仓</button></span>
+      <span style="font-size:11px;color:var(--muted)">预设：<button type="button" class="chip pfbt-preset" data-p="85:33,90:33,95:34">85金字塔</button> <button type="button" class="chip pfbt-preset" data-p="90:100">90单档</button> <button type="button" class="chip pfbt-preset" data-p="80:100">80单档</button> <button type="button" class="chip pfbt-preset" data-p="80:50,90:50">80+90半仓</button></span>
     </div>
     <div id="pfbtCustomList" style="font-size:11px;color:var(--muted);margin-bottom:6px"></div>
     <div id="pfbtResult"><div class="hint">点“运行”开始（拉取自选池 K线+分红，N 只 × 2 请求，约 1-3 分钟）</div></div>
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.28"></script>
+<script src="demo-data.js?v=v1.9.29"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v1.9.28"></script>
+<script src="data-layer.js?v=v1.9.29"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.28';
+const APP_VERSION = 'v1.9.29';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -824,9 +828,9 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     yAxis:axY({scale:true, axisLabel:{formatter:v=> v>=1e4? (v/1e4).toFixed(0)+'万':v}}),
     series:[
       {name:'总资产(复投)', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.value)), lineStyle:{width:2,color:'#d9a441'}, areaStyle:{color:'rgba(217,164,65,.12)'},
-        markPoint:{ data: markPts, symbol:'pin', symbolSize:26, itemStyle:{color:'rgba(63,191,127,.85)'}, label:{show:false, position:'top', color:'#3fbf7f', fontSize:9} }},
+        markPoint:{ data: markPts, symbol:'pin', symbolSize:26, itemStyle:{color:'rgba(63,191,127,.85)'}, label:{show:false, position:'top', color:'#4caf7d', fontSize:9} }},
       {name:'总资产(不买股)', type:'line', showSymbol:false, data:sd2? sd2.map(x=>Math.round(x.value)) : [], lineStyle:{width:1.5,color:'#5aa9e6',type:'dashed'}},
-      {name:'累计投入', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#3fbf7f'}},
+      {name:'累计投入', type:'line', showSymbol:false, data:sd.map(x=>Math.round(x.invested)), lineStyle:{width:1.5,color:'#4caf7d'}},
     ]
   });
   // v1.8.13 BUG-3 防御：views.js 未就绪时跳过测量不崩（主修=自动运行延迟到 load）
@@ -847,8 +851,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       grid:{left:50,right:14,top:20,bottom:24},
       xAxis:Object.assign({type:'category', data:yKeys}, AXIS),
       yAxis:axY({axisLabel:{formatter:v=> (v/1e4).toFixed(1)+'万'}}),
-      series:[{name: mode==='pay' ? '分红(到账年)' : '分红(报告期)', type:'bar', data:yKeys.map(y=>Math.round(byYear[y])), itemStyle:{color:'#3fbf7f',borderRadius:[4,4,0,0]}, barMaxWidth:34,
-        label:{show:true, position:'top', color:'#3fbf7f', fontSize:10, formatter:p=> (p.value/1e4).toFixed(1)+'万'}}]
+      series:[{name: mode==='pay' ? '分红(到账年)' : '分红(报告期)', type:'bar', data:yKeys.map(y=>Math.round(byYear[y])), itemStyle:{color:'#4caf7d',borderRadius:[4,4,0,0]}, barMaxWidth:34,
+        label:{show:true, position:'top', color:'#4caf7d', fontSize:10, formatter:p=> (p.value/1e4).toFixed(1)+'万'}}]
     });
     // 分红率图跟随
     const srcYears = mode === 'report' ? (res.reportYears || []) : res.years;
@@ -862,8 +866,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       series:[
         {name:'分红率(相对投入)', type:'bar', data:srcYears.map(y=>+(y.rate*100).toFixed(2)), itemStyle:{color:'#d9a441',borderRadius:[4,4,0,0]}, barMaxWidth:22,
           label:{show:true, position:'top', color:'#d9a441', fontSize:9, formatter:p=> p.value+'%'}},
-        {name:'分红率(相对本金)', type:'bar', data:srcYears.map(y=>+(y.rate0*100).toFixed(2)), itemStyle:{color:'#3fbf7f',borderRadius:[4,4,0,0]}, barMaxWidth:22,
-          label:{show:true, position:'top', color:'#3fbf7f', fontSize:9, formatter:p=> p.value+'%'}},
+        {name:'分红率(相对本金)', type:'bar', data:srcYears.map(y=>+(y.rate0*100).toFixed(2)), itemStyle:{color:'#4caf7d',borderRadius:[4,4,0,0]}, barMaxWidth:22,
+          label:{show:true, position:'top', color:'#4caf7d', fontSize:9, formatter:p=> p.value+'%'}},
       ]
     });
     window.fitLegendTop(ch3, $('#chartRate'), 36);   // v1.8.4 大师 M2/M4：统一全局实现（旧内联 rAF 已删）
@@ -913,7 +917,7 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
       }]
     });
     mkGauge('chartGauge1', v1, '#d9a441');
-    mkGauge('chartGauge2', v2, '#3fbf7f');
+    mkGauge('chartGauge2', v2, '#4caf7d');
     $('gaugeNote').textContent = (rateNote1 ? rateNote1 + ' ｜ ' : '') + (rateNote2 ? rateNote2 + ' ｜ ' : '') + showY.year + '分红 ' + fmt(showY.divTotal,0) + ' 元（基数 ' + fmt(showY.investedEnd,0) + '）· ' + showY0.year + '分红 ' + fmt(showY0.divTotal,0) + ' 元（基数 ' + fmt(res.principal,0) + '）';
   } else {
     $('cardGauge').style.display = 'none';
@@ -937,8 +941,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
         <td>${fmt(y.divTotal,0)}${yoy != null && yoy <= -0.2 ? ` <span style="color:var(--red)" title="较${srcYears[i-1].year}年下降">⚠️${(yoy*100).toFixed(0)}%</span>` : ''}</td>
         <td>${y.dps!=null?fmt(y.dps,3):'—'}</td>
         <td style="color:#d9a441">${fmtPct(y.rate)}</td>
-        <td style="color:#3fbf7f">${fmtPct(y.rate0)}</td>
-        <td>${evs.length ? `<details style="font-size:11px"><summary style="cursor:pointer;color:#3fbf7f">${evs.length}笔</summary><div style="margin-top:3px;line-height:1.7">${evs.slice().reverse().map(e => e.date + ' 派' + fmt(e.cash,0) + '元（每股' + fmt(e.dps,3) + '）').join('<br>')}</div></details>` : '—'}</td>
+        <td style="color:#4caf7d">${fmtPct(y.rate0)}</td>
+        <td>${evs.length ? `<details style="font-size:11px"><summary style="cursor:pointer;color:#4caf7d">${evs.length}笔</summary><div style="margin-top:3px;line-height:1.7">${evs.slice().reverse().map(e => e.date + ' 派' + fmt(e.cash,0) + '元（每股' + fmt(e.dps,3) + '）').join('<br>')}</div></details>` : '—'}</td>
         ${mode==='pay' ? `
         <td>${y.sharesStart!=null?fmt(y.sharesStart,0):'—'}</td>
         <td>${y.sharesEnd!=null?fmt(y.sharesEnd,0):'—'}</td>
@@ -1215,6 +1219,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.28"></script>
+<script src="views.js?v=v1.9.29"></script>
 </body>
 </html>
