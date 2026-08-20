@@ -1268,6 +1268,7 @@ async function fetchF10Annual(code, tryN = 1) {
       deductNetProfit: x.KCFJCXSYJLR != null ? parseFloat(x.KCFJCXSYJLR) / 1e8 : null,     // 扣非净利·元→亿（v1.9.17 财报证据层）
       roe: x.ROEJQ != null ? parseFloat(x.ROEJQ) : null,
       grossMargin: x.XSMLL != null ? parseFloat(x.XSMLL) : null,        // 毛利率%（v1.9.17）
+      bps: x.BPS != null ? parseFloat(x.BPS) : null,                    // 每股净资产（F6 估值双锚·PB 分位 2026-08-20）
       netMargin: x.XSJLL != null ? parseFloat(x.XSJLL) : null,         // 销售净利率%（v1.9.17）
       ocf: x.NETCASH_OPERATE_PK != null ? parseFloat(x.NETCASH_OPERATE_PK) / 1e8 : null,  // 经营现金流·元→亿（v1.9.17）
       ocfPerShare: x.MGJYXJJE != null ? parseFloat(x.MGJYXJJE) : null,  // 每股经营现金流·元（v1.9.17）
@@ -1480,6 +1481,38 @@ function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays,
   }
   // 3. 默认持有
   return { action: 'hold', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };
+}
+
+/* F6 估值双锚·PB 分位（2026-08-20 实测：PB>P95 触发后 1 年下跌率 66% 有效卖出；P75 无效）
+ * 输入：kline（历史日K）、annuals（含 bps 的年报序列，降序）、dateStr（当前日）
+ * 输出：{ pb, pct, lvl: 'P95'|'P90'|'P75'|null, signal }
+ *   signal: 'sell_high'(PB>P95·1年下跌率66%·估值极端减仓强度0.7) / 'sell_watch'(PB>P90·强度0.5) / 'hint'(PB>P75·仅提示) / null
+ */
+function calcPbPercentile(kline, annuals, dateStr) {
+  if (!kline || !kline.length || !annuals || !annuals.length) return null;
+  const rows = kline.filter(x => x.close != null && x.close > 0).map(x => ({ d: x.d, c: parseFloat(x.close) })).sort((a, b) => a.d < b.d ? -1 : 1);
+  const date = dateStr || (rows.length ? rows[rows.length - 1].d : '');
+  const limit = (() => { const y = parseInt(date.slice(0, 4), 10); const m = parseInt(date.slice(5, 7), 10) - 5; return y + '-' + String(m <= 0 ? 12 + m : m).padStart(2, '0'); })();
+  // 当日 BPS（≤limit 的最新年报）
+  const cur = annuals.find(x => x.bps != null && x.bps > 0 && x.d.slice(0, 7) <= limit);
+  if (!cur) return null;
+  // 历史 PB 序列（每交易日：价格/当时最近年报 BPS）
+  const pbHist = [];
+  for (let i = 0; i < rows.length; i++) {
+    const d = rows[i].d;
+    const l2 = (() => { const y = parseInt(d.slice(0, 4), 10); const m = parseInt(d.slice(5, 7), 10) - 5; return y + '-' + String(m <= 0 ? 12 + m : m).padStart(2, '0'); })();
+    const b = annuals.find(x => x.bps != null && x.bps > 0 && x.d.slice(0, 7) <= l2);
+    if (b) pbHist.push(rows[i].c / b.bps);
+  }
+  if (pbHist.length < 250) return null;
+  const curPb = rows[rows.length - 1].c / cur.bps;
+  const window = pbHist.slice(-500);
+  const sorted = [...window].sort((a, b) => a - b);
+  const pct = (() => { const idx = sorted.findIndex(x => x >= curPb); return idx < 0 ? 100 : idx / sorted.length * 100; })();
+  let lvl = null;
+  if (pct >= 95) lvl = 'P95'; else if (pct >= 90) lvl = 'P90'; else if (pct >= 75) lvl = 'P75';
+  const signal = lvl === 'P95' ? 'sell_high' : lvl === 'P90' ? 'sell_watch' : lvl === 'P75' ? 'hint' : null;
+  return { pb: +curPb.toFixed(2), pct: +pct.toFixed(0), lvl, signal };
 }
 
 function assessIndustrySignals({ industry, code, kf, kfPrev, ocf, np, xsmll, xsmllPrev, xsmllPrev2, netProfitYoY }) {
@@ -1934,7 +1967,7 @@ window.DL = {
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
-  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, splitSpecialDivs, computeZone, BENCH, roeBand,
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, splitSpecialDivs, calcPbPercentile, computeZone, BENCH, roeBand,
   reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD,
   /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
