@@ -1166,13 +1166,37 @@ async function fetchF10Annual(code, tryN = 1) {
   const secuCode = /^\d+$/.test(code) ? code + (/^6/.test(code) ? '.SH' : '.SZ') : code;
   const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_MAINFINADATA&columns=ALL&filter=(SECUCODE%3D%22${secuCode}%22)&pageNumber=1&pageSize=100&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`;
   try {
-    const [r, r2] = await Promise.all([
+    const [r, r2, r3] = await Promise.all([
       fetch(url, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
       fetch(`https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_ORG_BASICINFO&columns=ALL&filter=(SECUCODE%3D%22${code}%22)&pageNumber=1&pageSize=1&source=HSF10&client=PC`, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
+      // v1.9.18 决策层：资产负债表接口（短债/货币资金/流动比/商誉/审计意见——财报全景判读用）
+      fetch(`https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_FINANCE_GBALANCE&columns=ALL&filter=(SECUCODE%3D%22${secuCode}%22)&pageNumber=1&pageSize=6&sortTypes=-1&sortColumns=REPORT_DATE&source=HSF10&client=PC`, { headers: { 'Referer': 'https://emweb.securities.eastmoney.com/', 'User-Agent': 'Mozilla/5.0 Chrome/126.0' } }),
     ]);
     const j = await r.json();
     let csrc = '';
     try { const j2 = await r2.json(); const b = (j2 && j2.result && j2.result.data) || []; csrc = (b[0] && b[0].CSRC_INDUSTRY_NAME) || ''; } catch (e2) {}
+    // v1.9.18：资产负债表（GBALANCE）——最新年报行 + 最新中报行（中报检测·卖出信号时效 2 年→6 个月）
+    let bal = {}, balH1 = {};
+    try {
+      const j3 = await r3.json(); const b3 = (j3 && j3.result && j3.result.data) || [];
+      const annualRow3 = b3.find(x => /12-31/.test(x.REPORT_DATE || '')) || b3[0] || {};
+      const h1Row = b3.find(x => /06-30/.test(x.REPORT_DATE || '')) || null;
+      const pick = (row) => ({
+        shortLoan: row.SHORT_LOAN != null ? parseFloat(row.SHORT_LOAN) / 1e8 : null,
+        monetaryFunds: row.MONETARYFUNDS != null ? parseFloat(row.MONETARYFUNDS) / 1e8 : null,
+        currentAssets: row.TOTAL_CURRENT_ASSETS != null ? parseFloat(row.TOTAL_CURRENT_ASSETS) / 1e8 : null,
+        currentLiab: row.TOTAL_CURRENT_LIAB != null ? parseFloat(row.TOTAL_CURRENT_LIAB) / 1e8 : null,
+        goodwill: row.GOODWILL != null ? parseFloat(row.GOODWILL) / 1e8 : null,
+        auditOpinion: row.OPINION_TYPE || null,
+        unassignProfit: row.UNASSIGN_RPOFIT != null ? parseFloat(row.UNASSIGN_RPOFIT) / 1e8 : null,
+        minorityEquity: row.MINORITY_EQUITY != null ? parseFloat(row.MINORITY_EQUITY) / 1e8 : null,
+        totalEquity: row.TOTAL_EQUITY != null ? parseFloat(row.TOTAL_EQUITY) / 1e8 : null,
+        totalAssets: row.TOTAL_ASSETS != null ? parseFloat(row.TOTAL_ASSETS) / 1e8 : null,
+        date: (row.REPORT_DATE || '').slice(0, 10),
+      });
+      bal = pick(annualRow3);
+      if (h1Row) balH1 = pick(h1Row);
+    } catch (e3) {}
     const rows = (j && j.result && j.result.data) || [];
     // 所有完整年报序列（接口降序 → 保持降序），全量保留（回放验收需 2018 年前数据，实测 pageSize=100 覆盖至 2006）
     const annuals = rows.filter(x => /12-31/.test(x.REPORT_DATE || '')).map(x => ({
@@ -1287,6 +1311,145 @@ function trapFilter({ netProfitYoY, payout, dy, p90Line, deductYoY, payoutHigh }
     return { level: 'hard', msg: `陷阱确认：${useDeduct ? '扣非' : '净利'}同比 ${trendYoY.toFixed(1)}% 下滑 + 支付率 ${(payout * 100).toFixed(0)}%（覆盖<2）` };
   }
   return { level: 'soft', msg: `观察：${useDeduct ? '扣非' : '净利'}同比 ${trendYoY.toFixed(1)}% 下滑（覆盖尚可，盯年报）` };
+}
+
+/* 行业校准信号包（2026-08-20 最终执行方案v2·持仓回测实证）
+ * 实证：银行 OCF/净利常年<0.5=特性（触发后+47%/+76%反向）；电信 S1 结构性下降（+34%~45%反向）
+ *      制造/消费 扣非+OCF+S1 有效（宇通 2017 双信号-37%）；S1 在制造/消费=单独硬红灯（35次-19.2pp）
+ * 输入：industry(csrc 行业)、最新年报财务（kf=扣非亿、kfPrev=上一年扣非、ocf=经营现金流亿、np=净利亿、
+ *       xsmll=毛利率%、xsmllPrev/xsmllPrev2=前两年、netProfitYoY=净利同比%、code）
+ * 输出：{ signals:[...], level:'hard'|'soft'|'watch'|null, msg }
+ *   hard=硬红灯（清仓）/ soft=软恶化（减半）/ watch=观察（单信号）/ null=干净
+ */
+/* 财报确认闸（2026-08-20 主人令：买卖必须依据财报——财报是买入的必要条件，价格只定时机）
+ * 硬闸（不过=禁止买入，即使 P95 触发）：
+ *   全行业：净利>0 / 扣非>0 / 扣非同比>-10%
+ *   制造/消费：OCF/净利≥0.5 / 毛利率连降S1 不过
+ *   银行/保险/电信：豁免 OCF/S1（行业特性，用净利+扣非趋势）
+ * 输出：{ pass, checks:[...] }
+ */
+function finConfirm({ industry, kf, kfPrev, ocf, np, xsmll, xsmllPrev, xsmllPrev2 }) {
+  const ind = (industry || '').toLowerCase();
+  const isManu = ind.includes('制造') || ind.includes('汽车') || ind.includes('机械') || ind.includes('电气') || ind.includes('家电');
+  const isConsumer = ind.includes('食品') || ind.includes('饮料') || ind.includes('消费') || ind.includes('农牧');
+  const isReal = isManu || isConsumer;
+  const checks = [];
+  let pass = true;
+  if (np != null && np <= 0) { pass = false; checks.push(`净利${np}亿为负`); }
+  if (kf != null && kf <= 0) { pass = false; checks.push(`扣非${kf}亿为负`); }
+  if (kf != null && kfPrev != null && kfPrev > 0) {
+    const yoy = kf / kfPrev - 1;
+    if (yoy < -0.1) { pass = false; checks.push(`扣非同比${(yoy * 100).toFixed(0)}%（恶化>10%）`); }
+  }
+  if (isReal) {
+    if (ocf != null && np != null && np > 0 && ocf / np < 0.5) { pass = false; checks.push(`OCF/净利${(ocf / np).toFixed(2)}（<0.5）`); }
+    if (xsmll != null && xsmllPrev != null && xsmllPrev2 != null &&
+        xsmll < xsmllPrev - 0.5 && xsmllPrev < xsmllPrev2 - 0.5) { pass = false; checks.push('毛利率连降(S1)'); }
+  }
+  return { pass, checks };
+}
+
+/* 标的分层（2026-08-20 大师最终方案 A-·实测验证）：
+ * 自动层（招行/工行/美的/宇通）：2年胜率 75% 平均+35.3% → 自动买卖信号
+ * 事件层（伊利/平安）：2年胜率 49% 中位-1.8%（历史任何买法都难赚，行业事件驱动测不到）
+ *   → 工具只做财报监控+风险提示，不自动给买卖信号，买入=人工事件判断，仓位≤10%
+ * 实测：B 行业强度过滤（60%→56%）、C 季度止损（57%→52%）、右侧买入（撞股灾）全部失败
+ */
+const TRADE_LAYER = {
+  '600036': 'auto', '601398': 'auto', '000333': 'auto', '600066': 'auto', '600941': 'auto',
+  '600887': 'event', '601318': 'event',
+};
+
+/* 买入触发配置（2026-08-20 全标的优化矩阵实验结论·主人令"工具明确提示买卖"）
+ * 每只最优组合（2年胜率优先）：冷却60日+档位定制+趋势确认+双闸
+ * 招行 p75 / 宇通 p95+趋势+双闸 / 伊利 p95+趋势 / 移动 p90 / 平安 p75 / 工行 p95+趋势 / 美的 p95+趋势
+ */
+const BUY_CFG = {
+  '600036': { minTier: 'p75' },                // 招行
+  '600066': { minTier: 'p95', trend: true, gate: true },  // 宇通
+  '600887': { minTier: 'p95', trend: true },   // 伊利
+  '600941': { minTier: 'p90' },                // 移动
+  '601318': { minTier: 'p75' },                // 平安
+  '601398': { minTier: 'p95', trend: true },   // 工行
+  '000333': { minTier: 'p95', trend: true },   // 美的
+};
+
+/* 买卖指令引擎（2026-08-20 主人令：工具明确提示买卖，不是数据报表）
+ * 输入：code、dy（当前股息率%）、tier（分位档 p75/p90/p95/null）、trendOk（趋势确认：非创新低）、
+ *       finOk（财报双闸过）、lastBuyDays（距上次买入触发天数，冷却60日）、industrySignals（行业校准信号结果）
+ * 输出：{ action, text, reason, evidence }
+ *   action: buy_heavy=重仓买 / buy_add=加仓买 / buy_probe=试探买 / hold=持有 / reduce=减半 / sell=清仓
+ * 优先级：卖出信号(hard/soft) > 买入触发(定制档位) > 持有
+ */
+function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals }) {
+  const cfg = BUY_CFG[code] || { minTier: 'p75' };
+  const lvl = { p75: 0, p90: 1, p95: 2 };
+  // 1. 卖出优先：行业校准信号（财报恶化=卖出主依据）
+  if (industrySignals && industrySignals.level === 'hard') {
+    return { action: 'sell', text: '🔴 卖出（清仓）', reason: industrySignals.msg, evidence: '财报硬红灯（行业校准）' };
+  }
+  if (industrySignals && industrySignals.level === 'soft') {
+    return { action: 'reduce', text: '🟠 卖出（减半）', reason: industrySignals.msg, evidence: '财报软恶化（行业校准）' };
+  }
+  // 2. 买入触发：财报确认（主依据·硬闸）→ 价格分位（定时机）
+  const minLvl = lvl[cfg.minTier];
+  const curLvl = tier ? lvl[tier] : -1;
+  if (tier && curLvl >= minLvl) {
+    // 财报确认硬闸：不过关=禁止买入（即使 P95）——主人令：买卖依据财报
+    if (finOk === false) {
+      return { action: 'hold', text: '❌ 禁止买入（财报不过关）', reason: `dy已到${tier.toUpperCase()}但财报确认失败：${(finChecks || []).join('；')}`, evidence: '财报确认闸（主依据）' };
+    }
+    // 冷却：距上次买入 <60 交易日 → 提示但不动
+    if (lastBuyDays != null && lastBuyDays < 60) {
+      return { action: 'hold', text: '🟡 持有（冷却中）', reason: `已触发${tier.toUpperCase()}但距上次买入仅${lastBuyDays}日（冷却60日）`, evidence: '冷却期' };
+    }
+    // 趋势确认（配置开启）
+    if (cfg.trend && !trendOk) {
+      return { action: 'hold', text: '🟡 等待（趋势未确认）', reason: `dy已到${tier.toUpperCase()}但仍在下跌通道（60日新低附近），等企稳`, evidence: '趋势确认' };
+    }
+    // 加严双闸（配置开启，宇通）
+    if (cfg.gate && !trendOk) {
+      return { action: 'hold', text: '🟡 等待（加严双闸）', reason: '宇通定制：需趋势确认+财报双闸全过', evidence: '宇通专属规则' };
+    }
+    if (tier === 'p95') return { action: 'buy_heavy', text: '✅ 买入（重仓档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P95`, evidence: '财报确认✅+价格P95' };
+    if (tier === 'p90') return { action: 'buy_add', text: '✅ 买入（加仓档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P90`, evidence: '财报确认✅+价格P90' };
+    return { action: 'buy_probe', text: '🟢 买入（试探档）', reason: `财报确认通过 + dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 P75`, evidence: '财报确认✅+价格P75' };
+  }
+  // 3. 默认持有
+  return { action: 'hold', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };
+}
+
+function assessIndustrySignals({ industry, code, kf, kfPrev, ocf, np, xsmll, xsmllPrev, xsmllPrev2, netProfitYoY }) {
+  const signals = [];
+  const ind = (industry || '').toLowerCase();
+  const isBank = ind.includes('银行') || ind.includes('货币金融');
+  const isInsurer = ind.includes('保险');
+  const isTelecom = ind.includes('电信') || ind.includes('移动') || ind.includes('通信');
+  const isManu = ind.includes('制造') || ind.includes('汽车') || ind.includes('机械') || ind.includes('电气') || ind.includes('家电');
+  const isConsumer = ind.includes('食品') || ind.includes('饮料') || ind.includes('消费') || ind.includes('农牧');
+  const isReal = isManu || isConsumer; // 校准信号全用的行业
+  if (isReal) {
+    if (kf != null && kf < 0) signals.push('扣非转负');
+    if (kf != null && kfPrev != null && kfPrev > 0 && kf < kfPrev * 0.95) signals.push('扣非下滑');
+    if (ocf != null && np != null && np > 0 && ocf / np < 0.5) signals.push(`OCF/净利${(ocf / np).toFixed(2)}`);
+    if (xsmll != null && xsmllPrev != null && xsmllPrev2 != null &&
+        xsmll < xsmllPrev - 0.5 && xsmllPrev < xsmllPrev2 - 0.5) signals.push('毛利率连降S1');
+  } else if (isBank) {
+    if (netProfitYoY != null && netProfitYoY < 5) signals.push(`净利增速低(${netProfitYoY.toFixed(0)}%)`);
+    if (netProfitYoY != null && netProfitYoY < 0) signals.push('净利转负');
+  } else if (isInsurer) {
+    if (netProfitYoY != null && netProfitYoY < 0) signals.push(`净利转负(${netProfitYoY.toFixed(0)}%)`);
+  } else if (isTelecom) {
+    if (netProfitYoY != null && netProfitYoY < 0) signals.push(`净利转负(${netProfitYoY.toFixed(0)}%)`);
+  }
+  // 分级：S1 在制造/消费=单独硬红灯（回测强有效）；宇通双信号=立即硬红灯（2017 -37% 实证）
+  const n = signals.length;
+  if (signals.includes('毛利率连降S1') && isReal) return { signals, level: 'hard', msg: `硬红灯：${signals.join('、')}（S1 回测35次-19.2pp强有效）` };
+  if (code === '600066' && n >= 2) return { signals, level: 'hard', msg: `硬红灯：${signals.join('、')}（宇通双信号已验证-37%，立即行动）` };
+  if (n >= 3) return { signals, level: 'hard', msg: `硬红灯：${signals.join('、')}（三共振）` };
+  if (n === 2) return { signals, level: 'soft', msg: `软恶化：${signals.join('、')}（双信号→减半观察）` };
+  if (n === 1) return { signals, level: 'watch', msg: `观察：${signals.join('、')}（单信号）` };
+  return { signals, level: null, msg: null };
 }
 
 function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, price, dy, pct, industry, roe, roeTrend, dividendCagr, code, netProfitYoY }) {
@@ -1593,6 +1756,7 @@ const TIER_LINE = {
   '601225': { name: '陕西煤业', ind: 'energy', p75: 8.37, p90: 9.6, p95: 10.11, p90_1y: 5.24, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, pending: false },
   '601288': { name: '农业银行', ind: 'bank', p75: 3.82, p90: 4.11, p95: 4.86, p90_1y: 3.04, cagr: 3.9, payout: 32, quality: '低增长', redLine: false, pending: false },
   '601318': { name: '中国平安', ind: 'insurer', p75: 3.56, p90: 3.89, p95: 4, p90_1y: 3.58, cagr: 3.7, payout: 35, quality: '低增长', redLine: false, pending: false },
+  '600066': { name: '宇通客车', ind: 'manufacture', p75: 6.06, p90: 6.66, p95: 7.41, p90_1y: 6.66, cagr: 15.2, payout: 45, quality: '高增长', redLine: false, pending: false, note: '周期股·2年持有窗口·双信号立即硬红灯(2017-37%)' },
   '601328': { name: '交通银行', ind: 'bank', p75: 4.08, p90: 4.38, p95: 4.84, p90_1y: 3.65, cagr: -4.5, payout: 31, quality: '负增长', redLine: false, pending: false },
   '601398': { name: '工商银行', ind: 'bank', p75: 3.89, p90: 4.21, p95: 4.37, p90_1y: 2.87, cagr: 0.7, payout: 31, quality: '低增长', redLine: false, pending: false },
   '601601': { name: '中国太保', ind: 'insurer', p75: 1.78, p90: 2.16, p95: 2.31, p90_1y: 2.14, cagr: 4.1, payout: 22, quality: '低增长', redLine: false, pending: false },
@@ -1708,7 +1872,7 @@ window.DL = {
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
   calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, computeZone, BENCH, roeBand,
-  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, sigNote, SIG_STATS, ddNote, MAX_DD,
+  reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD,
   /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
