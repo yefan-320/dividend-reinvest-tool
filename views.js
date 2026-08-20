@@ -1106,9 +1106,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           extra = Object.assign({ source: '研究数据 2026-08-18' }, window.REPORT_CARD_EXTRA[code]);
         }
         if (extra) renderReportCard(code, divs, kline, extra);
+        // M2（阶段3）：风险提示版体检卡（事实层/假设层三情景/结论层）——在报告卡后（extra 可用）
+        renderRiskCheck(code, divs, kline, extra);
       }
-      // M2（阶段3）：风险提示版体检卡（事实层触发器/假设层三情景/结论层空白=主人拍板）——在报告卡后（F10 extra 可用）
-      renderRiskCheck(code, divs, kline, extra);
       // v1.9.6：决策摘要区（买入结论行+关键三数）
       renderDecisionSummary(code, divs, kline);
       // 分红节奏
