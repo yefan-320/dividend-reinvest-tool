@@ -854,6 +854,42 @@ function classifyTier(code) {
   return { cls, ...base, profile };
 }
 
+/* M5 分红预测引擎（决策点4·阶段3·2026-08-20 落地）
+ * 三情景 DPS 区间：输入=历史分红序列+覆盖率+周期定位；输出=保守/中性/乐观 DPS+股息率
+ * 方法（宇通研究同源）：
+ *   乐观 = 最近年度 DPS（近1年派息能力）
+ *   中性 = 近7年周期均值 DPS（周期真锤）
+ *   保守 = 近10年周期均值 DPS（含底部年份，周期底锚）
+ * 注：数据不足（<3年）→ 只给最近年度，不假装有区间（8/18 原则）
+ */
+function divForecast(divs, price) {
+  if (!divs || !divs.length) return null;
+  const ys = {};
+  divs.forEach(d => {
+    if (d.pending || !(d.dps > 0) || !d.ex) return;
+    const y = d.ex.slice(0, 4);
+    ys[y] = (ys[y] || 0) + d.dps;
+  });
+  const years = Object.keys(ys).sort();
+  if (years.length < 1) return null;
+  const lastY = years[years.length - 1];
+  const lastDps = ys[lastY];
+  const avg = (arr) => arr.reduce((s, v) => s + v, 0) / arr.length;
+  const last10 = years.slice(-10).map(y => ys[y]);
+  const last7 = years.slice(-7).map(y => ys[y]);
+  const base = avg(last10);        // 保守：十年周期均值（含底部）
+  const mid = avg(last7);         // 中性：七年周期均值
+  const opt = lastDps;            // 乐观：最近年度实际派息
+  const p = price > 0 ? price : null;
+  const fmt = v => v.toFixed(2) + ' 元' + (p ? `（股息率 ${(v / p * 100).toFixed(1)}%）` : '');
+  return {
+    years: { last: lastY, n: years.length },
+    dps: { conservative: +base.toFixed(2), base: +mid.toFixed(2), optimistic: +opt.toFixed(2) },
+    text: { conservative: fmt(base), base: fmt(mid), optimistic: fmt(opt) },
+    note: years.length < 7 ? '数据不足7年：区间参考性弱，仅展示最近年度派息' : null
+  };
+}
+
 /* v1.9.3：未来分红到账预测（已宣告 + 上年同期估计）
  * 输入 divs（已 parse）, holdings { code: shares }, todayStr 'YYYY-MM-DD', monthsN（默认12）
  * 返回 [{ month:'YYYY-MM', total, items:[{ code, name, ex, dps, shares, est(是否估计) }] }] 按月份升序
@@ -1454,7 +1490,7 @@ const BUY_CFG = {
  *   4. 等级=风险提示+建议强度，最终动作主人拍板
  */
 const P95_TRIGGERS = {  // 个股 P95 线历史触发次数（脚本 scripts/refresh-p95-triggers.js 自动刷新；口径=TIER_LINE.p95+TREASURY_NOW 绝对线，zoneEvents 连续段首日）
-  '600036': 20, '600066': 1, '600887': 1, '600941': 1, '601318': 0, '601398': 20, '000333': 2,
+  '600036': 20, '600066': 3, '600887': 1, '600941': 3, '601318': 0, '601398': 20, '000333': 2,
 };
 function indKeyOf(industry) {
   const t = (industry || '').toLowerCase();
@@ -2033,7 +2069,7 @@ window.DL = {
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
-  calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS,
+  calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS, divForecast,
   calcFutureCashflow,
   /* v1.9.6 新增：结论行规则树 */
   divTrendBadAt, coverageAt, ruleVerdict, RULE_STATS, RULE_TIER_LABEL,

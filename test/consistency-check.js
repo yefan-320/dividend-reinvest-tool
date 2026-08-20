@@ -19,16 +19,28 @@ function chk(name, cond, detail) {
 }
 
 (async () => {
-  // 1. 缓存版本号
+  // 0. 缓存加载（顶层供后续检查复用）
+  let cache = null;
   try {
-    const c = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
-    chk('缓存版本号存在(_version)', c._version != null, '未找到 _version');
+    cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+    chk('缓存版本号存在(_version)', cache._version != null, '未找到 _version');
   } catch (e) { chk('缓存可读', false, e.message); }
 
   // 2. TIER_LINE 行业映射（ind 字段已是 SIG_STATS key；manufacture 特例→consumer）
   const TL2IND = { manufacture: 'consumer', telecom: 'telecom' };
   const unmapped = Object.entries(DL.TIER_LINE || {}).filter(([, v]) => !DL.SIG_STATS[TL2IND[v.ind] || v.ind]).map(([c]) => c);
   chk('TIER_LINE 行业全部可映射', unmapped.length === 0, unmapped.join(','));
+  // 2b. 分红单位校验（2026-08-20 抓 bug：宇通/移动缓存=每10股未除10 → 2025归组>10 即异常）
+  // 注意：茅台 27.6 元/股是真实每股（每10股派276），不是 bug——仅当 10<dps<100 且近3年比值骤变才报警
+  const badUnit = Object.keys(DL.TIER_LINE || {}).filter(c => {
+    const divs = (cache[c + ':d'] || []).filter(d => d.report && d.report.startsWith('2025'));
+    const y2025 = divs.reduce((s, d) => s + (d.dps || 0), 0);
+    if (!(y2025 > 10 && y2025 < 100)) return false;   // 真实每股>10（茅台型）不报警
+    const hist = (cache[c + ':d'] || []).filter(d => d.report && (d.report.startsWith('2023') || d.report.startsWith('2024')));
+    const yHist = hist.reduce((s, d) => s + (d.dps || 0), 0) / Math.max(1, new Set(hist.map(d => d.report.slice(0, 4))).size);
+    return y2025 > yHist * 5;   // 2025 突变为历史 5 倍以上 = 单位翻倍嫌疑
+  });
+  chk('分红单位正确（2025归组无10倍突变）', badUnit.length === 0, badUnit.join(','));
 
   // 3. P95_TRIGGERS 覆盖 BUY_CFG
   const missing = Object.keys(DL.BUY_CFG || {}).filter(c => DL.P95_TRIGGERS[c] == null);
