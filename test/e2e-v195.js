@@ -112,13 +112,13 @@ async function main() {
     const lastIdx = opt.xAxis[0].data.length - 1;
     return fmt([{ dataIndex: lastIdx }]);
   })()`);
-  check('tooltip 含"滚动 366 天 TTM"', tip.includes('滚动 366 天 TTM'), tip.replace(/<[^>]+>/g, ''));
+  check('tooltip 含“前瞻口径·公告即算”', tip.includes('前瞻口径'), tip.replace(/<[^>]+>/g, ''));
   check('tooltip 无"平滑"字样', !tip.includes('平滑'), tip.replace(/<[^>]+>/g, ''));
 
-  // 2. 带状图 note 口径标注（v1.9.16：口径统一为 TTM 滚动——旧“逐年滚动”已废弃）
-  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('TTM滚动口径')`);
+  // 2. 带状图 note 口径标注（v1.9.27：前瞻口径——公告即算含未派发，主人钦定）
+  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('前瞻口径')`);
   const noteTxt = await evalJS(`document.getElementById('diagYieldNote').textContent`);
-  check('带状图 note 含口径标注（TTM滚动+年化近2财年）', note && noteTxt.includes('TTM滚动口径') && noteTxt.includes('年化近2财年'), noteTxt.slice(0, 80));
+  check('带状图 note 含口径标注（前瞻+年化近2财年）', note && noteTxt.includes('前瞻口径') && noteTxt.includes('年化近2财年'), noteTxt.slice(0, 80));
   check('带状图 note 无旧“逐年滚动”字样', !noteTxt.includes('逐年滚动'), noteTxt.slice(0, 80));
 
   // 3. diagStats 年化口径标注

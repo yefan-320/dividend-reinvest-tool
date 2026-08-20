@@ -1318,7 +1318,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const markAreas = tiers2.slice(0, -1).map((t, i) => [{ yAxis: t, itemStyle: { color: 'rgba(217,164,65,.10)' } }, { yAxis: tiers2[i + 1] }]);
         chart.setOption({
           backgroundColor: 'transparent',
-          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 股息率 <b>${x.dy.toFixed(2)}%</b>（滚动 366 天 TTM）`; } },
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 12 }, formatter: p => { const x = valid[p[0].dataIndex]; return `<b>${x.d}</b><br/>分位 <b>${x.pct.toFixed(0)}%</b> · 股息率 <b>${x.dy.toFixed(2)}%</b>（前瞻口径·公告即算）`; } },
           grid: { left: 44, right: 14, top: 24, bottom: 26 },
           xAxis: { type: 'category', data: valid.map(x => x.d), axisLine: { lineStyle: { color: '#3a4f46' } }, axisLabel: { color: '#8fa69c', fontSize: 10 } },
           yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { lineStyle: { color: '#22322c' } } },
