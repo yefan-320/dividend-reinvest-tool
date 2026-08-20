@@ -23,6 +23,10 @@ const fmtPct = (n, d = 2) => (n == null ? '—' : (n * 100).toFixed(d) + '%');
  * 禁止再引入其他选择器风格（如 jQuery $ 语义、querySelector 混用）——$ bug 就是风格混用 9 轮未暴露的教训 */
 const $ = id => document.getElementById(String(id).replace(/^#/, ''));
 const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+/* P111/P123（2026-08-21）：本地日期工具——全站禁用 toISOString 截日期（UTC 差一天，深夜 0-8 点起点变昨天） */
+const fmtDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const fmtMonth = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return fmtDate(d); };
 
 /* ---------- 限流队列（串行 + 间隔 + 重试指数退避；腾讯/东财时间窗口型限流应对 P2-19） ---------- */
 class RateLimitedQueue {
@@ -129,6 +133,35 @@ async function cacheGetFresh(key, ttl) {
   if (!hit) return null;
   if (Date.now() - hit.ts > ttl) return null;   // 过期
   return hit;
+}
+
+/* W10（2026-08-21）：数据源状态记录——渲染层徽章三态（实时 net/缓存 cache/降级 fallback）
+ * 不改返回结构（下游大量依赖），独立日志表供徽章读取 */
+const _srcLog = {};
+function srcMark(key, s) { _srcLog[key] = { s, ts: Date.now() }; }
+function srcOf(key) { const v = _srcLog[key]; return v || null; }
+
+/* P39（2026-08-21）：IndexedDB 缓存卫生——>7天 且 >50MB 才 prune（防误删高频小缓存），
+ * 删除 7 天前写入的 key（30 天访问 key 保留策略：ts=写入时间，保留近 7 天；高频 key 会持续刷新 ts） */
+async function cachePrune() {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE, 'readonly');
+    const store = tx.objectStore(STORE);
+    const entries = await new Promise((res, rej) => {
+      const out = [];
+      const cur = store.openCursor();
+      cur.onsuccess = () => { const c = cur.result; if (c) { out.push({ key: c.key, val: c.value }); c.continue(); } else res(out); };
+      cur.onerror = () => rej(cur.error);
+    });
+    if (!entries.length) return;
+    const total = entries.reduce((s, e) => s + JSON.stringify(e.val).length, 0);
+    if (total < 50 * 1024 * 1024) return;   // <50MB 不动
+    const now = Date.now();
+    const delTx = db.transaction(STORE, 'readwrite');
+    entries.forEach(e => { const ts = (e.val && e.val.ts) || 0; if (now - ts > 7 * 86400000) delTx.objectStore(STORE).delete(e.key); });
+    await new Promise((res, rej) => { delTx.oncomplete = res; delTx.onerror = () => rej(delTx.error); });
+  } catch (e) { /* 卫生清理失败不影响主流程 */ }
 }
 
 /* ---------- 代码/市场映射 ---------- */
@@ -286,6 +319,7 @@ async function fetchDividendsOne(code) {
   const out = dedupDividends(parseDivs(rows));
   const cleaned = sanitizeDividends(code, out);   // 2026-08-21 清洗层三级（大师裁决 B）
   cacheSet('dv:' + code, { ts: Date.now(), data: cleaned });   // P2-30: 供除权日缓存失效检查
+  srcMark(code + ':div', 'net');   // W10：实时拉取成功
   return cleaned;
 }
 
@@ -399,7 +433,7 @@ async function fetchKlineTx(txPrefix, start, end) {
   while (cur < end && guard++ < 12) {
     const d0 = new Date(cur);
     const segEnd = new Date(Date.UTC(d0.getUTCFullYear() + 2, d0.getUTCMonth() + 6, d0.getUTCDate()));
-    const endStr = segEnd > new Date(end) ? end : segEnd.toISOString().slice(0, 10);
+    const endStr = segEnd > new Date(end) ? end : fmtDate(segEnd);
     // v1.7.2: 必须用不复权(真实价)K线！回测模型自带分红复投，前复权价已折算分红 → 双重计算虚高
     // 实测：2016-08-16 真实价 18.31 vs qfq 4.419（差 4 倍）；qfq 导致持股/总资产/累计投入全部虚高
     const url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + txPrefix + ',day,' + cur + ',' + endStr + ',800,';
@@ -412,7 +446,7 @@ async function fetchKlineTx(txPrefix, start, end) {
     if (!rows.length) {
       // v1.8.2 修复：上市晚的标的（515080 2019 上市），起点前段为空 → 跳过该段继续，不提前终止（曾致 10 年周期下无数据）
       const nd = new Date(segEnd); nd.setDate(nd.getDate() + 1);
-      cur = nd.toISOString().slice(0, 10);
+      cur = fmtDate(nd);
       continue;
     }
     rows.forEach(r => { map[r[0]] = parseFloat(r[2]); });
@@ -422,7 +456,7 @@ async function fetchKlineTx(txPrefix, start, end) {
     if (last === prevLast) break;
     prevLast = last;
     const nd = new Date(last); nd.setDate(nd.getDate() + 1);
-    cur = nd.toISOString().slice(0, 10);
+    cur = fmtDate(nd);
   }
   return map;
 }
@@ -445,12 +479,13 @@ async function getKline(code, start, end, market) {
     }
   } catch (e) { }
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.kline);
-  if (hit) return hit.data;
+  if (hit) { srcMark(code + ':k', 'cache'); return hit.data; }
   const g = guessSec(code, market);
   let m = {};
   try { m = await fetchKlineTx(g.tx, start, end); } catch (e) { }
   if (!Object.keys(m).length) { try { m = await fetchKlineSina(g.tx); } catch (e) { } }
-  if (Object.keys(m).length) await cacheSet(key, { ts: Date.now(), data: m });
+  if (Object.keys(m).length) { await cacheSet(key, { ts: Date.now(), data: m }); srcMark(code + ':k', 'net'); }
+  else { srcMark(code + ':k', 'fallback'); }
   return m;
 }
 
@@ -490,10 +525,11 @@ async function getStockQuotes(codes) {
   if (!codes.length) return {};
   const key = 'qt:' + codes.join(',');
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.snapshot);
-  if (hit) return hit.data;
+  if (hit) { srcMark('qt:' + codes.join(','), 'cache'); return hit.data; }
   let out = {};
   try { out = await txQueue.push(() => loadQtQuotes(codes)); } catch (e) { }
-  if (Object.keys(out).length) await cacheSet(key, { ts: Date.now(), data: out });
+  if (Object.keys(out).length) { await cacheSet(key, { ts: Date.now(), data: out }); srcMark('qt:' + codes.join(','), 'net'); }
+  else { srcMark('qt:' + codes.join(','), 'fallback'); }
   return out;
 }
 
@@ -977,12 +1013,12 @@ function calcFutureCashflow(divs, holdings, todayStr, monthsN) {
     const estEx = new Date(exY.getTime() + 365 * 86400000);
     if (estEx <= today || estEx > horizon) return;
     // 若该 code 已有宣告落在同年份估计月附近（±1月），跳过防重复
-    const m = estEx.toISOString().slice(0, 7);
+    const m = fmtMonth(estEx);
     const code = d.code;
     const shares = (holdings && holdings[code]) || 0;
     const dup = (byMonth[m] || []).some(x => x.code === code && !x.est);
     if (dup) return;
-    push(m, { code, name: d.name, ex: estEx.toISOString().slice(0, 10), dps: d.dps, shares, est: true });
+    push(m, { code, name: d.name, ex: fmtDate(estEx), dps: d.dps, shares, est: true });
   });
   const out = Object.keys(byMonth).sort().map(m => {
     const items = byMonth[m].sort((a, b) => a.ex < b.ex ? -1 : 1);
@@ -1318,7 +1354,7 @@ async function fetchF10Annual(code, tryN = 1) {
   const hit = _f10Cache.get(key);
   // P7（2026-08-18）：财报季感知 TTL——4 月（年报集中披露）/8 月（中报）缩到 1 天，其余 7 天（防陷阱预警用旧数据延迟一周）
   const _f10TtlMs = (() => { const m = new Date().getMonth() + 1; return (m === 4 || m === 8) ? 24 * 3600 * 1000 : 7 * 24 * 3600 * 1000; })();
-  if (hit && Date.now() - hit.ts < _f10TtlMs) return Object.assign({ cached: true, cachedAt: new Date(hit.ts).toISOString().slice(0, 10) }, hit.data);
+  if (hit && Date.now() - hit.ts < _f10TtlMs) return Object.assign({ cached: true, cachedAt: fmtDate(new Date(hit.ts)) }, hit.data);
   // v1.9.17 修复：SECUCODE 需要带交易所后缀（600066.SH / 000333.SZ），纯数字 code 直接过滤会拿不到数据（既有 bug：
   // 报告卡 F10 一直静默失败靠静态数据兜底；6 开头=沪.SH，0/3 开头=深.SZ）
   const secuCode = /^\d+$/.test(code) ? code + (/^6/.test(code) ? '.SH' : '.SZ') : code;
@@ -2128,7 +2164,7 @@ function sellSignalQuick(divs) {
 
 /* ---------- 对外导出 ---------- */
 window.DL = {
-  CALIB, fmt, fmtPct, $, todayStr, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
+  CALIB, fmt, fmtPct, $, todayStr, fmtDate, fmtMonth, daysAgo, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
   fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield,
   tierSpot, sellSignalQuick, sellFuse, TIER_LINE,
@@ -2142,6 +2178,10 @@ window.DL = {
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
   /* v1.9.1 新增：生态判定/起建线偏移/分位事件 */
   calcEcoType, findZoneEvents,
+  /* P39（2026-08-21）：缓存卫生 */
+  cachePrune,
+  /* W10（2026-08-21）：数据源状态 */
+  srcMark, srcOf,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
   calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS, divForecast,
   calcFutureCashflow,

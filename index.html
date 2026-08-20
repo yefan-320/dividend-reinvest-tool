@@ -7,6 +7,11 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
 <script src="vendor/echarts.min.js"></script>
 <script>
+/* W5（2026-08-21）：echarts 备用改为 CDN 备源（原 document.write 写同路径=404 时备用失效）
+ * 页面解析期执行，不产生文本节点，密码锁页首屏不受影响 */
+window.echarts || document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"><\/script>');
+</script>
+<script>
 /* O1：报告卡研究数据（2026-08-18 东财F10 2025年报 + 腾讯实时价）——F10 自动接入后删除 */
 window.REPORT_CARD_EXTRA = {
   '600036': { industry: 'bank', roe: 13.44, roeTrend: -3, netProfit: 1501.81, eps: 5.70, reserve: 26.9551, period: '2025年报' },
@@ -18,10 +23,6 @@ window.REPORT_CARD_EXTRA = {
 };
 </script>
 
-if (typeof echarts === 'undefined') {
-  document.write('<script src="vendor/echarts.min.js"><\/script>');
-}
-</script>
 <style>
 :root{
   --bg:#0e1412; --card:#16211d; --card2:#1b2a25; --line:#2a3d36;
@@ -210,7 +211,7 @@ body{padding-bottom:64px}
     <div id="homeWatchlist"></div>
   </div>
   <div class="card">
-    <h2>📅 分红到账日历（未来12个月，估=上年同期推算）</h2>
+    <h2>📅 分红到账日历（税前 · 未来12个月，估=上年同期推算）</h2>
     <div id="homeDivCalendar"></div>
   </div>
   <div class="card" id="pfSample"></div>
@@ -403,7 +404,7 @@ body{padding-bottom:64px}
   </div>
   <div class="btnrow">
     <button class="btn" id="btnRun">▶ 回测（联网拉最新数据）</button>
-    <button class="btn ghost" id="btnDemo">用招行演示数据</button>
+    <button class="btn ghost" id="btnDemo">离线演示（仅招行，不联网）</button>
   </div>
   <div class="status" id="status">页面加载中…</div>
 </div>
@@ -486,12 +487,12 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.27"></script>
+<script src="demo-data.js?v=v1.9.28"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v1.9.27"></script>
+<script src="data-layer.js?v=v1.9.28"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.27';
+const APP_VERSION = 'v1.9.28';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1061,12 +1062,12 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
           hint.textContent = '✅ ' + code + ' → ' + name;
           hint.className = 'hint ok';
           $('btnDemo').textContent = (code === '600036')
-            ? '⚡ 用招商银行演示数据（离线）'
-            : '🌐 查询 ' + name + '（联网）';
+            ? '⚡ 离线演示（招行）'
+            : '🌐 联网查询 ' + name;
         }else{
           hint.textContent = '⚠️ 未找到 ' + code + '，请检查是否为 6 位 A 股代码';
           hint.className = 'hint err';
-          $('btnDemo').textContent = '用招行演示数据';
+          $('btnDemo').textContent = '离线演示（仅招行）';
         }
       }, 500);
       return;
@@ -1084,11 +1085,11 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
           if(hit && hit.Code && /^\d{6}$/.test(hit.Code)){
             hint.textContent = '✅ ' + code + ' → ' + hit.Name + '（' + hit.Code + '）';
             hint.className = 'hint ok';
-            $('btnDemo').textContent = '🌐 查询 ' + hit.Name + '（联网）';
+            $('btnDemo').textContent = '🌐 联网查询 ' + hit.Name;
           }else{
             hint.textContent = '⚠️ 未找到「' + code + '」，请输入 6 位代码或正确名称';
             hint.className = 'hint err';
-            $('btnDemo').textContent = '用招行演示数据';
+            $('btnDemo').textContent = '离线演示（仅招行）';
           }
         }catch(e){
           hint.textContent = '⚠️ 名称解析失败（网络？），可直接点回测重试';
@@ -1122,7 +1123,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   if(parseFloat(p)>0) $('principal').value = p;
   const today = new Date();
   if(d && /^\d{4}-\d{2}-\d{2}$/.test(d)) $('buyDate').value = d;
-  else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = today.toISOString().slice(0,10); }
+  else { today.setFullYear(today.getFullYear()-10); $('buyDate').value = DL.fmtDate(today); }
   if(r!=null) $('reinvest').checked = (r !== '0');
   const m = params.get('m') || savedM;
   if(m && parseFloat(m)>=0) $('monthly').value = m;
@@ -1152,7 +1153,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
       if(b.dataset.y){
         const t = new Date();
         t.setFullYear(t.getFullYear() - parseInt(b.dataset.y,10));
-        $('buyDate').value = t.toISOString().slice(0,10);
+        $('buyDate').value = DL.fmtDate(t);
       }
       if(b.dataset.m !== undefined){
         $('monthly').value = b.dataset.m;
@@ -1166,7 +1167,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
           if(/^\d{6}$/.test(code)){
             const t = new Date();
             t.setFullYear(t.getFullYear() - 25);   // 拉 25 年找最早
-            DL.getKline(code, t.toISOString().slice(0,10), DL.todayStr()).then(k=>{
+            DL.getKline(code, DL.fmtDate(t), DL.todayStr()).then(k=>{
               const ds = Object.keys(k).sort();
               if(ds.length){ $('buyDate').value = ds[0]; saveParams(); }
             });
@@ -1185,9 +1186,12 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
 
   $('btnRun').onclick = ()=> run('live');
   $('btnDemo').onclick = ()=>{
-    // 输入其他代码时，演示按钮 = 联网查询；招行则用内置离线数据
+    /* P120（2026-08-21）：演示按钮名实相符——离线仅招行；非招行点击=提示确认后联网（诚实条款） */
     const code = $('code').value.trim();
-    if(/^\d{6}$/.test(code) && code !== '600036') return run('live');
+    if(/^\d{6}$/.test(code) && code !== '600036'){
+      if(!confirm('离线演示仅支持招商银行（内置数据）。当前将联网查询 ' + code + '，继续？')) return;
+      return run('live');
+    }
     return run('demo');
   };
   // 版本号
@@ -1211,6 +1215,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.27"></script>
+<script src="views.js?v=v1.9.28"></script>
 </body>
 </html>

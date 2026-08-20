@@ -404,8 +404,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   async function renderOpportunities() {
     const el = $('#homeOpportunities');
     if (!el) return;
+    try {   /* W6：错误组件包裹 */
     const wl = homeState.watchlist;
-    if (!wl.length) { el.innerHTML = '<div class="hint">暂无自选股。添加自选后，这里显示三档机会雷达+股息率/估值变化提醒。</div>'; return; }
+    if (!wl.length) { el.innerHTML = '<div class="hint">🔍 暂无自选股。在上方搜索框输入 6 位代码 → 点 ➕ 加自选，这里就会显示三档机会雷达+股息率/估值变化提醒。</div>'; return; }
     el.innerHTML = '<div class="hint">加载中…</div>';
     const snap = await DL.getStockQuotes(wl.map(x => x.code));
     homeState.snap = snap;
@@ -449,22 +450,17 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     html += alerts.length
       ? alerts.map(a => `<div class="alert-item">🔔 ${a}</div>`).join('')
       : '<div class="hint">✅ 变化提醒：自选股状态稳定（股息率/价格无显著变化）</div>';
-    /* 首页速览增强（UI 待办）：今日触发/买点命中——读 watch 最近报告 */
-    try {
-      const wr = await fetch('/tmp/watch-report.json').then(r => r.json()).catch(() => null);
-      if (wr && Array.isArray(wr.changes) && wr.changes.length) {
-        html += `<div class="alert-item" style="border-color:#4caf7d">📡 监测触发（${wr.ts.slice(0, 16).replace('T', ' ')}）：${wr.changes.slice(0, 5).map(c => `${c.name} ${c.verdict}（dy ${c.dy != null ? c.dy.toFixed(2) + '%' : '—'}）`).join('；')}</div>`;
-      }
-      if (wr && wr.regime) html += `<div class="alert-item">🌡️ ${wr.regime.level}：${wr.regime.note}</div>`;
-      if (wr && wr.rateShift) html += `<div class="alert-item">🔄 ${wr.rateShift}</div>`;
-    } catch (e) {}
+    /* P99/J1（2026-08-21）：删线上假功能——/tmp/watch-report.json 是本地开发残留，GitHub Pages 必 404。
+     * 诚实条款：无真实能力不显示占位。今日触发/买点命中并入 B4 今日变化条（K8）。 */
     el.innerHTML = html;
+    } catch (e) { showLoadError(el, '机会雷达加载失败' + (e && e.message ? '：' + e.message : ''), renderOpportunities); }
   }
 
   /* 自选卡片：默认3指标（股息率+分位、估值分位、年化/回撤合并）+ 展开态 */
   async function renderWatchlist() {
     const el = $('#homeWatchlist');
     if (!el) return;
+    try {   /* W6：错误组件包裹 */
     const wl = homeState.watchlist;
     if (!wl.length) {
       // P2-28: 优先用扫描器最近结果（动态），无缓存回落硬编码预设
@@ -563,19 +559,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         renderHome();
       };
     });
+    } catch (e) { showLoadError(el, '自选卡加载失败' + (e && e.message ? '：' + e.message : ''), renderWatchlist); }
   }
 
   /* 分红到账日历 v1.9.3：自选未来12个月（已宣告+上年同期估计，月度汇总+持仓金额）
-   * 持仓股数可填（divtool_holdings_{code}），未填只显示每股合计 */
+   * 持仓股数可填（P114：v1 真源，录入在决策台「📊 我的持仓」），未填只显示每股合计 */
   async function renderDivCalendar() {
     const el = $('#homeDivCalendar');
     if (!el) return;
     const wl = homeState.watchlist;
-    if (!wl.length) { el.innerHTML = '<div class="hint">还没有自选。添加自选后，这里显示未来 12 个月的分红到账日历（已宣告+上年同期估算）。</div>'; return; }
+    if (!wl.length) { el.innerHTML = '<div class="hint">📅 还没有自选。在上方搜索框输入 6 位代码 → 点 ➕ 加自选，这里显示未来 12 个月的分红到账日历（已宣告+上年同期估算）。</div>'; return; }
     el.innerHTML = '<div class="hint">分红日历加载中…</div>';
     const today = DL.todayStr();
     let holdings = {};
-    try { holdings = JSON.parse(localStorage.getItem('divtool_holdings') || '{}'); } catch (e) {}
+    /* P114（2026-08-21）：F2 第 0 步——分红日历改读 v1 真源（数组→映射） */
+    try { holdings = Object.fromEntries(loadHoldings().map(h => [h.code, h.shares])); } catch (e) {}
     const allDivs = [];
     const names = {};
     const cagrs = [];   // E3：自选分红 CAGR 收集（保守口径）
@@ -627,8 +625,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>`;
     } catch (e) {}
     const targetInput = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span style="font-size:11px;color:var(--muted)">每年目标分红（万）：</span><input id="divtoolTargetInput" type="number" min="0" placeholder="如 20" value="${target ? (target / 10000).toFixed(1) : ''}" style="width:70px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divtoolTargetSave">💾 保存</button></div>`;
-    // 持仓管理行
-    const holdInput = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><span style="font-size:11px;color:var(--muted)">持仓股数：</span><input id="divtoolHoldInput" type="text" placeholder="600036:5000, 601398:20000（代码:股数，逗号分隔）" value="${Object.entries(holdings).map(([c, s]) => c + ':' + s).join(', ')}" style="flex:1;min-width:0;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divtoolHoldSave">💾 保存</button></div><div style="font-size:10px;color:var(--muted);margin:-4px 0 6px">格式：代码:股数，逗号分隔（如 600036:5000）——填了才能算到账金额</div>`;
+    /* P106（2026-08-21）：K3 单一录入入口——旧 divtoolHoldInput 已删，持仓只认决策台 v1 表单（#pfSample） */
     const rows = cf.map(m => {
       const hasAmt = m.items.some(x => x.shares > 0);
       const amt = hasAmt ? m.items.reduce((s, x) => s + x.dps * x.shares, 0) : 0;
@@ -676,8 +673,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const etfRefId = 'divLifeEtf';
     const lifeHtml = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
       <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 年报 · D12 消费覆盖 · E2 追加 · E3 里程碑 · D11 ETF 参照）</summary>
-        <div style="font-size:11px;color:var(--sub);margin:6px 0 4px">📅 近 ${Math.min(6, years.length)} 年实际分红收入（需填持仓股数）：</div>
-        <div>${yearRows || '<span class="hint">填写上方持仓股数后显示历史分红收入</span>'}</div>
+        <div style="font-size:11px;color:var(--sub);margin:6px 0 4px">📅 近 ${Math.min(6, years.length)} 年实际分红收入（需在决策台录入持仓）：</div>
+        <div>${yearRows || '<span class="hint">到决策台「📊 我的持仓」录入后显示历史分红收入</span>'}</div>
         <div style="font-size:11px;margin-top:6px">🚀 分红里程碑：${doubleY ? `按近 3 年分红增速 ${(avgCagr * 100).toFixed(1)}% 持续（保守口径），月分红翻倍还需约 <b>${doubleY.toFixed(0)} 年</b>` : '<span class="hint">自选样本不足，无法估算增速（分红不增长时永远不翻倍）</span>'}</div>
         <div id="${etfRefId}" style="font-size:11px;margin-top:4px"><span class="hint">红利 ETF 参照加载中…</span></div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">月生活支出（元）：</span><input id="divLifeExp" type="number" min="0" placeholder="如 15000" value="${expDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeExpSave">💾 算覆盖</button></div>
@@ -694,18 +691,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <div style="font-size:10px;color:var(--muted);margin-top:2px">导出=自选/持仓/决策日志/目标/支出/设置（JSON 带版本号，本地文件不上传）</div>
       </details>
     </div>`;
-    el.innerHTML = `${holdInput}${targetInput}${targetHtml}${comboHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
-    const saveBtn = $('#divtoolHoldSave');
-    if (saveBtn) saveBtn.onclick = () => {
-      const v = ($('#divtoolHoldInput') || {}).value || '';
-      const h = {};
-      v.split(',').forEach(part => {
-        const m = part.trim().match(/^(\d{6})\s*[:：]\s*(\d+)$/);
-        if (m) h[m[1]] = parseInt(m[2], 10);
-      });
-      try { localStorage.setItem('divtool_holdings', JSON.stringify(h)); } catch (e) {}
-      renderDivCalendar();
-    };
+    el.innerHTML = `${targetInput}${targetHtml}${comboHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告；持仓股数以决策台「📊 我的持仓」为准）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
     const tSave = $('#divtoolTargetSave');
     if (tSave) tSave.onclick = () => {
       const v = parseFloat(($('#divtoolTargetInput') || {}).value || '0') || 0;
@@ -731,13 +717,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       try { const h = document.querySelector('[data-tab="home"]'); if (h) h.click(); const d = $('#btnDiscover'); if (d) d.click(); } catch (e) {}
     };
     // P2 F3：多设备数据迁移（导出/导入 JSON 带版本号）
+    /* P41/P44（2026-08-21）：导出 v2 四件套——持仓/自选（含快照）/决策日志/设置；读写 v1 真源，旧 key 只兼容读不互写 */
     const exBtn = $('#divLifeExport');
     if (exBtn) exBtn.onclick = () => {
       try {
         const data = {
-          v: 1, app: 'dividend-tool', exportedAt: DL.todayStr(),
-          watchlist: wl.map(w => ({ code: w.code, name: w.name || '' })),
-          holdings: (() => { try { return JSON.parse(localStorage.getItem('divtool_holdings') || '{}'); } catch (e) { return {}; } })(),
+          v: 2, app: 'dividend-tool', exportedAt: DL.todayStr(),
+          watchlist: wl.map(w => ({ code: w.code, name: w.name || '', snapshot: w.snapshot || null })),
+          holdings: loadHoldings(),
           decisions: decLog(),
           target: localStorage.getItem('divtool_div_target') || '',
           monthlyExp: localStorage.getItem('divtool_monthly_exp') || '',
@@ -750,19 +737,40 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     };
     const imBtn = $('#divLifeImport'), imFile = $('#divLifeImportFile');
     if (imBtn) imBtn.onclick = () => { if (imFile) imFile.click(); };
+    /* P43（2026-08-21）：导入三保险——覆盖确认 → 导入前 bak（divtool_bak_before_import）→ 失败自动回滚 */
     if (imFile) imFile.onchange = async (e) => {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       try {
         const data = JSON.parse(await file.text());
-        if (!data || data.v !== 1 || data.app !== 'dividend-tool') { try { toast('文件版本不兼容'); } catch (e2) {} return; }
-        if (Array.isArray(data.watchlist)) { try { localStorage.setItem('divtool_watchlist_v1', JSON.stringify(data.watchlist)); } catch (e2) {} }
-        if (data.holdings) { try { localStorage.setItem('divtool_holdings', JSON.stringify(data.holdings)); } catch (e2) {} }
-        if (Array.isArray(data.decisions)) { try { localStorage.setItem(DEC_KEY, JSON.stringify(data.decisions.slice(0, 200))); } catch (e2) {} }
-        ['target', 'monthlyExp', 'addAmt'].forEach(k => { if (data[k] != null && data[k] !== '') { try { localStorage.setItem('divtool_' + k, data[k]); } catch (e2) {} } });
-        if (data.mode) { try { localStorage.setItem('divtool_zone_mode', data.mode); } catch (e2) {} }
-        try { toast('✅ 导入成功'); } catch (e2) {}
-        if (typeof renderHome === 'function') { try { renderHome(); } catch (e2) {} }
-        renderDivCalendar();
+        const vOk = data && (data.v === 1 || data.v === 2) && data.app === 'dividend-tool';
+        if (!vOk) { try { toast('文件版本不兼容'); } catch (e2) {} return; }
+        if (!confirm('导入将覆盖当前本地数据（自选/持仓/决策日志/设置），继续？')) return;
+        /* 导入前备份（可手动恢复的 key：divtool_bak_before_import） */
+        const bak = {};
+        ['divtool_watchlist_v1', 'divtool_holdings_v1', 'divtool_decisions_v1', 'divtool_div_target', 'divtool_monthly_exp', 'divtool_add_amt', 'divtool_zone_mode']
+          .forEach(k => { try { const v = localStorage.getItem(k); if (v != null) bak[k] = v; } catch (e2) {} });
+        try { localStorage.setItem('divtool_bak_before_import', JSON.stringify(bak)); } catch (e2) {}
+        try {
+          if (Array.isArray(data.watchlist)) { try { localStorage.setItem('divtool_watchlist_v1', JSON.stringify(data.watchlist)); } catch (e2) {} }
+          if (Array.isArray(data.holdings)) { try { localStorage.setItem('divtool_holdings_v1', JSON.stringify(data.holdings)); } catch (e2) {} }
+          else if (data.holdings && typeof data.holdings === 'object') { /* v1 旧格式兼容：对象 → 数组 */
+            const arr = Object.entries(data.holdings).filter(([c, s]) => /^\d{6}$/.test(c) && s > 0).map(([c, s]) => ({ code: c, name: c, shares: s, cost: null, date: null }));
+            try { localStorage.setItem('divtool_holdings_v1', JSON.stringify(arr)); } catch (e2) {}
+          }
+          if (Array.isArray(data.decisions)) { try { localStorage.setItem('divtool_decisions_v1', JSON.stringify(data.decisions.slice(0, 200))); } catch (e2) {} }
+          ['target', 'monthlyExp', 'addAmt'].forEach(k => { if (data[k] != null && data[k] !== '') { try { localStorage.setItem('divtool_' + k, data[k]); } catch (e2) {} } });
+          if (data.mode) { try { localStorage.setItem('divtool_zone_mode', data.mode); } catch (e2) {} }
+          try { toast('✅ 导入成功'); } catch (e2) {}
+          if (typeof renderHome === 'function') { try { renderHome(); } catch (e2) {} }
+          renderDivCalendar();
+        } catch (err) {
+          /* 失败自动回滚 */
+          try {
+            const b = JSON.parse(localStorage.getItem('divtool_bak_before_import') || '{}');
+            Object.entries(b).forEach(([k, v]) => { try { localStorage.setItem(k, v); } catch (e2) {} });
+            try { toast('导入失败已回滚：' + err.message); } catch (e2) {}
+          } catch (e2) {}
+        }
       } catch (err) { try { toast('导入失败：' + err.message); } catch (e2) {} }
     };
     // P2 D11：红利 ETF 年化分红参照（近 12 月每份分红 ÷ 现价，异步填充失败静默）
@@ -778,7 +786,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             const snap = await DL.getStockQuotes([code]);
             const price = snap[code] && snap[code].price;
             if (!divs || !divs.length || !price) continue;
-            const start = new Date(Date.now() - 366 * 86400000).toISOString().slice(0, 10);
+            const start = DL.daysAgo(366);
             let sum = 0;
             divs.forEach(d => { if (d.ex && d.ex >= start && d.ex <= DL.todayStr()) sum += d.dps; });
             rows.push(name + ' <b>' + (sum / price * 100).toFixed(1) + '%</b>');
@@ -803,7 +811,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.style.display = 'block';
     el.innerHTML = '<div class="hint">⏳ 扫描中：拉取全市场分红数据（近 3 年，连分判定需要）…</div>';
     // v1.9.6 修复：原来只拉 365 天→连分≥3年永远不满足→恒 0 只（确定性 bug）；改拉 3 年
-    const from = new Date(Date.now() - 3 * 366 * 86400000).toISOString().slice(0, 10);
+    const from = DL.daysAgo(3 * 366);
     try {
       const divs = await DL.fetchDividendsAll(from);
       el.innerHTML = `<div class="hint">✅ 分红数据 ${divs.length} 条，拉取行情快照…</div>`;
@@ -991,14 +999,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const etfNoteEl = $('#diagEtfNote');
       if (etfNoteEl) {
         etfNoteEl.style.display = isEtf ? 'block' : 'none';
-        etfNoteEl.textContent = isEtf ? '⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源，正常应显示真实分红记录）' : '';
+        etfNoteEl.textContent = isEtf ? '⚠️ ETF/指数：若累计分红显示 0，为分红数据源暂缺或获取失败（已接入基金公告源，正常应显示真实分红记录）。ETF 分红免税。' : '';
       }
       $('#diagTitle').textContent = '🔬 ' + (name === code ? '' : name + ' ') + code;
       const [divs, kline] = await Promise.all([
         DL.fetchDividendsOne(code),
         /* v1.9.17：K线拉取范围 = max(diagYears, 10) 年——长期复投视角（5年/10年）需要 10 年数据，
          * 旧版只拉 diagYears（默认5年）→ 10年 永远"样本不足"，主人抓"做个5年10年怎么没优化" */
-        DL.getKline(code, new Date(Date.now() - Math.max(diagYears, 10) * 366 * 86400000).toISOString().slice(0, 10), DL.todayStr()),
+        DL.getKline(code, DL.daysAgo(Math.max(diagYears, 10) * 366), DL.todayStr()),
       ]);
       if (seq !== diagSeq) return;   // v1.9.0 竞态修复
       // BUG修复(2026-08-18)：snap 复用同根因——诊断其他股票时若 snap 缺该 code，合并拉取保证 PE/PB/价格齐全
@@ -1034,7 +1042,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const startPrice = dates.length ? kline[dates[0]] : null;
       const yearsSpan = dates.length ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / (365 * 86400000) : 0;
       const cagr = (startPrice && lastPrice && yearsSpan > 0) ? Math.pow(lastPrice / startPrice, 1 / yearsSpan) - 1 : null;
-      $('#diagStats').innerHTML = `<div class="stats">
+      $('#diagStats').innerHTML = `<div style="margin-bottom:6px">${srcBadge(diagCode + ':div', '分红 ')}${srcBadge(diagCode + ':k', 'K线 ')}${srcBadge('qt:' + (homeState.watchlist || []).map(x => x.code).join(',') || diagCode, '行情 ')}</div><div class="stats">
         <div class="stat"><div class="k">当前股息率(年化)</div><div class="v gold">${divYield != null ? divYield.toFixed(2) + '%' : '—'}</div></div>
         <div class="stat"><div class="k">每股分红(年化${yieldLabel})</div><div class="v">${fmt(dps, 3)} 元</div></div>
         <div class="stat"><div class="k">分红率(近2财年)</div><div class="v">${cover != null ? (cover * 100).toFixed(0) + '%' : '—'}</div></div>
@@ -1262,7 +1270,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         /* v1.9.16 主人令"做个5年10年"：长期复投视角入建仓区状态卡（旧版只在报告卡，主人看的这张没有） */
         const longView = calcLongTermView(series, kline, divs, rollingDy);
         const longHtml = longView && (longView[1250] || longView[2500])
-          ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📈 长期复投视角（当前股息率档·历史表现）：5年 ${longView[1250] ? longView[1250].winP.toFixed(0) + '%胜率·均值' + (longView[1250].avg >= 0 ? '+' : '') + longView[1250].avg.toFixed(1) + '%（n=' + longView[1250].n + '）' : '样本不足'} · 10年 ${longView[2500] ? longView[2500].winP.toFixed(0) + '%·' + (longView[2500].avg >= 0 ? '+' : '') + longView[2500].avg.toFixed(1) + '%（n=' + longView[2500].n + '）' : '样本不足'}（含分红·不复投·复投更高）</div>`
+          ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📈 长期复投视角（同类档位历史表现·非个股承诺）：5年 ${longView[1250] ? longView[1250].winP.toFixed(0) + '%胜率·均值' + (longView[1250].avg >= 0 ? '+' : '') + longView[1250].avg.toFixed(1) + '%（n=' + longView[1250].n + '）' : '样本不足'} · 10年 ${longView[2500] ? longView[2500].winP.toFixed(0) + '%·' + (longView[2500].avg >= 0 ? '+' : '') + longView[2500].avg.toFixed(1) + '%（n=' + longView[2500].n + '）' : '样本不足'}（含分红·不复投·复投更高·不含送转股）</div>`
           : '';
         zel.innerHTML = `<div class="zone-row">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -1785,7 +1793,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
         ${v.conflicts && v.conflicts.length ? `<div style="font-size:10px;margin-top:3px;color:#d9a45b">⚡ 矛盾提示：${v.conflicts.join('；')}（并列展示，请自行裁决）</div>` : ''}
         ${lineNoteHtml}
-        ${(() => { const longView = calcLongTermView(series, kline, divs, dy); return longView && (longView[1250] || longView[2500]) ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📈 长期持有视角（当前股息率档·历史表现）：5年 ${longView[1250] ? longView[1250].winP.toFixed(0) + '%胜率·均值' + (longView[1250].avg >= 0 ? '+' : '') + longView[1250].avg.toFixed(1) + '%（n=' + longView[1250].n + '）' : '样本不足'} · 10年 ${longView[2500] ? longView[2500].winP.toFixed(0) + '%·' + (longView[2500].avg >= 0 ? '+' : '') + longView[2500].avg.toFixed(1) + '%（n=' + longView[2500].n + '）' : '样本不足'}（含分红·不复投·复投更高·样本以2010-2016为主）</div>` : ''; })()}
+        ${(() => { const longView = calcLongTermView(series, kline, divs, dy); return longView && (longView[1250] || longView[2500]) ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📈 长期持有视角（同类档位历史表现·非个股承诺）：5年 ${longView[1250] ? longView[1250].winP.toFixed(0) + '%胜率·均值' + (longView[1250].avg >= 0 ? '+' : '') + longView[1250].avg.toFixed(1) + '%（n=' + longView[1250].n + '）' : '样本不足'} · 10年 ${longView[2500] ? longView[2500].winP.toFixed(0) + '%·' + (longView[2500].avg >= 0 ? '+' : '') + longView[2500].avg.toFixed(1) + '%（n=' + longView[2500].n + '）' : '样本不足'}（含分红·不复投·复投更高·不含送转股·样本以2010-2016为主）</div>` : ''; })()}
         ${(() => { const fuse = (dy != null && pct != null) ? DL.sellFuse(dy, pct, industry, code, divs, kline) : null; return fuse ? (fuse.active ? `<div style="font-size:11px;margin-top:4px;padding:5px 8px;border-radius:6px;background:rgba(224,90,90,.12);border:1px solid rgba(224,90,90,.45);color:#e05a5a">🚨 ${fuse.msg}</div>` : `<div style="font-size:10px;color:var(--muted);margin-top:3px">🧯 高估保险丝：未激活${fuse.exempt ? '（' + fuse.exempt + '）' : '（分位<5 且 股息率<2.2% 才触发）'}</div>`) : ''; })()}
         ${v.curTier && industry ? sigNoteHtml(industry, v.curTier.name, v.trap, gapAdd) : ''}
       </div>
@@ -1845,8 +1853,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const ecoName = { low: '低波动', mid: '中波动', high: '高波动', declining: '阴跌' }[eco.type] || '中波动';
     const waitHint = (v.tier === 'wait' && tcls.profile) ? ` · 历史等90档平均约 ${(tcls.profile.gap90 / 30.4).toFixed(0)} 个月` : '';
     const statTxt = v.tier === 'wait'
-      ? '历史：等1年再买 vs 立即买 3年收益差 +3.6%（976 次事件，历史均值非承诺收益）'
-      : (st && st[0] != null ? `历史同结论 3 年收益 ${st[0].toFixed(1)}% / 胜率 ${st[1]}%（${st[2]} 次事件）` : '历史样本不足');
+      ? '历史：立即买优于等 1 年再买（触发即买胜率更高，回测口径；历史均值非承诺收益）'
+      : (st && st[0] != null ? `同类结论历史胜率 ${st[1]}%（${st[2]} 次事件 · 3 年收益均值 ${st[0].toFixed(1)}% · 40只×16年回测）` : '历史样本不足');
     const cagr = DL.calcDivCAGR(divs, 3);
     const dyTmp = DL.calcAnnualDivYield(divs, Object.values(kline).pop());
     const yieldTxt = dyTmp ? dyTmp.yieldPct.toFixed(2) + '%' : '—';
@@ -1898,12 +1906,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.innerHTML = '<div class="hint">加载中…</div>';
     try {
       const end = DL.todayStr();
-      const start10 = new Date(Date.now() - 10 * 366 * 86400000).toISOString().slice(0, 10);
+      const start10 = DL.daysAgo(10 * 366);
       const kline = await DL.getKline(code, start10, end);
       const dates = Object.keys(kline).sort();
       if (!dates.length || typeof window.simulate !== 'function') { el.innerHTML = '<div class="hint">数据不足</div>'; return; }
       const rows = [1, 3, 5, 10].map(y => {
-        const buyDate = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+        const buyDate = DL.daysAgo(y * 366);
         const res = window.simulate(1000000, buyDate, true, kline, divs, 0, 0);
         return { y, res };
       });
@@ -2060,7 +2068,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (bad) { alert('本金/月供请输入有效金额（≥0）'); return; }
     const principal = principalRaw || 1000000;
     // v1.8.11 大师 M1/M3：起始日期优先（cmpStartDate），否则快捷年数（今天-N年）
-    const start = cmpState.startDate || new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+    const start = cmpState.startDate || DL.daysAgo(y * 366);
     const reinvest = !$('#cmpReinvest') || $('#cmpReinvest').checked;
     // v1.7.3：月供可调（默认 0=零月供）；所有标的同月供，保证口径一致
     const monthly = Math.max(0, parseFloat($('#cmpMonthly').value) || 0);
@@ -2311,7 +2319,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const days = Math.max(0, Math.round((new Date(DL.todayStr()) - new Date(cmpState.startDate)) / 86400000));
         pn.textContent = '自 ' + cmpState.startDate + ' 起 · 约 ' + (days / 365.25).toFixed(1) + ' 年';
       } else {
-        pn.textContent = '近 ' + cmpState.years + ' 年（自 ' + new Date(Date.now() - cmpState.years * 366 * 86400000).toISOString().slice(0, 10) + ' 起）';
+        pn.textContent = '近 ' + cmpState.years + ' 年（自 ' + DL.daysAgo(cmpState.years * 366) + ' 起）';
       }
     };
     if (cy) {
@@ -2326,7 +2334,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (di) {
         // M5：min=今天-30年，max=今天（源头挡未来日期/超长周期）
         di.max = DL.todayStr();
-        di.min = new Date(Date.now() - 30 * 366 * 86400000).toISOString().slice(0, 10);
+        di.min = DL.daysAgo(30 * 366);
         di.addEventListener('change', () => {
           const v = di.value;
           if (!v) { cmpState.startDate = null; setPeriodNote(); return; }
@@ -2374,7 +2382,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     let dValid = false;
     if (dParam) {
       const today = DL.todayStr();
-      const minD = new Date(Date.now() - 30 * 366 * 86400000).toISOString().slice(0, 10);
+      const minD = DL.daysAgo(30 * 366);
       if (/^\d{4}-\d{2}-\d{2}$/.test(dParam) && dParam <= today && dParam >= minD) {
         cmpState.startDate = dParam;
         dValid = true;
@@ -2396,7 +2404,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         if (![1, 3, 5, 10].includes(y)) {
           // M3-③：y 非快捷集（如老链接 y=15/20）→ 按钮全不亮，日期输入回填计算出的日期
           const di2 = $('#cmpStartDate');
-          if (di2) di2.value = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+          if (di2) di2.value = DL.daysAgo(y * 366);
         }
       }
       setPeriodNote();
@@ -2450,6 +2458,34 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* v1.9.4 统一加自选入口（A/B/C 三处共用）：去重检测 + 统一 toast 反馈 */
   let _toastTimer = null;
+  /* W6（2026-08-21）：错误组件——文案+🔄重试（3s 冷却防连点） */
+  const _retryCool = {};
+  function showLoadError(el, msg, retryFn) {
+    if (!el) return;
+    const key = el.id || 'el';
+    const wait = _retryCool[key] || 0;
+    el.innerHTML = `<div style="padding:10px;border:1px solid rgba(224,102,102,.4);border-radius:8px;background:rgba(224,102,102,.08)"><span style="font-size:12px;color:var(--red)">⚠️ ${msg || '加载失败'}</span><button type="button" class="chip" id="retry-${key}" style="margin-left:8px;color:var(--gold)">🔄 重试</button></div>`;
+    const btn = document.getElementById('retry-' + key);
+    if (btn) btn.onclick = () => {
+      if (Date.now() < wait) { try { toast('请稍候再试（3 秒冷却）'); } catch (e2) {} return; }
+      _retryCool[key] = Date.now() + 3000;
+      if (retryFn) retryFn();
+    };
+  }
+
+  /* W10/W12（2026-08-21）：数据源徽章三态——net 实时(绿)/cache 缓存(橙)/fallback 降级(红)；>30 天=已过期(红) */
+  function srcBadge(key, label) {
+    try {
+      const r = DL.srcOf(key);
+      if (!r) return '';
+      const expired = (Date.now() - r.ts) > 30 * 86400000;
+      let color = '#4caf7d', txt = '实时';
+      if (r.s === 'cache') { color = '#d9a441'; txt = '缓存'; }
+      if (r.s === 'fallback' || expired) { color = '#e05a5a'; txt = r.s === 'fallback' ? '降级' : '已过期'; }
+      return `<span data-badge source="${r.s}" style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid ${color};color:${color};margin-right:6px">${label || ''}${txt}</span>`;
+    } catch (e) { return ''; }
+  }
+
   function toast(msg) {
     let el = document.getElementById('toast');
     if (!el) {
@@ -2557,7 +2593,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const y = parseInt((document.querySelector('.pfbt-y.on') || {}).dataset && document.querySelector('.pfbt-y.on').dataset.y || '5', 10);
     try {
       el.innerHTML = `<div class="hint">⏳ 拉取 ${wl.length} 只自选 K线+分红（批处理 5 并发）…</div>`;
-      const from = new Date(Date.now() - y * 366 * 86400000).toISOString().slice(0, 10);
+      const from = DL.daysAgo(y * 366);
       const pool = [];
       for (let i = 0; i < wl.length; i += 5) {
         const batch = wl.slice(i, i + 5);
@@ -2617,6 +2653,30 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   const HOLD_KEY = 'divtool_holdings_v1';
   function loadHoldings() { try { return JSON.parse(localStorage.getItem(HOLD_KEY)) || []; } catch (e) { return []; } }
   function saveHoldings(h) { localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
+
+  /* P114（2026-08-21）：F2 第 0 步——旧 key 一次性迁移到 v1（对象 {code:shares} → 数组 [{code,shares}]）
+   * 顺序铁律：先迁移 → 再删旧表单（已删）→ 日历改读 v1（已改）→ grep 旧 key=0。验收只看数据通了没。 */
+  function migrateHoldingsV1() {
+    try {
+      const legacy = JSON.parse(localStorage.getItem('divtool_holdings') || 'null');
+      if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+        /* W7（2026-08-21）：迁移前备份旧 key（可手动恢复） */
+        try { localStorage.setItem('divtool_holdings_legacy_bak', JSON.stringify(legacy)); } catch (e2) {}
+        const merged = loadHoldings().slice();
+        let added = 0;
+        for (const [code, shares] of Object.entries(legacy)) {
+          if (!/^\d{6}$/.test(code) || !(shares > 0)) continue;
+          if (!merged.some(h => h.code === code)) { merged.push({ code, name: code, shares, cost: null, date: null }); added++; }
+        }
+        if (added > 0) {
+          saveHoldings(merged);
+          try { toast('✅ 旧持仓已迁移 ' + added + ' 只到新表单'); } catch (e2) {}
+        }
+      }
+      /* 迁移完成后清旧 key；备份保留在 divtool_holdings_legacy_bak（供手动恢复） */
+      localStorage.removeItem('divtool_holdings');
+    } catch (e) {}
+  }
   function renderHoldingsEditor() {
     const el = $('#pfSample');
     if (!el) return;
@@ -2665,6 +2725,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (holds2.some(h => h.code === code)) { toast('该代码已录入'); return; }
       holds2.push({ code, name, shares, cost: cost > 0 ? cost : null, date: date || null });
       saveHoldings(holds2);
+      try { toast('✅ 已保存 ' + holds2.length + ' 只持仓'); } catch (e2) {}
       renderHoldingsEditor();
       renderPortfolioSample();
     };
@@ -2672,10 +2733,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     rmBtns.forEach(b => b.onclick = () => {
       const i = parseInt(b.dataset.rm, 10);
       const h2 = loadHoldings(); h2.splice(i, 1); saveHoldings(h2);
+      try { toast('✅ 已保存 ' + h2.length + ' 只持仓'); } catch (e2) {}
       renderHoldingsEditor(); renderPortfolioSample();
     });
     const clearBtn = document.getElementById('holdClear');
-    if (clearBtn) clearBtn.onclick = () => { saveHoldings([]); renderHoldingsEditor(); renderPortfolioSample(); };
+    if (clearBtn) clearBtn.onclick = () => { saveHoldings([]); try { toast('✅ 已清空持仓'); } catch (e2) {} renderHoldingsEditor(); renderPortfolioSample(); };
   }
 
   /* O4：组合静态样例页（M27 方案 C）——6 只持仓一行一卡，静态原型·数据 2026-08-18
@@ -2702,6 +2764,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">标的</th><th>股数</th><th>成本</th><th>买入日</th><th>提示</th></tr>${rowsHtml}</table>
         <div class="hint" style="margin-top:4px">逐只诊断请到诊断页（报告卡+三档买点）；组合级计算（现金流/回本）随持仓模块完整落地</div>
       </div>`;
+      return;   /* F1（2026-08-21）：有录入→只显示真实持仓，静态样例不再渲染（原代码无 return，样例覆盖真实卡） */
     }
     const rows = [
       /* Q3（M39）：风险列与报告卡引擎⑤同源（roeTrend 连降 / 分红率高企判定） */
@@ -2715,11 +2778,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const buyN = rows.filter(r => r.dec.startsWith('✅')).length;
     const waitN = rows.length - buyN;
     const finN = rows.filter(r => ['银行','保险'].includes(r.ind)).length;
+    /* F3（2026-08-21）：静态样例默认折叠 + ⚠️ + 日期戳——样例是研究数据不是真实持仓，录入后自动替换 */
     el.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-size:12px;font-weight:700">📊 组合总览（静态原型）</div>
-        <div style="font-size:10px;color:var(--muted)">静态原型·数据 2026-08-18 · 持仓模块拍板后自动更新</div>
-      </div>
+      <details>
+        <summary style="font-size:12px;font-weight:700;cursor:pointer">📊 组合总览（静态样例 ⚠️）<span style="font-size:10px;color:var(--muted);font-weight:400">研究数据 2026-08-18 · 非您的持仓 · 录入后自动替换</span></summary>
+        <div style="font-size:11px;color:var(--sub);margin:6px 0">这是研究原型数据（招行/工行/伊利/移动/美的/平安 6 只），用于演示组合总览长什么样。录入真实持仓后此处自动切换为您的组合。</div>
       <table style="width:100%;font-size:11px;border-collapse:collapse">
         <tr style="color:var(--muted)">
           <th style="text-align:left;padding:4px">标的</th><th>现价</th><th>股息率</th><th>覆盖</th><th>储备</th><th>分红率</th><th>ROE</th><th>档位</th><th>决策</th><th>主要风险</th>
@@ -2741,7 +2804,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         </tr>`;
         }).join('')}
       </table>
-      <div class="hint" style="margin-top:6px">组合结构：可买 ${buyN} 只 vs 等更低 ${waitN} 只 · 金融集中度 ${finN}/6（50%）· 分红安全分层：招行/工行/平安覆盖 2.8-3.2 倍 vs 伊利/移动/美的 1.3 倍</div>`;
+      <div class="hint" style="margin-top:6px">组合结构：可买 ${buyN} 只 vs 等更低 ${waitN} 只 · 金融集中度 ${finN}/6（50%）· 分红安全分层：招行/工行/平安覆盖 2.8-3.2 倍 vs 伊利/移动/美的 1.3 倍</div>
+      </details>`;
   }
 
   window.addEventListener('DOMContentLoaded', () => {
@@ -2757,6 +2821,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         });
       }
     } catch (e) { }
+    /* P114（2026-08-21）：F2 第 0 步——旧 key 一次性迁移（对象→数组），必须在渲染前 */
+    try { migrateHoldingsV1(); } catch (e) { }
+    /* P39（2026-08-21）：IndexedDB 缓存卫生（>7天且>50MB 才 prune，异步不阻塞） */
+    try { if (typeof DL.cachePrune === 'function') DL.cachePrune(); } catch (e) { }
     renderHoldingsEditor();
     renderPortfolioSample();
     renderCompare();
@@ -2811,7 +2879,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       document.querySelectorAll('.pfbt-y').forEach(x => x.classList.toggle('on', x === b));
     });
     const btnDiagBacktest = $('#btnDiagBacktest');
-    if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; const bd = $('#buyDate'); if (bd) bd.value = new Date(Date.now() - 5 * 366 * 86400000).toISOString().slice(0, 10); switchTab('backtest'); $('#btnRun').click(); } };
+    if (btnDiagBacktest) btnDiagBacktest.onclick = () => { if (diagCode) { const input = $('#code'); if (input) input.value = diagCode; const bd = $('#buyDate'); if (bd) bd.value = DL.daysAgo(5 * 366); switchTab('backtest'); $('#btnRun').click(); } };
     switchTab('home');
   });
 })();
