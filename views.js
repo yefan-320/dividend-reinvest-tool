@@ -1465,7 +1465,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div class="hint">估值放大器：${ampTxt}${exit ? '（基本面恶化 + 估值' + (valAmp === 'high' ? '高位 → 退出信号可信' : valAmp === 'low' ? '低位 → 建议二次确认' : '中性') + '）' : ''}</div>
       ${eff ? `<div style="font-size:10px;color:${eff.verdict.indexOf('踏空') >= 0 ? '#e06666' : eff.verdict === '有效' ? '#4caf7d' : 'var(--muted)'};margin-top:4px">🎯 该行业卖出信号历史有效性：<b>${eff.verdict}</b>——${eff.txt}</div>` : ''}
       ${exit ? '<div class="hint" style="margin-top:4px;color:#d9a45b">💡 释放资金去向：切到 <b>决策台</b> 查看顶部“建仓区提醒”横幅（当前建仓区标的 + 档位距离 + 分红陷阱/钝化标注），或自选持仓巡检卡对比健康标的</div>' : ''}
-      <div class="hint">口径：EPS/分红按报告期归组；连续 2 年（相邻年度）恶化才触发退出，单年波动仅关注；<b>信号仅看最近 5 个完整财年（滚动窗口，历史事件不永久触发）</b>；卖出信号是纪律参考，非自动执行</div>`;
+      <div class="hint">口径：EPS/分红按报告期归组；连续 2 年（相邻年度）恶化才触发退出，单年波动仅关注；<b>信号仅看最近 5 个完整财年（滚动窗口，历史事件不永久触发）</b>；卖出信号是纪律参考，非自动执行；<b>执行颗粒：部分卖出目标仓位向下取整到整手（100 股/手）</b>——<300 股建议"卖0或全卖"两选项</div>`;
   }
 
   /* v1.9.3：档位画像卡（诊断页）——五态分类 + 年化等待收益/间隔/收益差（研究固化数据） */

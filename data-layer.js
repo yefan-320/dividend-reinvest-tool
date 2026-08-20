@@ -1453,8 +1453,8 @@ const BUY_CFG = {
  *   3. 双背书（个股触发≥1 且 行业 heavy 胜率≥80% n≥10）才可 L4/L5
  *   4. 等级=风险提示+建议强度，最终动作主人拍板
  */
-const P95_TRIGGERS = {  // 个股 P95 线历史触发次数（2026-08-20 实测 rule-tree-cache 全历史，含宇通/移动补拉）
-  '600036': 20, '601398': 20, '000333': 2, '600066': 1, '600887': 1, '600941': 1, '601318': 0,
+const P95_TRIGGERS = {  // 个股 P95 线历史触发次数（脚本 scripts/refresh-p95-triggers.js 自动刷新；口径=TIER_LINE.p95+TREASURY_NOW 绝对线，zoneEvents 连续段首日）
+  '600036': 20, '600066': 1, '600887': 1, '600941': 1, '601318': 0, '601398': 20, '000333': 2,
 };
 function indKeyOf(industry) {
   const t = (industry || '').toLowerCase();
@@ -1541,10 +1541,10 @@ function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays,
   return { action: 'hold', level: null, strength: '0%', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };
 }
 
-/* F6 估值双锚·PB 分位（2026-08-20 实测：PB>P95 触发后 1 年下跌率 66% 有效卖出；P75 无效）
+/* F6 估值双锚·PB 分位（2026-08-20 实测+大师终审裁决：PB>P95 后 3 年 60% 继续涨=卖出大概率卖飞 → 估值极端降级为“仅提醒”，不触发卖出动作；硬红灯（S1 2年/审计非标）才是卖出）
  * 输入：kline（历史日K）、annuals（含 bps 的年报序列，降序）、dateStr（当前日）
  * 输出：{ pb, pct, lvl: 'P95'|'P90'|'P75'|null, signal }
- *   signal: 'sell_high'(PB>P95·1年下跌率66%·估值极端减仓强度0.7) / 'sell_watch'(PB>P90·强度0.5) / 'hint'(PB>P75·仅提示) / null
+ *   signal: 'hint'(PB>P95·估值极端·仅提醒不动作) / 'hint'(PB>P90·仅提醒) / 'hint'(PB>P75·仅提示) / null
  */
 function calcPbPercentile(kline, annuals, dateStr) {
   if (!kline || !kline.length || !annuals || !annuals.length) return null;
@@ -1569,7 +1569,8 @@ function calcPbPercentile(kline, annuals, dateStr) {
   const pct = (() => { const idx = sorted.findIndex(x => x >= curPb); return idx < 0 ? 100 : idx / sorted.length * 100; })();
   let lvl = null;
   if (pct >= 95) lvl = 'P95'; else if (pct >= 90) lvl = 'P90'; else if (pct >= 75) lvl = 'P75';
-  const signal = lvl === 'P95' ? 'sell_high' : lvl === 'P90' ? 'sell_watch' : lvl === 'P75' ? 'hint' : null;
+  // 大师终审裁决（2026-08-20）：PB 高分位≠卖出依据（P5 实锤 3 年 60% 继续涨）——统一为仅提醒，不产生卖出动作
+  const signal = lvl ? 'hint' : null;
   return { pb: +curPb.toFixed(2), pct: +pct.toFixed(0), lvl, signal };
 }
 
