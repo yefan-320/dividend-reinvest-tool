@@ -574,12 +574,13 @@ const Watchlist = {
 function calcAnnualDivYield(divs, price) {
   if (!price || price <= 0) return null;
   divs = alignSendZhuan(divs);   // F8 送转对齐（2026-08-20）
+  divs = splitSpecialDivs(divs); // F4 特别分红拆分（2026-08-20）：用经常性 regular
   const years = {};
   divs.forEach(d => {
     if (d.pending || !d.ex || !d.report) return;
     const y = d.report.slice(0, 4);
     if (!y) return;
-    years[y] = (years[y] || 0) + d.dps;
+    years[y] = (years[y] || 0) + (d.regular != null ? d.regular : d.dps);
   });
   const yearList = Object.keys(years).filter(y => years[y] > 0).sort().reverse();
   if (!yearList.length) return null;
@@ -614,6 +615,40 @@ function alignSendZhuan(divs) {
       d.dps = d.dps / factor;        // 折算到当前股本口径
     }
   }
+  return list;
+}
+
+/* F4 DPS 拆分（2026-08-20 方案 v9.2 盲区13 落地）：经常性(年度常规) vs 特别(一次性)
+ * 问题：大额特别分红（兖矿 2022年报 DPS 3.07 含特别派息，次年回归 1.49）→ dy 虚高 → 触发价/分位线失真
+ * 检测：报告期 DPS > 该股历史中位数 × 2 → 判定含特别分红
+ * 拆分：经常性 = 中位数（保守），特别 = DPS − 中位数（标注展示）
+ * 使用：TTM/分位线/触发价用经常性 DPS（与方案盲区13一致）
+ * 输入：已 F8 对齐的 divs；输出：每笔附 regular（经常性）字段
+ */
+function splitSpecialDivs(divs) {
+  const list = (divs || []).map(d => ({ ...d }));
+  // 报告期归组 → 各年 DPS
+  const byY = {};
+  list.forEach(d => { if (d.report && !d.pending && d.dps > 0) { const y = d.report.slice(0, 4); byY[y] = (byY[y] || 0) + d.dps; } });
+  const years = Object.keys(byY).map(Number).sort((a, b) => a - b);
+  const vals = years.map(y => byY[y]).filter(v => v > 0);
+  if (vals.length < 4) { list.forEach(d => d.regular = d.dps); return list; } // 样本不足不拆
+  const sorted = [...vals].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  list.forEach(d => {
+    if (!d.report || d.pending || !(d.dps > 0)) { d.regular = d.dps; return; }
+    const y = d.report.slice(0, 4);
+    const ySum = byY[y] || d.dps;
+    if (ySum > median * 2) {
+      // 该报告期含特别分红：经常性=中位数，特别=ySum−中位数（按比例摊到该期各笔）
+      const ratio = ySum > 0 ? median / ySum : 1;
+      d.regular = d.dps * ratio;
+      d.special = d.dps - d.regular;
+    } else {
+      d.regular = d.dps;
+      d.special = 0;
+    }
+  });
   return list;
 }
 
@@ -652,13 +687,14 @@ function ttmDivsAtMode(divs, dateStr) {
   let c = _ttmCache.get(divs);
   if (!c) {
     divs = alignSendZhuan(divs);   // F8 送转对齐（2026-08-20）
+    divs = splitSpecialDivs(divs); // F4 特别分红拆分（2026-08-20）
     const sorted = divs.filter(d => d.ex && d.dps > 0).sort((a, b) => a.ex < b.ex ? -1 : 1);
     const byRepYear = {};
     divs.forEach(d => {
       if (!d.report || d.pending || !(d.dps > 0)) return;
       const y = d.report.slice(0, 4);
       if (!byRepYear[y]) byRepYear[y] = { sum: 0, hasAnnual: false };
-      byRepYear[y].sum += d.dps;
+      byRepYear[y].sum += (d.regular != null ? d.regular : d.dps);
       if (/-12-31$/.test(d.report)) byRepYear[y].hasAnnual = true;
     });
     c = { sorted, byRepYear };
@@ -1898,7 +1934,7 @@ window.DL = {
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
   Watchlist, cacheGet, cacheSet, cacheGetFresh,
   /* v1.9.0 新增：滚动分位/分红CAGR/除息锁定TTM/报告期归组 */
-  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, computeZone, BENCH, roeBand,
+  calcRollingPercentile, calcDivCAGR, calcReportYearDivs, calcLockedTTM, ttmDivsAt, ttmDivsAtMode, alignSendZhuan, splitSpecialDivs, computeZone, BENCH, roeBand,
   reportPeriodLabel, industryOf, verdictEngine, fetchF10Annual, trapFilter, assessIndustrySignals, finConfirm, tradingSignal, BUY_CFG, TRADE_LAYER, sigNote, SIG_STATS, ddNote, MAX_DD,
   /* v1.9.14 新增：历史战绩（招行案例三轮裁决 B/D/E + Q5/Q6） */
   trackRec, trackStat, waitGapKey, tierTrackNote, tierTrackShort,
