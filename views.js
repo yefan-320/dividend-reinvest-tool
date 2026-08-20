@@ -277,7 +277,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const color = it.zone === 'extreme' ? '#e05a5a' : (it.zone === 'full' ? '#4caf7d' : (it.zone === 'add' ? '#5aa9e6' : (it.zone === 'start' ? '#d9a441' : '#8fa69c')));
       rows += `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span><b>${it.name}</b>(${it.code}) <span style="font-size:10px;color:var(--muted)">${ecoName[it.ecoType] || '中波'}·起${it.ecoStart}</span></span>
+          <span><b>${it.name}</b>(${it.code}) ${(DL.TRADE_LAYER[it.code] || '') === 'event' ? '<span style="font-size:9px;color:#d9a45b;border:1px solid #d9a45b;border-radius:4px;padding:0 3px">🔎事件层</span>' : '<span style="font-size:9px;color:#5aa9e6;border:1px solid #5aa9e6;border-radius:4px;padding:0 3px">⚡自动层</span>'} <span style="font-size:10px;color:var(--muted)">${ecoName[it.ecoType] || '中波'}·起${it.ecoStart}</span></span>
           <span style="font-size:11px">${it.pct.toFixed(0)}%分位 <span style="color:${color}">${it.label}</span>${it.tcls && it.tcls.cls !== 'direct' ? ` <span style="color:${it.tcls.color}" title="${it.tcls.detail}">${it.tcls.label}</span>` : ''}${it.warn && (!it.tcls || it.tcls.cls !== 'trap') ? ' <span style="color:#e05a5a">⚠️分红缩水</span>' : ''}${it.trap && it.trap.level ? ` <span style="color:${it.trap.level === 'hard' ? '#e05a5a' : '#d9a45b'};font-weight:700" title="${it.trap.msg}">${it.trap.level === 'hard' ? '🚫陷阱确认' : '⚠️净利下滑'}</span>` : ''}</span>
         </div>
         <div style="height:6px;background:var(--card2);border-radius:3px;margin-top:3px;position:relative">
@@ -1617,6 +1617,31 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}${v.trap.level === 'hard' ? ' · 💱 换仓参考：继续持有=吃当前股息率（覆盖 ' + (cov != null ? (1 / cov).toFixed(1) + ' 倍' : '—') + '）；如需换仓可到决策台扫描对比更健康标的——注意换仓有交易成本+浮盈税（A股印花税 0.05%+佣金），历史数据非承诺' : ''}</div>` : ''}
         ${v.filters && v.filters.length ? `<div style="font-size:10px;margin-bottom:4px;color:#d9a45b;background:rgba(217,164,91,.08);border:1px solid rgba(217,164,91,.3);border-radius:6px;padding:3px 6px">🟡 信号降级：仅参考 — ${v.filters.map(f => f.txt).join('；')}</div>` : ''}
         ${verdictHtml}
+        ${(() => {
+          /* v9.2 UI：买卖指令条（分层徽章+财报确认+行业信号+明确买卖动作）2026-08-20 */
+          const layer = DL.TRADE_LAYER[code] || 'auto';
+          const layerBadge = layer === 'event'
+            ? '<span style="font-size:9px;border:1px solid #d9a45b;border-radius:4px;padding:0 4px;color:#d9a45b;margin-right:6px">🔎 事件层·人工决策</span>'
+            : '<span style="font-size:9px;border:1px solid #5aa9e6;border-radius:4px;padding:0 4px;color:#5aa9e6;margin-right:6px">⚡ 自动层</span>';
+          let tier = null;
+          if (pct != null) { if (pct >= 95) tier = 'p95'; else if (pct >= 90) tier = 'p90'; else if (pct >= 75) tier = 'p75'; }
+          let finOk = true, finChecks = [];
+          let indSig = null;
+          if (extra && extra.deductNetProfit != null) {
+            const fc = DL.finConfirm({ industry, code, kf: extra.deductNetProfit, kfPrev: extra.deductNetProfitPrev, ocf: extra.ocf, np: extra.netProfit, xsmll: extra.grossMargin, xsmllPrev: extra.grossMarginPrev, xsmllPrev2: extra.grossMarginPrev2 });
+            finOk = fc.pass; finChecks = fc.checks;
+            indSig = DL.assessIndustrySignals({ industry, code, kf: extra.deductNetProfit, kfPrev: extra.deductNetProfitPrev, ocf: extra.ocf, np: extra.netProfit, xsmll: extra.grossMargin, xsmllPrev: extra.grossMarginPrev, xsmllPrev2: extra.grossMarginPrev2, netProfitYoY: extra.netProfitYoY });
+          }
+          let trendOk = true;
+          if (kline && kline.length >= 60) {
+            const low60 = Math.min(...kline.slice(-60).map(x => x.low || x.close || Infinity));
+            const cur = kline[kline.length - 1];
+            if (cur && cur.close != null && cur.close <= low60 * 1.02) trendOk = false;
+          }
+          const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig });
+          const col = ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a45b' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)');
+          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + '<span style="font-weight:400;font-size:10px;color:var(--sub)"> — ' + ts.reason + '</span></div>';
+        })()}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : (t.label || t.type) + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
         ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
         ${v.conflicts && v.conflicts.length ? `<div style="font-size:10px;margin-top:3px;color:#d9a45b">⚡ 矛盾提示：${v.conflicts.join('；')}（并列展示，请自行裁决）</div>` : ''}
