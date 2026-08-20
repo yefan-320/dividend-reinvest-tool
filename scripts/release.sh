@@ -79,7 +79,8 @@ fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 # v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）
-DIRTY=$(git status --porcelain | grep -v '^??' | head -5)
+# v1.9.25 修复：排除三受管文件（index.html/data-layer.js/views.js）——版本号更新是脚本自己改的预期改动，否则每次发布自相矛盾中止（本次踩到）
+DIRTY=$(git status --porcelain | grep -v '^??' | grep -v -E '^ M (index\.html|data-layer\.js|views\.js)$' | head -5)
 if [ -n "$DIRTY" ]; then
   echo "!! 工作区有未提交改动，中止发布："
   echo "$DIRTY"
