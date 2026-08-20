@@ -2582,6 +2582,17 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   window.addEventListener('DOMContentLoaded', () => {
     bindTabs();
+    // v1.9.18 S2：启动异步拉取国债正式源（中国货币网官方接口），成功后若有打开的诊断卡则重渲染（线值随国债锚变化）
+    // 注意：必须在 bindTabs 之后调用（防异常打断初始化），且 DL.refreshTreasury 已导出
+    try {
+      if (typeof DL.refreshTreasury === 'function') {
+        DL.refreshTreasury().then(r => {
+          if (r && typeof diagCode === 'string' && diagCode) {
+            try { openDiagnose(diagCode, diagYears); } catch (e) { }
+          }
+        });
+      }
+    } catch (e) { }
     renderHoldingsEditor();
     renderPortfolioSample();
     renderCompare();

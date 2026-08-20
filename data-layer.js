@@ -1381,7 +1381,7 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
     if (tl.pending) {
       out.lineNote = '⚠️ 溢价分位线待补（K线源故障）·当前显示股息率线（口径不同）·仅展示不触发';
     } else {
-      out.lineNote = '三档=溢价分位线（近3年：dy−国债；P75/P90/P95=' + tl.p75.toFixed(2) + '/' + tl.p90.toFixed(2) + '/' + tl.p95.toFixed(2) + 'pp，国债锚 ' + TREASURY_NOW.toFixed(2) + '% 近似）'
+      out.lineNote = '三档=溢价分位线（近3年：dy−国债；P75/P90/P95=' + tl.p75.toFixed(2) + '/' + tl.p90.toFixed(2) + '/' + tl.p95.toFixed(2) + 'pp，国债锚 ' + TREASURY_NOW.toFixed(2) + '%·' + TREASURY_ASOF + '）'
         + (indLine != null ? '；行业参考 ' + indLine.toFixed(1) + '%' : '')
         + '；线高=市场对其分红增长信心低（分红CAGR ' + (tl.cagr != null ? tl.cagr.toFixed(1) + '%' : '—') + '）';
       if (tl.redLine) out.lineNote += '；⚠️ 支付率 ' + tl.payout + '% 超红线，分位线仅供参考';
@@ -1549,8 +1549,27 @@ function tierTrackShort(ind, tierKey) {
   return `${label}线历史 3 年复投中位 +${s3.mid}%、亏损率 ${s3.loss}%（n=${s3.n}）`;
 }
 
-/* 国债锚（v1.9.13 溢价分位：触发比较 dy−国债；2026-08-18 实测 10Y=1.681%，当前 1.55 为近似·正式源待接入 backlog；影响全站溢价线约 0.13pp，分位排名基本不变） */
-const TREASURY_NOW = 1.55;
+/* 国债锚（v1.9.18 正式源）：启动时 refreshTreasury() 从中国货币网官方接口拉取最新 10Y 收益率
+ * （2026-08-20 实测接口可用，CORS 全开；失败静默回退静态值 1.681 = 08-18 官方收盘）
+ * 影响全站溢价线：触发比较 dy−国债、回算 dy 口径 +TREASURY_NOW */
+let TREASURY_NOW = 1.681;
+let TREASURY_ASOF = '2026-08-18';
+const TREASURY_URL = 'https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/SddsIntrRateGovYldHis?lang=CN&pageNum=1&pageSize=1';
+async function refreshTreasury() {
+  try {
+    const hit = await cacheGetFresh('tr:10y', 86400000);   // 1 天 TTL（国债收益率日频）
+    if (hit && hit.v > 0) { TREASURY_NOW = hit.v; TREASURY_ASOF = hit.d || TREASURY_ASOF; return { v: hit.v, d: hit.d, cached: true }; }
+    const d = await fetchJson(TREASURY_URL);
+    const rec = d && d.records && d.records[0];
+    const v = rec ? parseFloat(rec.tenRate) : NaN;
+    if (v > 0 && v < 10) {
+      TREASURY_NOW = v; TREASURY_ASOF = rec.dateString || TREASURY_ASOF;
+      await cacheSet('tr:10y', { ts: Date.now(), v, d: rec.dateString });
+      return { v, d: rec.dateString, cached: false };
+    }
+  } catch (e) { /* 网络失败静默，保持静态兜底 */ }
+  return null;
+}
 const TIER_LINE = {
   '000001': { name: '平安银行', ind: 'bank', p75: 4.35, p90: 5.07, p95: 5.28, p90_1y: 3.99, cagr: 27.9, payout: 29, quality: '高增长', redLine: false, pending: false },
   '000333': { name: '美的集团', ind: 'consumer', p75: 3.22, p90: 3.88, p95: 4.03, p90_1y: 4.04, cagr: 19.8, payout: 69, quality: '高增长', redLine: false, pending: false },
@@ -1568,7 +1587,7 @@ const TIER_LINE = {
   '600886': { name: '国投电力', ind: 'utility', p75: 1.62, p90: 2.22, p95: 2.31, p90_1y: 2.31, cagr: 22.7, payout: 54, quality: '高增长', redLine: false, pending: false },
   '600887': { name: '伊利股份', ind: 'consumer', p75: 2.86, p90: 3.7, p95: 3.85, p90_1y: 3.87, cagr: 9.9, payout: 82, quality: '稳定增长', redLine: false, pending: false, eventRisk: '澳优2026H1预亏6.85-7.85亿·中报8月底披露' },
   '600900': { name: '长江电力', ind: 'utility', p75: 1.78, p90: 2.16, p95: 2.23, p90_1y: 2.24, cagr: 5.4, payout: 71, quality: '稳定增长', redLine: false, pending: false },
-  '600941': { name: '中国移动', ind: 'telecom', p75: 4.49, p90: 4.97, p95: 5.06, p90_1y: null, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: true },
+  '600941': { name: '中国移动', ind: 'telecom', p75: 2.76, p90: 3.4, p95: 3.51, p90_1y: 3.51, cagr: 6.7, payout: 73, quality: '稳定增长', redLine: false, pending: false },
   '601088': { name: '中国神华', ind: 'energy', p75: 5.85, p90: 6.49, p95: 6.64, p90_1y: 4.38, cagr: -7.6, payout: 76, quality: '负增长', redLine: false, pending: false },
   '601166': { name: '兴业银行', ind: 'bank', p75: 4.56, p90: 5.08, p95: 5.36, p90_1y: 4.46, cagr: -3.5, payout: 31, quality: '负增长', redLine: false, pending: false },
   '601225': { name: '陕西煤业', ind: 'energy', p75: 8.37, p90: 9.6, p95: 10.11, p90_1y: 5.24, cagr: -24.2, payout: 57, quality: '负增长', redLine: false, pending: false },
@@ -1621,7 +1640,7 @@ function tierSpot(dy, industry, code) {
     /* v1.9.13 溢价分位：TIER_LINE 存溢价分位（pp），触发比较 dy−国债；回算 dy 口径供显示（+TREASURY_NOW）
      * 数学：dy ≥ p+国债 ⟺ dy−国债 ≥ p，等价判定 */
     if (tl.pending) {
-      // 移动类：K线源故障，股息率线暂替——只展示不触发（大师第5轮）
+      // 历史遗留：移动 K 线源故障时股息率线暂替；2026-08-20 实测腾讯源分段拉取正常（1121 根），已解除 pending（v1.9.18）
       return { mid: tl.p75, line: tl.p90, heavy: tl.p95, cur: null, gapAdd: Math.max(0, tl.p90 - dy), src: 'pct-pending', redLine: !!tl.redLine, shortSample: true, pending: true, tl };
     }
     mid = tl.p75 + TREASURY_NOW; line = tl.p90 + TREASURY_NOW; heavy = tl.p95 + TREASURY_NOW;
@@ -1701,5 +1720,9 @@ window.DL = {
   divTrendBadAt, coverageAt, ruleVerdict, RULE_STATS, RULE_TIER_LABEL,
   /* v1.9.2 新增：组合级回测 */
   calcPortfolioBacktest,
+  /* v1.9.18 新增：国债正式源刷新（中国货币网）；getter 实时读取（防导出快照陈旧） */
+  refreshTreasury,
+  get TREASURY_NOW() { return TREASURY_NOW; },
+  get TREASURY_ASOF() { return TREASURY_ASOF; },
 }
 })();
