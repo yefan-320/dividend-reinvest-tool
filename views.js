@@ -1173,7 +1173,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (note) {
       // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
-      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=TTM滚动口径（每点=该日前366天到账分红÷价，与顶部信号线同源）${suspCount ? '；⚠️ ' + suspCount + ' 处疑似数据异常（红色标记，非除息日突变>50%，可能数据源错误）' : ''}；年化近2财年=${(() => { try { const ad = DL.calcAnnualDivYield(divs, kline[dates[dates.length-1]]); return ad ? ad.yieldPct.toFixed(2) + '%' : '—'; } catch (e) { return '—'; } })()}`;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=前瞻口径（每点=已公告年度分红÷价，公告即算、含未派发，与顶部信号线同源）${suspCount ? '；⚠️ ' + suspCount + ' 处疑似数据异常（红色标记，非除息日突变>50%，可能数据源错误）' : ''}；年化近2财年=${(() => { try { const ad = DL.calcAnnualDivYield(divs, kline[dates[dates.length-1]]); return ad ? ad.yieldPct.toFixed(2) + '%' : '—'; } catch (e) { return '—'; } })()}`;
     }
   }
 

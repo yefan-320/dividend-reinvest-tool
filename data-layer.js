@@ -749,17 +749,19 @@ function ttmDivsAtMode(divs, dateStr) {
     _ttmCache.set(divs, c);
   }
   const yearNow = parseInt(dateStr.slice(0, 4), 10);
-  // 2026-08-21 bugfix：B 口径只计“已全部到账”的最近完整财年——
-  //   宇通 2023-01 虚高 13% 根因（2022 末期 ex=2023-05-19 未到账却计入）；
-  //   招行 2026-06-24 锚点 5.48% 验证（2025 末期未到账→应取 2024 财年 2.0 元）
+  // v1.9.27 前瞻口径（主人钦定 2026-08-21：股票本来就是预测未来，公告就算数）：
+  //   B 口径=“已公告”的最近完整财年（planNotice ≤ dateStr，预案公告即算；无 planNotice 时退回 ex ≤ dateStr）
+  //   ——已公告未派发计入（宇通 2026-04-01: 2025末期 plan=2026-03-31 已公告 → 2.5 计入 ✓）；
+  //   ——未公告不计入（宇通 2023-01-03: 2022年报 plan=2023-03-28 未公告 → 仍只算 0.5，13% bug 不复发）
   const completeYears = Object.keys(c.byRepYear).map(Number)
     .filter(y => c.byRepYear[y].hasAnnual && y < yearNow)
     .sort((a, b) => b - a);
   if (completeYears.length) {
     for (const y of completeYears) {
       const yrDivs = divs.filter(d => d.report && d.report.startsWith(String(y)) && d.dps > 0);
-      const allPaid = yrDivs.length > 0 && yrDivs.every(d => d.ex && d.ex <= dateStr);
-      if (allPaid) {
+      const announced = yrDivs.length > 0 && yrDivs.every(d =>
+        (d.planNotice && d.planNotice <= dateStr) || (!d.planNotice && d.ex && d.ex <= dateStr));
+      if (announced) {
         const bVal = yrDivs.reduce((s, d) => s + (d.regular != null ? d.regular : d.dps), 0);
         if (bVal > 0) return { v: bVal, mode: 'B' };
       }

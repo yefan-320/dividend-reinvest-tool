@@ -91,5 +91,17 @@ const ok = (name, cond) => { if (cond) { pass++; console.log('✅ ' + name); } e
   ok('案例6 样本不足不拆特别分红', spSum === 0);
 }
 
+/* 案例7：前瞻口径——已公告未派发计入（主人钦定 2026-08-21：股票预测未来，公告就算数） */
+{
+  const divs = [
+    { ex: '2025-05-14', dps: 1.0, report: '2024-12-31', planNotice: '2025-04-01' },
+    { ex: '2025-09-11', dps: 0.5, report: '2025-06-30', planNotice: '2025-08-26' },
+    { ex: '2026-05-15', dps: 2.0, report: '2025-12-31', planNotice: '2026-03-31' },
+  ];
+  // 2026-04-01：2025 末期已公告（plan 2026-03-31）未派发（ex 2026-05-15）→ 应计入 2.5
+  const r = DL.ttmDivsAtMode(divs, '2026-04-01');
+  ok('案例7 前瞻口径已公告未派计入(2026-04-01=2.5)', r.mode === 'B' && Math.abs(r.v - 2.5) < 0.01);
+}
+
 console.log(`\n口径单测: ${pass}/${pass + fail} 通过`);
 process.exit(fail ? 1 : 0);
