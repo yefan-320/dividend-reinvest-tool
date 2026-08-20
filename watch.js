@@ -74,6 +74,22 @@ function finSignals(f, code) {
   if (f.ocf != null && f.netProfit != null && f.netProfit > 0 && f.ocf / f.netProfit < 0.6) {
     sigs.push({ sig: 'S7', level: '🟡', txt: `OCF/净利 ${(f.ocf / f.netProfit * 100).toFixed(0)}% 偏低` });
   }
+  // D1b（阶段4）：卖出信号补全——①盈利连2期收缩（分红能力预警）②应收账期拉长 ③审计意见变化
+  // ① 净利连 2 期降 >30% → 分红能力收缩预警（分红=利润分配，利润腰斩分红必然受冲击）
+  if (f.annuals && f.annuals[0] && f.annuals[1] && f.annuals[2]
+      && f.annuals[0].netProfit != null && f.annuals[1].netProfit != null && f.annuals[2].netProfit != null
+      && f.annuals[1].netProfit < f.annuals[2].netProfit * 0.7 && f.annuals[0].netProfit < f.annuals[1].netProfit * 0.7) {
+    sigs.push({ sig: 'D1b', level: '🟡', txt: `净利连2期收缩>30%（${f.annuals[2].netProfit.toFixed(0)}→${f.annuals[1].netProfit.toFixed(0)}→${f.annuals[0].netProfit.toFixed(0)}亿）——分红能力预警` });
+  }
+  // ② 应收账期拉长：应收/营收 同比升 >10pp（赊销堆积=回款恶化）
+  if (f.receivable != null && f.revenue != null && f.revenue > 0 && f.receivablePrev != null && f.revenuePrev != null && f.revenuePrev > 0) {
+    const r1 = f.receivable / f.revenue, r0 = f.receivablePrev / f.revenuePrev;
+    if (r1 > r0 + 0.10) sigs.push({ sig: 'D1b', level: '🟡', txt: `应收/营收 ${(r0 * 100).toFixed(0)}%→${(r1 * 100).toFixed(0)}%（赊销堆积，回款恶化）` });
+  }
+  // ③ 审计意见非标（非“标准无保留”）→ 硬红灯
+  if (f.auditOpinion && !/标准/.test(f.auditOpinion)) {
+    sigs.push({ sig: 'AUD', level: '🔴', txt: `审计意见非标：${f.auditOpinion}（硬红灯）` });
+  }
   // 汇率敏感度（补漏：海外收入>30%标的→监测加信号；宇通已配 fxSensitive）
   if (DL.BUY_CFG && DL.BUY_CFG[code] && DL.BUY_CFG[code].fxSensitive) {
     sigs.push({ sig: 'FX', level: '🟡', txt: '汇率敏感度：海外收入>30%，人民币升值5%影响净利约2-2.5%（监测信号）' });
@@ -153,6 +169,15 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   if (layer === 'event' && ts.action.startsWith('buy_')) {
     ts = { ...ts, action: 'monitor', text: '🔎 提示（事件层·人工决策）', reason: `${ts.reason}——但伊利/平安=事件驱动股（历史2年胜率49%中位-1.8%），自动信号无效，买入需人工事件判断（利空出尽+财报确认反转），仓位≤10%`, evidence: '标的分层·事件驱动层' };
   }
+  // M4（阶段3）：买入强制体检轻量版——财报确认闸通过但体检数据不全（缺扣非/OCF/毛利率任一）=未体检黄标
+  let examNote = '';
+  if (ts.action.startsWith('buy_')) {
+    const hasKf = a0 && a1 && a0.deductNetProfit != null && a1.deductNetProfit != null;
+    const hasOcf = f && f.ocf != null;
+    const hasGm = a0 && a0.grossMargin != null;
+    if (!(hasKf && hasOcf && hasGm)) examNote = `；⚠️ 未完成体检（缺 ${[!hasKf ? '扣非' : '', !hasOcf ? 'OCF' : '', !hasGm ? '毛利率' : ''].filter(Boolean).join('/')} 数据）——建议先看体检卡再决定`;
+  }
+  if (examNote) ts = { ...ts, reason: ts.reason + examNote };
   // 兼容旧字段（变化检测/上层）
   const oldTier = { p75: '低估一档', p90: '低估二档', p95: '深度低估' }[tier] || '等待';
   let verdict = ts.text;
@@ -309,5 +334,24 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   if (regime) { report.regime = regime; state._regimeLevel = regime.level; }
   // 输出：有变化→只输出变化项；无变化→空数组（上层 cron 据此不触发=不花 LLM 钱）；--force→全部
   const out = force ? report.items : report.changes;
+  // D1/D2（阶段4）：触发式精读请求——硬红灯/审计非标时输出精读任务清单（供上层 LLM 管道按决策卡三关执行：页码锚定/双通道交叉/抽样复核）
+  const deepRead = out.filter(x => x.signalLevel === 'S3' || (x.signals || []).some(s => s.sig === 'AUD'));
+  if (deepRead.length) {
+    report.deepRead = deepRead.map(x => ({
+      code: x.code, name: x.name, reason: x.verdictNote,
+      checklist: ['核对最新年报原文关键页（营收/净利/扣非/OCF）', '审计意见段落原文摘录', '分红/覆盖率/应收三勾稽', '结论写决策卡（deliverables/财报研究/）——页码锚定，禁二手']
+    }));
+  }
+  const pushUrl = (() => { try { return fs.readFileSync(__dirname + '/../.state/push-url.txt', 'utf8').trim(); } catch (e) { return ''; } })();
+  // D5（阶段4）：主动 push——硬红灯（S3 清仓/审计非标）→ webhook 推送主人（无配置静默跳过）
+  if (pushUrl && (force || out.some(x => x.signalLevel === 'S3' || (x.signals || []).some(s => s.sig === 'AUD')))) {
+    const alerts = out.filter(x => x.signalLevel === 'S3' || (x.signals || []).some(s => s.sig === 'AUD'));
+    try {
+      const text = `🚨 红利工具重大风险（${report.ts}）\n${alerts.map(x => `${x.name}（${x.code}）：${x.actionText}｜${x.verdictNote}`).join('\n')}`;
+      fetch(pushUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msg_type: 'text', content: { text } }) })
+        .then(() => console.log('✅ push 已发送（S3/审计非标）'))
+        .catch(e => console.log('⚠️ push 失败:', e.message));
+    } catch (e) {}
+  }
   console.log(JSON.stringify(out, null, 1));
 })();

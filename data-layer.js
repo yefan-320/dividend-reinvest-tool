@@ -1308,6 +1308,8 @@ async function fetchF10Annual(code, tryN = 1) {
       netMargin: x.XSJLL != null ? parseFloat(x.XSJLL) : null,         // 销售净利率%（v1.9.17）
       ocf: x.NETCASH_OPERATE_PK != null ? parseFloat(x.NETCASH_OPERATE_PK) / 1e8 : null,  // 经营现金流·元→亿（v1.9.17）
       ocfPerShare: x.MGJYXJJE != null ? parseFloat(x.MGJYXJJE) : null,  // 每股经营现金流·元（v1.9.17）
+      receivable: x.ACCOUNTS_RECE ? parseFloat(x.ACCOUNTS_RECE) / 1e8 : null,   // 应收账款·元→亿（D1b 应收账期拉长信号）
+      revenue: x.TOTAL_OPERATE_INCOME != null ? parseFloat(x.TOTAL_OPERATE_INCOME) / 1e8 : null,  // 营业总收入·亿（D1b 应收/营收比）
       liabilityRatio: x.ZCFZL != null ? parseFloat(x.ZCFZL) : null,    // 资产负债率%（v1.9.17）
       dpsUndistributed: x.MGWFPLR != null ? parseFloat(x.MGWFPLR) : null,  // 每股未分配利润·元（v1.9.17）
     }));
@@ -1342,6 +1344,11 @@ async function fetchF10Annual(code, tryN = 1) {
       ocf: annual.ocf,                          // v1.9.17：经营现金流（亿）
       ocfPerShare: annual.ocfPerShare,          // v1.9.17：每股经营现金流（元）
       liabilityRatio: annual.liabilityRatio,    // v1.9.17：资产负债率（%）
+      auditOpinion: bal.auditOpinion || null,  // D1b：最新年报审计意见（非标=硬红灯）
+      receivable: annuals[0] ? annuals[0].receivable : null,   // D1b：最新年报应收（亿）
+      revenue: annuals[0] ? annuals[0].revenue : null,         // D1b：最新年报营收（亿）
+      receivablePrev: annuals[1] ? annuals[1].receivable : null,
+      revenuePrev: annuals[1] ? annuals[1].revenue : null,
       annuals,            // P0-3：年报序列（降序，{reportDate,netProfit,roe,...}）
       orgType: annualRow ? (annualRow.ORG_TYPE || '') : '',
       csrcIndustry: csrc,   // 证监会行业（第二判据，Q1）
@@ -1806,9 +1813,9 @@ const SIG_STATS = {
     heavy: { all: '100%', n: 11, seg: '100%', last: '100%', lastN: 7, note: '' },
   },
   energy: {
-    small: { all: '74%', n: 98, seg: '33-96%', last: '68%', lastN: 69, note: '随机等效' },
-    add:   { all: '61%', n: 59, seg: '51-100%', last: '65%', lastN: 26, note: '石化拖累' },
-    heavy: { all: '69%', n: 52, seg: '60-88%', last: '88%', lastN: 17, note: '石化拖累' },
+    small: { all: '74%', n: 98, seg: '33-96%', last: '68%', lastN: 69, note: '随机等效；拆子类(D6)：煤炭100%胜率/石化72%（n=39）' },
+    add:   { all: '61%', n: 59, seg: '51-100%', last: '65%', lastN: 26, note: '石化拖累；拆子类(D6)：煤炭100%（n=18）/石化85%（n=20）' },
+    heavy: { all: '69%', n: 52, seg: '60-88%', last: '88%', lastN: 17, note: '石化拖累；拆子类(D6)：煤炭100%（n=11）/石化89%（n=9）' },
   },
   telecom: {
     small: { all: '', n: 0, seg: '', last: '', lastN: 0, note: '样本不足' },
@@ -1961,6 +1968,14 @@ const TIER_LINE = {
 
 /* P2 机会雷达（2026-08-18 大师裁决）：轻量三档定位——给定当前股息率+行业 → 落档 + 距加仓线差
  * 与 verdictEngine 同源（BENCH 零硬编码）；雷达展示用，不含价格换算（价格差易误导 M47 教训） */
+/* D7（阶段4）：L5 保险丝豁免表埋点——每次豁免/激活计数，样本≥5 自动提示迁移数据驱动
+ * 存 window.__fuseStats（session 内）；>=5 次时 sigNote 附迁移提示 */
+const fuseStats = { exempt: {}, active: 0 };
+function fuseTrack(key) {
+  fuseStats.exempt[key] = (fuseStats.exempt[key] || 0) + 1;
+  const total = Object.values(fuseStats.exempt).reduce((s, v) => s + v, 0) + fuseStats.active;
+  return total >= 5 ? `（D7埋点：豁免样本${total}次，建议迁移为数据驱动阈值，勿长期依赖硬编码）` : '';
+}
 /* v1.9.15 高估保险丝（极端高估识别·大师终审定稿）：
  * 规则：自身分位<5 且 绝对dy<2.2% → 硬卖提示（消费高分红股核心；2021后几乎不触发=罕见保险丝）
  * 豁免：①bank（dy 常年>2.2，天然不触发；顶后跌20-22%非深跌）②energy（周期顶特征：神华2021-09顶时dy7.54%，绝对线失效）
@@ -1969,7 +1984,7 @@ const TIER_LINE = {
  * 输出：{ active, msg, exempt } */
 function sellFuse(dy, pct, industry, code, divs, kline) {
   if (dy == null || pct == null) return { active: false, msg: '', exempt: '数据不足' };
-  if (industry === 'bank' || industry === 'energy') return { active: false, msg: '', exempt: industry === 'bank' ? '银行豁免（dy天花板5-6%，信号不存在）' : '周期股豁免（周期顶特征：高dy见顶，保险丝不适用）' };
+  if (industry === 'bank' || industry === 'energy') { fuseStats.exempt[industry] = (fuseStats.exempt[industry] || 0) + 1; return { active: false, msg: '', exempt: (industry === 'bank' ? '银行豁免（dy天花板5-6%，信号不存在）' : '周期股豁免（周期顶特征：高dy见顶，保险丝不适用）') + fuseTrack(industry) }; }
   // 低dy股豁免：近3年 dy 中位 <2.5%（茅台2012/平安2018型分位失效）
   let dyMed = null;
   try {
@@ -1979,8 +1994,8 @@ function sellFuse(dy, pct, industry, code, divs, kline) {
       if (r3.length >= 100) dyMed = r3[Math.floor(r3.length / 2)];
     }
   } catch (e) { }
-  if (dyMed != null && dyMed < 2.5) return { active: false, msg: '', exempt: '低dy股豁免（近3年dy中位<2.5%，分位失效，需PE/相对估值辅助）', dyMed: dyMed.toFixed(2) };
-  if (pct < 5 && dy < 2.2) return { active: true, msg: '极端高估保险丝激活：自身分位' + pct.toFixed(0) + ' + 股息率' + dy.toFixed(2) + '%（<2.2%）——历史该信号=真泡沫顶（伊利2013/美的2021/茅台2020），可考虑卖出；2021后罕见触发，勿常规操作', exempt: null };
+  if (dyMed != null && dyMed < 2.5) { fuseStats.exempt['lowdy'] = (fuseStats.exempt['lowdy'] || 0) + 1; return { active: false, msg: '', exempt: '低dy股豁免（近3年dy中位<2.5%，分位失效，需PE/相对估值辅助）' + fuseTrack('lowdy'), dyMed: dyMed.toFixed(2) }; }
+  if (pct < 5 && dy < 2.2) { fuseStats.active++; return { active: true, msg: '极端高估保险丝激活：自身分位' + pct.toFixed(0) + ' + 股息率' + dy.toFixed(2) + '%（<2.2%）——历史该信号=真泡沫顶（伊利2013/美的2021/茅台2020），可考虑卖出；2021后罕见触发，勿常规操作' + fuseTrack('active'), exempt: null }; }
   return { active: false, msg: '', exempt: null };
 }
 

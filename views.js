@@ -605,6 +605,27 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const targetHtml = target > 0
       ? `<div style="font-size:11px;color:var(--txt);margin-bottom:6px">🎯 分红目标 ${(target / 10000).toFixed(1)}万/年 → 当前覆盖 <b style="color:var(--gold)">${Math.min(999, yearTotalNow / target * 100).toFixed(0)}%</b>${yearTotalNow < target ? ` · 缺口 ${((target - yearTotalNow) / 10000).toFixed(1)}万/年` : ' · 已达标 🎉'}</div>`
       : '';
+    // D4（阶段4）：组合级视图——组合加权股息率 + 单票风险占比（持仓占比×股息率贡献；无持仓=按自选等权示意）
+    let comboHtml = '';
+    try {
+      const pos = Object.keys(holdings).length ? holdings : null;
+      const rows4 = wl.slice(0, 20).map(it => {
+        const sn = it.snapshot || {};
+        const price = sn.price || 0, dy = sn.divYield != null ? sn.divYield : null;
+        const shares = pos && pos[it.code] ? pos[it.code] : 0;
+        const val = shares > 0 ? shares * price : 0;
+        return { code: it.code, name: it.name || it.code, price, dy, val, shares };
+      }).filter(r => r.price > 0);
+      const totalVal = pos ? rows4.reduce((s, r) => s + r.val, 0) : 0;
+      const weight = r => pos ? (totalVal > 0 ? r.val / totalVal : 0) : 1 / Math.max(1, rows4.length);
+      const comboDy = rows4.reduce((s, r) => s + (r.dy != null ? r.dy * weight(r) : 0), 0);
+      const riskRows = rows4.filter(r => weight(r) > 0.02).sort((a, b) => b.dy * weight(b) - a.dy * weight(a)).slice(0, 5);
+      comboHtml = `<div style="margin:6px 0;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.15)">
+        <div style="font-size:11px;color:var(--sub);margin-bottom:3px">📊 组合级视图（D4）${pos ? '' : '<span style="font-size:9px">（未填持仓=按自选等权示意）</span>'}</div>
+        <div style="font-size:12px">组合加权股息率 <b class="green">${comboDy.toFixed(2)}%</b> ${pos ? `（持仓 ${rows4.length} 只）` : ''}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">单票风险占比（股息率×权重，前5）：${riskRows.map(r => `${r.name} <b>${(r.dy * weight(r)).toFixed(2)}%</b>`).join(' · ')}</div>
+      </div>`;
+    } catch (e) {}
     const targetInput = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><span style="font-size:11px;color:var(--muted)">每年目标分红（万）：</span><input id="divtoolTargetInput" type="number" min="0" placeholder="如 20" value="${target ? (target / 10000).toFixed(1) : ''}" style="width:70px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divtoolTargetSave">💾 保存</button></div>`;
     // 持仓管理行
     const holdInput = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><span style="font-size:11px;color:var(--muted)">持仓股数：</span><input id="divtoolHoldInput" type="text" placeholder="600036:5000, 601398:20000（代码:股数，逗号分隔）" value="${Object.entries(holdings).map(([c, s]) => c + ':' + s).join(', ')}" style="flex:1;min-width:0;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divtoolHoldSave">💾 保存</button></div><div style="font-size:10px;color:var(--muted);margin:-4px 0 6px">格式：代码:股数，逗号分隔（如 600036:5000）——填了才能算到账金额</div>`;
@@ -673,7 +694,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <div style="font-size:10px;color:var(--muted);margin-top:2px">导出=自选/持仓/决策日志/目标/支出/设置（JSON 带版本号，本地文件不上传）</div>
       </details>
     </div>`;
-    el.innerHTML = `${holdInput}${targetInput}${targetHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
+    el.innerHTML = `${holdInput}${targetInput}${targetHtml}${comboHtml}${nearTxt}<div style="font-size:11px;color:var(--muted);margin-bottom:6px">未来 12 个月预计到账 <b>${cf.length} 个月</b>${yearTotal > 0 ? ' · 合计 <b style="color:var(--txt)">' + (yearTotal / 10000).toFixed(2) + ' 万</b>' : ''}（估=上年同期推算，未公告）</div>${rows.length ? rows.join('') : '<div class="hint">未来 12 个月无预计到账</div>'}${lifeHtml}`;
     const saveBtn = $('#divtoolHoldSave');
     if (saveBtn) saveBtn.onclick = () => {
       const v = ($('#divtoolHoldInput') || {}).value || '';
@@ -1021,6 +1042,24 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <div class="stat"><div class="k">近${diagYears}年最大回撤</div><div class="v red">${fmtPct(-maxDD)}</div></div>
         <div class="stat"><div class="k">PE / PB</div><div class="v">${s.pe != null ? fmt(s.pe, 1) : '—'} / ${s.pb != null ? fmt(s.pb, 2) : '—'}</div></div>
       </div>`;
+      // M5+M7（阶段3）：分红预测三情景区间卡（divForecast 引擎）——卡面单点→区间
+      try {
+        const fc = DL.divForecast(divs, kline[dates[dates.length - 1]]);
+        const fcEl = $('#diagStats');
+        if (fc) {
+          const seg = fc.note ? `<div class="hint" style="font-size:10px;margin-top:3px">${fc.note}</div>` : '';
+          fcEl.insertAdjacentHTML('beforeend', `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.15)">
+            <div style="font-size:11px;color:var(--sub);margin-bottom:4px">🔮 分红预测三情景（${fc.years.n} 年数据，至 ${fc.years.last} 年度）<span style="font-size:9px">M5引擎</span></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <div style="flex:1;min-width:90px;padding:5px 7px;border-radius:6px;background:rgba(224,90,90,.12)"><div style="font-size:10px;color:#e06666">保守（10年周期均）</div><div style="font-size:12px;font-weight:700;color:#e06666">${fc.text.conservative}</div></div>
+              <div style="flex:1;min-width:90px;padding:5px 7px;border-radius:6px;background:rgba(224,160,48,.12)"><div style="font-size:10px;color:#e0a030">中性（7年周期均）</div><div style="font-size:12px;font-weight:700;color:#e0a030">${fc.text.base}</div></div>
+              <div style="flex:1;min-width:90px;padding:5px 7px;border-radius:6px;background:rgba(76,175,125,.12)"><div style="font-size:10px;color:#4caf7d">乐观（最近年度）</div><div style="font-size:12px;font-weight:700;color:#4caf7d">${fc.text.optimistic}</div></div>
+            </div>
+            ${seg}
+            <div class="hint" style="font-size:9px;margin-top:4px">最不确定变量：分红率政策（制度承诺 vs 管理层意愿）与盈利周期——见报告卡财报证据行</div>
+          </div>`);
+        }
+      } catch (e) {}
       // 带状图：历史股息率分位（滚动口径：每年用当年分红）
       renderYieldBand(divs, kline, diagYears);
       // v1.9.0：建仓区状态卡 + 分位信号线（滚动分位，窗口 G_WINDOW） + 分红增长趋势
@@ -1068,6 +1107,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
         if (extra) renderReportCard(code, divs, kline, extra);
       }
+      // M2（阶段3）：风险提示版体检卡（事实层触发器/假设层三情景/结论层空白=主人拍板）——在报告卡后（F10 extra 可用）
+      renderRiskCheck(code, divs, kline, extra);
       // v1.9.6：决策摘要区（买入结论行+关键三数）
       renderDecisionSummary(code, divs, kline);
       // 分红节奏
@@ -1451,6 +1492,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const ampTxt = { low: '当前估值低位（分位≤20%），基本面信号可能滞后，建议谨慎验证后再决策', mid: '当前估值中性', high: '当前估值高位（分位≥80%），基本面信号可信度较高' }[valAmp];
     // 组合判定
     const signals = [];
+    // D1c（阶段4）：分红率政策变化监控——支付率（分红÷EPS）连2期降>10pp→提示收缩
+    const payoutByYear = {};
+    const dpsByYear = {};
+    (divs || []).forEach(d => {
+      if (d.pending || !(d.dps > 0) || !d.ex) return;
+      const y = d.ex.slice(0, 4); dpsByYear[y] = (dpsByYear[y] || 0) + d.dps;
+    });
+    Object.keys(dpsByYear).forEach(y => {
+      if (epsByYear[y] != null && epsByYear[y] > 0) payoutByYear[y] = dpsByYear[y] / epsByYear[y];
+    });
+    const pyKeys = Object.keys(payoutByYear).sort();
+    if (pyKeys.length >= 3) {
+      const p3 = pyKeys.slice(-3).map(y => payoutByYear[y]);
+      if (p3[1] < p3[2] - 0.10 && p3[0] < p3[1] - 0.10) {
+        signals.push({ t: `🟠 分红率连2期降>10pp（${pyKeys.slice(-3).map((y, i) => y + ' ' + (p3[i] * 100).toFixed(0) + '%').join('→')}）——派息政策收缩，关注可持续性` });
+      }
+    }
     if (divDegraded) signals.push({ t: '🔴 分红连续 2 年下调（' + divConsec.slice(-1).map(s => s.y + ' ' + s.p2.toFixed(1) + '%').join('、') + '）→ 降级观察' });
     else if (yoy.length >= 2 && yoy[yoy.length - 1].pct != null && yoy[yoy.length - 1].pct <= 0) signals.push({ t: '🟡 最近年度（' + yoy[yoy.length - 1].y + '）分红停增/下调 ' + yoy[yoy.length - 1].pct.toFixed(1) + '%，第 1 年关注' });
     else signals.push({ t: '🟢 分红近 ' + (yoy.length ? yoy.length : 0) + ' 年未见连续停增（最近 ' + (yoy.length ? yoy[yoy.length - 1].y : '—') + ' ' + (yoy.length && yoy[yoy.length - 1].pct != null ? (yoy[yoy.length - 1].pct > 0 ? '+' : '') + yoy[yoy.length - 1].pct.toFixed(1) + '%' : '—') + '）' });
@@ -1469,10 +1527,65 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   /* v1.9.3：档位画像卡（诊断页）——五态分类 + 年化等待收益/间隔/收益差（研究固化数据） */
+  /* M2（阶段3）：风险提示版体检卡——事实层触发器/假设层三情景表/结论层空白（主人拍板区）
+   * 事实层：财报证据（扣非/OCF/毛利率/负债率/ROE退化/分红连续性/行业信号）——全部可回源，零猜测
+   * 假设层：divForecast 三情景 DPS+股息率区间（保守/中性/乐观）
+   * 结论层：空白——买/持/卖由主人定（不替主人拍板，8/18 原则）
+   */
+  function renderRiskCheck(code, divs, kline, extra) {
+    const el = $('#diagRiskCheck');
+    if (!el) return;
+    const price = kline && kline.length ? kline[kline.length - 1].close : null;
+    // 事实层：财报证据（extra=F10 数据）
+    const facts = [];
+    if (extra && extra.deductNetProfit != null && extra.netProfit != null && extra.netProfit > 0) {
+      const npRatio = (extra.netProfit - extra.deductNetProfit) / extra.netProfit * 100;
+      if (npRatio > 15) facts.push({ lv: 'warn', t: `非经常损益占归母 ${npRatio.toFixed(0)}%（理财/补助虚增嫌疑）` });
+      else facts.push({ lv: 'ok', t: `利润含金量高（扣非/归母=${(extra.deductNetProfit / extra.netProfit * 100).toFixed(0)}%）` });
+    }
+    if (extra && extra.ocf != null && extra.netProfit != null && extra.netProfit > 0) {
+      const cov = extra.ocf / extra.netProfit;
+      facts.push({ lv: cov < 0.6 ? 'warn' : 'ok', t: `OCF/净利=${(cov * 100).toFixed(0)}%（${cov < 0.6 ? '现金流偏弱，分红靠家底' : '现金流健康'}）` });
+    }
+    if (extra && extra.roeDownYears != null && extra.roeDownYears >= 2) facts.push({ lv: 'warn', t: `ROE 连降${extra.roeDownYears}年（盈利能力退化）` });
+    if (extra && extra.grossMargin != null && extra.grossMarginPrev != null && extra.grossMargin < extra.grossMarginPrev - 2) facts.push({ lv: 'warn', t: `毛利率下降 ${(extra.grossMarginPrev - extra.grossMargin).toFixed(1)}pp（${extra.grossMarginPrev.toFixed(1)}→${extra.grossMargin.toFixed(1)}%）` });
+    if (extra && extra.liabilityRatio != null && extra.liabilityRatio > 70) facts.push({ lv: 'warn', t: `负债率 ${extra.liabilityRatio.toFixed(0)}%（>70%）` });
+    // 事实层：分红连续性（divs 序列，报告期归组）
+    const ys = {};
+    (divs || []).forEach(d => { if (d.pending || !(d.dps > 0) || !d.ex) return; const y = d.ex.slice(0, 4); ys[y] = (ys[y] || 0) + d.dps; });
+    const yKeys = Object.keys(ys).sort();
+    if (yKeys.length >= 3) {
+      const last3 = yKeys.slice(-3).map(y => ys[y]);
+      if (last3[1] > last3[2] * 1.02 && last3[0] > last3[1] * 1.02) facts.push({ lv: 'ok', t: `分红连续 ${yKeys.length} 年递增（${yKeys.slice(-3).join('/')}）` });
+      else if (last3[0] < last3[1] * 0.98 && last3[1] < last3[2] * 0.98) facts.push({ lv: 'warn', t: `分红连续 2 年下调（${yKeys.slice(-3).map((y, i) => y + '=' + last3[i]).join(' ') }）` });
+      else facts.push({ lv: 'ok', t: `分红近 ${yKeys.length} 年稳定（最近 ${yKeys[yKeys.length - 1]}=${ys[yKeys[yKeys.length - 1]]} 元）` });
+    } else if (yKeys.length) facts.push({ lv: 'info', t: `分红数据 ${yKeys.length} 年（<3年，成长股通道？）` });
+    // 事实层：行业信号（trapFilter 同源信号——扣非转负/支付率过高）
+    if (extra && extra.deductNetProfit != null && extra.deductNetProfit < 0) facts.push({ lv: 'red', t: '扣非转负（命门信号：强有效，触发降档/回避）' });
+    // 假设层：三情景 DPS 区间
+    const fc = price > 0 ? DL.divForecast(divs, price) : null;
+    let assumeHtml = '<div class="hint" style="font-size:10px">数据不足，无假设区间</div>';
+    if (fc) {
+      const row = (label, v, color) => `<div style="flex:1;min-width:90px;padding:5px 7px;border-radius:6px;background:${color}"><div style="font-size:10px">${label}</div><div style="font-size:12px;font-weight:700">${v}</div></div>`;
+      assumeHtml = `<div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${row('保守（10年周期均）', fc.text.conservative, 'rgba(224,90,90,.12)')}
+        ${row('中性（7年周期均）', fc.text.base, 'rgba(224,160,48,.12)')}
+        ${row('乐观（最近年度）', fc.text.optimistic, 'rgba(76,175,125,.12)')}
+      </div>`;
+    }
+    const factsHtml = facts.length ? facts.map(f => `<div style="font-size:11px;margin:2px 0;color:${f.lv === 'red' ? '#e05a5a' : f.lv === 'warn' ? '#e0a030' : f.lv === 'ok' ? 'var(--fg)' : 'var(--sub)'}">${f.lv === 'red' ? '🔴' : f.lv === 'warn' ? '🟡' : f.lv === 'ok' ? '✅' : 'ℹ️'} ${f.t}</div>`).join('') : '<div class="hint" style="font-size:10px">事实层数据不足（不假装有）</div>';
+    el.innerHTML = `<div style="font-size:13px;font-weight:700;margin-bottom:4px">🏥 财报体检卡 <span style="font-size:9px;font-weight:400;color:var(--sub)">（M2·事实层可回源/假设层三情景/结论层您拍板）</span></div>
+      <div style="font-size:11px;color:var(--sub);margin:4px 0 2px">【事实层 · 触发器】</div>
+      ${factsHtml}
+      <div style="font-size:11px;color:var(--sub);margin:6px 0 2px">【假设层 · 三情景 DPS/股息率区间】（M5 引擎·${fc ? fc.years.n + ' 年数据至 ' + fc.years.last : '—'}）</div>
+      ${assumeHtml}
+      <div style="font-size:11px;color:var(--sub);margin:6px 0 2px">【结论层 · 主人拍板区】</div>
+      <div style="font-size:11px;padding:6px 8px;border:1px dashed var(--line);border-radius:6px;color:var(--muted)">买 / 持 / 卖 —— 由主人依据上两层事实决定（工具不替您拍板）</div>`;
+  }
+
   function renderTierProfile(code) {
     const el = $('#diagTierProfile');
-    if (!el) return;
-    const tcls = DL.classifyTier(code);
+    if (!el) return;    const tcls = DL.classifyTier(code);
     const p = tcls.profile;
     const known = p != null;
     let html = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="color:${tcls.color}">${tcls.label}</b><span style="font-size:11px;color:var(--sub)">${tcls.detail}</span></div>`;
@@ -1615,13 +1728,16 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* v1.9.13：分位线语义行（线源/线高低含义/红线/短样本告警） */
     const lineNoteHtml = v.lineNote ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 ${v.lineNote}</div>` : '';
     const sourceTxt = (extra && extra.source) ? extra.source : '研究数据';
+    // M1（阶段3）：数据源分级徽章（L0财报原文/L1公告/L2-F10/L3二手）——缺字段=“数据不足”不假装有
+    const srcLevel = (extra && extra.source && /F10/.test(extra.source)) ? 'L2' : (extra && extra.source && /研究数据/.test(extra.source)) ? 'L1' : 'L2';
+    const srcBadge = `<span style="border:1px solid ${srcLevel === 'L0' ? '#4caf7d' : srcLevel === 'L1' ? '#8bc34a' : '#e0a030'};border-radius:4px;padding:0 4px;color:${srcLevel === 'L0' ? '#4caf7d' : srcLevel === 'L1' ? '#8bc34a' : '#e0a030'}">数据源 ${srcLevel}（${srcLevel === 'L0' ? '财报原文' : srcLevel === 'L1' ? '公告/研究' : 'F10二手' }）</span>`;
     const freshTxt = (extra && extra.period) ? `数据时效：${extra.period}` : '数据时效：实时/延迟（截至最新交易日）';
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="font-size:12px;font-weight:700">📋 报告卡 · ${periodLabel}${industry ? ' · ' + industry : '<span style="color:#e0a030"> · 行业待确认（仅核心三问）</span>'}</div>
         <div style="font-size:10px;color:var(--muted)">结论由引擎生成 · 可回源</div>
       </div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote} · ${freshTxt} · <span style="border:1px solid var(--line);border-radius:4px;padding:0 4px">溢价分位·近3年·估值参考</span></div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote} · ${freshTxt} · ${srcBadge}</div>
       ${finEvidHtml}
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
         ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}${v.trap.level === 'hard' ? ' · 💱 换仓参考：继续持有=吃当前股息率（覆盖 ' + (cov != null ? (1 / cov).toFixed(1) + ' 倍' : '—') + '）；如需换仓可到决策台扫描对比更健康标的——注意换仓有交易成本+浮盈税（A股印花税 0.05%+佣金），历史数据非承诺' : ''}</div>` : ''}
