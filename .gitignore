@@ -3,3 +3,7 @@ dividends.json
 tencent_test.json
 *.bak-*
 .wrangler/
+
+test/.f10-cache.json
+test/.index-cache.json
+.state/

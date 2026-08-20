@@ -14,7 +14,7 @@ const path = require('path');
 
 const ROOT = __dirname + '/..';
 const WATCH_FILE = process.env.WATCH_FILE || ROOT + '/watchlist.json';
-const STATE_FILE = process.env.STATE_FILE || '/tmp/watch-state.json';
+const STATE_FILE = process.env.STATE_FILE || ROOT + '/.state/watch-state.json';
 
 /* ---------- 配置：持仓+自选（登记一行即监测，通用） ---------- */
 function loadWatchlist() {
@@ -55,7 +55,7 @@ async function getAnnouncements(code, days = 45) {
   } catch (e) { return []; }
 }
 /* ---------- 财报信号（已回测验证的进决策；未验证的仅展示） ---------- */
-function finSignals(f) {
+function finSignals(f, code) {
   const sigs = [];
   if (!f || !f.annuals || f.annuals.length < 3) return sigs;
   const a = f.annuals; // 降序
@@ -74,12 +74,32 @@ function finSignals(f) {
   if (f.ocf != null && f.netProfit != null && f.netProfit > 0 && f.ocf / f.netProfit < 0.6) {
     sigs.push({ sig: 'S7', level: '🟡', txt: `OCF/净利 ${(f.ocf / f.netProfit * 100).toFixed(0)}% 偏低` });
   }
+  // 汇率敏感度（补漏：海外收入>30%标的→监测加信号；宇通已配 fxSensitive）
+  if (DL.BUY_CFG && DL.BUY_CFG[code] && DL.BUY_CFG[code].fxSensitive) {
+    sigs.push({ sig: 'FX', level: '🟡', txt: '汇率敏感度：海外收入>30%，人民币升值5%影响净利约2-2.5%（监测信号）' });
+  }
   return sigs;
 }
 /* ---------- 单只判定（可买/等/观望 + 依据） ---------- */
-function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays }) {
+function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays, susp, divYears, indOverLimit }) {
   const name = quote ? quote.name : code;
-  const signals = finSignals(f);
+  const signals = finSignals(f, code);
+  // 盲区15：停牌检测（现价连续 N 日不变→标停牌跳过；由主流程 kline 尾段判定传入）
+  if (susp) return { code, name, price: quote ? quote.price : null, dy: dy != null ? dy : null, tier: '停牌', tierNote: '停牌中（连续多日无成交价变动），跳过判定', verdict: '⏸️ 停牌', verdictNote: '停牌检测：现价连续多日不变，跳过买卖判定', signals, action: 'hold', actionText: '⏸️ 停牌跳过' };
+  // v5 补漏：成长股独立通道——分红历史<3年 → 不入红利框架，走 PE/PB+增速逻辑（防硬塞）
+  if (divYears != null && divYears < 3) {
+    return { code, name, price: quote ? quote.price : null, dy: dy != null ? dy : null, tier: null, tierNote: `分红历史仅${divYears}年（<3年）`, verdict: '📈 成长股独立通道', verdictNote: '分红历史<3年，不入红利框架；走 PE/PB+增速逻辑（成长股独立通道，防硬塞）', signals, action: 'hold', actionText: '📈 成长股通道（非红利标的）' };
+  }
+  // 盲区15：流动性检查（日成交额<1000万 → 强度×0.7 提示）——用 K 线尾段量能估算（kline 带 volume 时）
+  let liqNote = '';
+  if (kline && kline.length >= 20 && quote && quote.price > 0) {
+    const vols = kline.slice(-20).map(x => x.volume).filter(v => v != null && v > 0);
+    if (vols.length >= 10) {
+      const avgVol = vols.reduce((s, v) => s + v, 0) / vols.length;
+      const avgAmt = avgVol * quote.price;   // 手×100股×价
+      if (avgAmt < 1000e4) liqNote = `；⚠️ 流动性低（日均成交额≈${(avgAmt / 1e4).toFixed(0)}万<1000万）→ 强度×0.7`;
+    }
+  }
   // 档位：溢价分位线（dy − 国债 vs P75/P90/P95）
   let tier = null, tierNote = '';
   if (tierLine && !tierLine.pending && dy != null) {
@@ -127,7 +147,7 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   const a0 = (f && f.annuals && f.annuals[0]) || null;
   const a1 = (f && f.annuals && f.annuals[1]) || null;
   const finGood = !!(a0 && a1 && a1.deductNetProfit != null && a1.deductNetProfit > 0 && a0.deductNetProfit > a1.deductNetProfit);
-  let ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals: indSignals, industry: (f && (f.industry || f.csrcIndustry)) || '', finGood, valuation: null });
+  let ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals: indSignals, industry: (f && (f.industry || f.csrcIndustry)) || '', finGood, valuation: null, indOverLimit: !!indOverLimit });
   // 标的分层（大师最终方案）：事件层（伊利/平安）只监控不自动买卖——买入信号降级为提示
   const layer = DL.TRADE_LAYER[code] || 'auto';
   if (layer === 'event' && ts.action.startsWith('buy_')) {
@@ -138,7 +158,8 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   let verdict = ts.text;
   let verdictNote = `${ts.reason}（${ts.evidence}）`;
   if (signals.length) verdictNote += `；信号: ${signals.map(s => s.txt).join('; ')}`;
-  return { code, name, price: quote ? quote.price : null, dy: dy != null ? dy : null, tier: oldTier, tierNote, verdict, verdictNote, signals, action: ts.action, actionText: ts.text };
+  if (liqNote) verdictNote += liqNote;
+  return { code, name, price: quote ? quote.price : null, dy: dy != null ? dy : null, tier: oldTier, tierNote, verdict, verdictNote, signals, action: ts.action, actionText: ts.text, signalLevel: ts.level };
 }
 /* ---------- 主流程 ---------- */
 (async () => {
@@ -148,10 +169,69 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
   const quotes = await getQuotes(codes);
   let state = {};
   try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
-  const report = { ts: new Date().toISOString(), items: [], changes: [] };
+  const report = { ts: new Date().toISOString(), items: [], changes: [], portfolio: null };
+  // v5 补漏：国债利率漂移>50bp → 触发价全部重算（含已命中，标注"利率重算"）
+  let rateShift = false, rateNote = '';
+  try {
+    await DL.refreshTreasury();
+    const prevRate = (state && state._treasury) != null ? state._treasury : null;
+    if (prevRate != null && DL.TREASURY_NOW != null && Math.abs(DL.TREASURY_NOW - prevRate) > 0.5) {
+      rateShift = true; rateNote = `⚠️ 国债利率漂移 ${prevRate.toFixed(2)}%→${DL.TREASURY_NOW.toFixed(2)}%（>50bp）→ 全部触发价按新利率重算`;
+    }
+    if (DL.TREASURY_NOW != null) state._treasury = DL.TREASURY_NOW;
+  } catch (e) {}
+  if (rateShift) report.rateShift = rateNote;
+  // v7 暴跌时卖出提示：大盘（沪深300）分位<20% → 提示"卖出可能在底部，可分批"（附在报告层，不拦自动卖出）
+  try {
+    const ix = await DL.getIndexKline('000300', '2016-01-01', DL.todayStr());
+    const closes = Object.entries(ix).filter(([, c]) => c > 0).map(([, c]) => c);
+    if (closes.length >= 250) {
+      const cur = closes[closes.length - 1];
+      const sorted = closes.slice(-250).sort((a, b) => a - b);
+      const pct = sorted.filter(c => c <= cur).length / sorted.length * 100;
+      report.marketPct = pct;
+      if (pct < 20) report.marketNote = `🌊 大盘处于近1年低位（沪深300分位 ${pct.toFixed(0)}%）——若触发卖出，注意可能卖在底部，可分批执行`;
+    }
+  } catch (e) {}
+  // 组合行业分布（v7 大师 A）：单行业≤2只+≤40%；行业超限（≥3只）→ 新买入降强度×0.5
+  const indCount = {};
+  for (const code of cfg.holdings) {
+    try {
+      const f0 = await DL.fetchF10Annual(code);
+      const ind0 = f0 && (f0.industry || f0.csrcIndustry || '');
+      const key0 = DL.indKeyOf(ind0) || ind0 || '未知';
+      indCount[key0] = (indCount[key0] || 0) + 1;
+    } catch (e) {}
+  }
+  const overLimit = Object.entries(indCount).filter(([, n]) => n >= 3).map(([k, n]) => `${k}×${n}`);
+  if (overLimit.length) report.portfolio = { indCount, overLimit };
+  const indOverLimitCodes = {};
+  for (const code of cfg.holdings) {
+    try {
+      const f0 = await DL.fetchF10Annual(code);
+      const ind0 = f0 && (f0.industry || f0.csrcIndustry || '');
+      const key0 = DL.indKeyOf(ind0) || ind0 || '未知';
+      if ((indCount[key0] || 0) >= 3) indOverLimitCodes[code] = true;
+    } catch (e) {}
+  }
   for (const code of codes) {
     let f = null;
     try { f = await DL.fetchF10Annual(code); } catch (e) {}
+    // v7 财报披露 13 步⑨⑩：新财报 vs 上期对比表 + diff（state 存上期财务，变化即输出）
+    let finDiff = null;
+    if (f && f.annuals && f.annuals[0]) {
+      const a = f.annuals[0];
+      const prevFin = state[code] && state[code].fin;
+      const curFin = { p: (a.reportPeriod || '').slice(0, 10), np: a.netProfit, kf: a.deductNetProfit, gm: a.grossMargin };
+      if (prevFin && prevFin.p !== curFin.p && curFin.np != null) {
+        const diffParts = [];
+        if (prevFin.np != null && curFin.np != null) diffParts.push(`净利 ${prevFin.np}→${curFin.np}亿（${((curFin.np / prevFin.np - 1) * 100).toFixed(0)}%）`);
+        if (prevFin.kf != null && curFin.kf != null) diffParts.push(`扣非 ${prevFin.kf}→${curFin.kf}亿（${((curFin.kf / prevFin.kf - 1) * 100).toFixed(0)}%）`);
+        if (prevFin.gm != null && curFin.gm != null) diffParts.push(`毛利率 ${prevFin.gm}→${curFin.gm}%`);
+        if (diffParts.length) finDiff = { from: prevFin.p, to: curFin.p, parts: diffParts };
+      }
+      state[code] = Object.assign({}, state[code], { fin: curFin });
+    }
     // 最近年度 DPS（工具同源：fetchDividendsOne 全历史分红 → 报告期归组）
     let dps = null, dy = null;
     try {
@@ -163,6 +243,8 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
       rows.forEach(x => { const report = (x.REPORT_DATE || '').slice(0, 10); const y = report.slice(0, 4); if (x.PRETAX_BONUS_RMB) byY[y] = (byY[y] || 0) + (parseFloat(x.PRETAX_BONUS_RMB) || 0) / 10; });
       const ys = Object.keys(byY).sort();
       if (ys.length) dps = byY[ys[ys.length - 1]];
+      // v5 成长股通道：分红年份数（连续分红年数）
+      var divYears = ys.length;
     } catch (e) {}
     if (dps != null && dps > 0 && quotes[code] && quotes[code].price > 0) dy = dps / quotes[code].price * 100;
     const tierLine = DL.TIER_LINE && DL.TIER_LINE[code] ? DL.TIER_LINE[code] : null;
@@ -172,10 +254,18 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
     // 近60日K线（趋势确认用；缓存优先）
     let kline = null;
     try { kline = await DL.getKline(code, 90); } catch (e) {}
+    // 盲区15：停牌检测——K线尾段连续≥5日收盘价不变 → 停牌（跳过判定）
+    let susp = false;
+    if (kline && kline.length >= 8) {
+      const tail = kline.slice(-8);
+      const closes = tail.map(x => x.close).filter(c => c != null && c > 0);
+      if (closes.length >= 5 && new Set(closes.map(c => c.toFixed(2))).size === 1) susp = true;
+    }
+    // 盲区15：流动性检查（日成交额<1000万 → 强度×0.7 提示；无成交额数据时跳过）
     // 冷却：距上次买入触发天数（state.lastBuyTs）
     let lastBuyDays = null;
     if (prev && prev.lastBuyTs) lastBuyDays = Math.round((Date.now() - prev.lastBuyTs) / 86400000);
-    const item = judge({ code, quote: quotes[code], dps, dy, f, tierLine, treasury, kline, lastBuyDays });
+    const item = judge({ code, quote: quotes[code], dps, dy, f, tierLine, treasury, kline, lastBuyDays, susp, divYears, indOverLimit: !!indOverLimitCodes[code] });
     if (!force) {
       if (!prev) item.changed = true;
       else if (prev.verdict !== item.verdict) item.changed = true;
@@ -186,11 +276,37 @@ function judge({ code, quote, dps, dy, f, tierLine, treasury, kline, lastBuyDays
     if (anns.length) item.announcements = anns;
     report.items.push(item);
     if (item.changed) report.changes.push(item);
+    if (finDiff) { item.finDiff = finDiff; report.changes.push(item); }
+    // 盲区19 犹豫双通道：硬红灯（S3）连续5日未执行 → 升级强提醒；软恶化（S2）未执行→只记录尊重主人
+    let stale = 0;
+    if (prev && prev.signalLevel && prev.signalLevel === item.signalLevel && item.signalLevel) {
+      stale = (prev.staleDays || 0) + 1;
+    }
+    if (item.signalLevel === 'S3' && stale >= 5) item.staleAlert = `🚨 硬红灯 S3 已连续${stale}日未执行——请尽快处理（清仓或明确豁免）`;
+    else if (item.signalLevel === 'S2') item.staleNote = '🟠 软恶化未执行=尊重主人选择（仅记录）';
     state[code] = { verdict: item.verdict, tier: item.tier, price: item.price, dy: item.dy, ts: report.ts,
+      signalLevel: item.signalLevel || null, staleDays: stale,
       lastBuyTs: (item.action && item.action.startsWith('buy_')) ? Date.now() : (prev && prev.lastBuyTs) };
   }
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
   fs.writeFileSync('/tmp/watch-report.json', JSON.stringify(report, null, 1));
+  // v5 失效条件（组合层面信号，区别于单只卖出分级）：观察级/暂停级/恢复级
+  // 利率连续上行检测（TREASURY 状态历史）→ 观察级×0.5 / 暂停级暂停新买入 / 恢复级反转
+  const rateHist = state._rateHist || [];
+  if (DL.TREASURY_NOW != null) {
+    rateHist.push({ d: report.ts.slice(0, 10), r: DL.TREASURY_NOW });
+    if (rateHist.length > 730) rateHist.shift();
+    state._rateHist = rateHist;
+  }
+  const last4 = rateHist.slice(-4).filter(x => x.r != null);
+  let regime = null;
+  if (last4.length >= 4) {
+    const upCount = last4.filter((x, i) => i > 0 && x.r > last4[i - 1].r).length;
+    if (upCount >= 4) regime = { level: '观察级', note: `利率连续上行（最近${last4.length}次采样${upCount}次上行）→ 买入强度×0.5+卖出提前触发` };
+    else if (upCount >= 3 && (state._regimeLevel === '观察级')) regime = { level: '暂停级', note: '观察级持续（利率持续上行）→ 暂停新买入（保留持有+卖出规则）' };
+    else if (upCount <= 1) regime = { level: '恢复级', note: '利率信号反转 → 恢复正常' };
+  }
+  if (regime) { report.regime = regime; state._regimeLevel = regime.level; }
   // 输出：有变化→只输出变化项；无变化→空数组（上层 cron 据此不触发=不花 LLM 钱）；--force→全部
   const out = force ? report.items : report.changes;
   console.log(JSON.stringify(out, null, 1));

@@ -1430,7 +1430,7 @@ const TRADE_LAYER = {
  */
 const BUY_CFG = {
   '600036': { minTier: 'p75' },                // 招行
-  '600066': { minTier: 'p95', trend: true, gate: true },  // 宇通
+  '600066': { minTier: 'p95', trend: true, gate: true, fxSensitive: true },  // 宇通（海外收入57.8%→汇率敏感度监测）
   '600887': { minTier: 'p95', trend: true },   // 伊利
   '600941': { minTier: 'p90' },                // 移动
   '601318': { minTier: 'p75' },                // 平安
@@ -1461,7 +1461,7 @@ function indKeyOf(industry) {
   if (t.includes('银行') || t.includes('货币金融')) return 'bank';
   if (t.includes('保险')) return 'insurer';
   if (t.includes('电信') || t.includes('移动') || t.includes('通信')) return 'telecom';
-  if (t.includes('食品') || t.includes('饮料') || t.includes('酒') || t.includes('农副') || t.includes('医药') || t.includes('汽车') || t.includes('家电') || t.includes('电气')) return 'consumer';
+  if (t.includes('食品') || t.includes('饮料') || t.includes('酒') || t.includes('农副') || t.includes('医药') || t.includes('汽车') || t.includes('家电') || t.includes('电气') || t.includes('制造') || t.includes('manufacture') || t.includes('机械')) return 'consumer';
   if (t.includes('电力') || t.includes('燃气') || t.includes('公用')) return 'utility';
   if (t.includes('煤炭') || t.includes('石油') || t.includes('开采') || t.includes('有色')) return 'energy';
   return null;
@@ -1479,19 +1479,20 @@ function levelFromScore(score, backing) {
   if (score === 2) return 'L2';
   return 'L1';
 }
-function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals, industry, finGood, valuation }) {
+function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays, industrySignals, industry, finGood, valuation, indOverLimit }) {
   const cfg = BUY_CFG[code] || { minTier: 'p75' };
   const lvl = { p75: 1, p90: 2, p95: 3 };
   const backing = hasBacking(code, industry);
-  // 1. 卖出优先：行业校准信号（财报恶化=卖出主依据）→ S1/S2/S3 等级
+  // 1. 卖出优先：行业校准信号（财报恶化=卖出主依据）→ S1/S2/S3 等级；盲区14 税务提示（<1年持仓缴10%红利税）
+  const TAX_NOTE = '；⚠️ <1年持仓卖出需缴10%红利税（>1年免税，FIFO持有期）';
   if (industrySignals && industrySignals.level === 'hard') {
-    return { action: 'sell', level: 'S3', strength: '1.0', text: '🔴 S3 清仓（强度 1.0）', reason: industrySignals.msg, evidence: '财报硬红灯（行业校准）' };
+    return { action: 'sell', level: 'S3', strength: '1.0', text: '🔴 S3 清仓（强度 1.0）', reason: industrySignals.msg + TAX_NOTE, evidence: '财报硬红灯（行业校准）' };
   }
   if (industrySignals && industrySignals.level === 'soft') {
-    return { action: 'reduce', level: 'S2', strength: '0.3-0.5', text: '🟠 S2 减半（建议卖出 30-50%）', reason: industrySignals.msg, evidence: '财报软恶化（行业校准）' };
+    return { action: 'reduce', level: 'S2', strength: '0.3-0.5', text: '🟠 S2 减半（建议卖出 30-50%）', reason: industrySignals.msg + TAX_NOTE, evidence: '财报软恶化（行业校准）' };
   }
   if (industrySignals && industrySignals.level === 'watch') {
-    return { action: 'watch', level: 'S1', strength: '0.15-0.2', text: '🟡 S1 观察（强度 0.15-0.2）', reason: industrySignals.msg, evidence: '财报单信号（行业校准）' };
+    return { action: 'watch', level: 'S1', strength: '0.15-0.2', text: '🟡 S1 观察（强度 0.15-0.2）', reason: industrySignals.msg + TAX_NOTE, evidence: '财报单信号（行业校准）' };
   }
   // 2. 买入触发：财报确认（主依据·硬闸）→ 价格分位（定时机）→ 等级（证据强度动态）
   const minLvl = lvl[cfg.minTier];
@@ -1522,16 +1523,19 @@ function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays,
       if (valuation.pct < 30) score += 1;
       else if (valuation.pct > 70) score -= 1;
     }
-    const L = levelFromScore(score, backing);
+    const L0 = levelFromScore(score, backing);
+    // 组合约束（v7 大师 A）：行业超限（同行业≥3只）→ 强度×0.5 降级（非禁止；主人明确加仓例外→UI 标注）
+    const L = indOverLimit ? ({ L5: 'L4', L4: 'L3', L3: 'L3', L2: 'L2', L1: 'L1' }[L0] || L0) : L0;
     const L_NAME = { L1: '观察', L2: '试探', L3: '小仓', L4: '加仓', L5: '重仓' }[L];
     const L_STR = { L1: '0%', L2: '1/6', L3: '1/3', L4: '2/3', L5: '上限' }[L];
     const L_ICON = { L1: '👁️', L2: '🟢', L3: '🟢', L4: '🟢', L5: '✅' }[L];
+    const comboNote = indOverLimit ? `；⚠️ 行业超限（同行业≥3只，组合约束→强度×0.5，建议换仓分散）` : '';
     const degradeNote = (score >= 4 && !backing.ok)
       ? `（首触降档：P95历史触发${P95_TRIGGERS[code] || 0}次${backing.indOk ? '' : '+行业无背书（胜率<80%或n<10）'}，最高L3，等验证）`
       : '';
     const tierNote = `dy ${dy != null ? dy.toFixed(2) + '%' : '—'} 达 ${tier.toUpperCase()}`;
-    const evParts = [tierNote, finGood ? '财报好' : '财报过', industrySignals && industrySignals.level == null ? '行业无恶化' : '', valuation != null && valuation.pct != null ? (valuation.pct < 30 ? '估值低估' : valuation.pct > 70 ? '估值高估' : '估值中性') : '', backing.ok ? '双背书✅' : `无背书（触发${P95_TRIGGERS[code] || 0}次${backing.indOk ? '' : '/行业无背书'}）`].filter(Boolean);
-    return { action: 'buy_' + L, level: L, strength: L_STR, text: `${L_ICON} ${L} ${L_NAME}（建议 ${L_STR}）`, reason: `证据${score}分：${evParts.join('+')}${degradeNote}`, evidence: '财报确认✅+价格分位+证据强度' };
+    const evParts = [tierNote, finGood ? '财报好' : '财报过', industrySignals && industrySignals.level == null ? '行业无恶化' : '', valuation != null && valuation.pct != null ? (valuation.pct < 30 ? '估值低估' : valuation.pct > 70 ? '估值高估' : '估值中性') : '', backing.ok ? '双背书✅' : `无背书（触发${P95_TRIGGERS[code] || 0}次${backing.indOk ? '' : '/行业无背书'}）`, indOverLimit ? '行业超限' : ''].filter(Boolean);
+    return { action: 'buy_' + L, level: L, strength: L_STR, text: `${L_ICON} ${L} ${L_NAME}（建议 ${L_STR}）${comboNote}`, reason: `证据${score}分：${evParts.join('+')}${degradeNote}`, evidence: '财报确认✅+价格分位+证据强度' };
   }
   // 3. 默认持有
   return { action: 'hold', level: null, strength: '0%', text: '⚪ 持有', reason: dy != null ? `财报${finOk === false ? '❌未过' : '确认✅'}，dy ${dy.toFixed(2)}% 未达买入线（${cfg.minTier.toUpperCase()}起）` : '数据不足', evidence: '财报确认+' + (tier ? '未达档位' : '无触发') };

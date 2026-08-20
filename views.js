@@ -449,6 +449,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     html += alerts.length
       ? alerts.map(a => `<div class="alert-item">🔔 ${a}</div>`).join('')
       : '<div class="hint">✅ 变化提醒：自选股状态稳定（股息率/价格无显著变化）</div>';
+    /* 首页速览增强（UI 待办）：今日触发/买点命中——读 watch 最近报告 */
+    try {
+      const wr = await fetch('/tmp/watch-report.json').then(r => r.json()).catch(() => null);
+      if (wr && Array.isArray(wr.changes) && wr.changes.length) {
+        html += `<div class="alert-item" style="border-color:#4caf7d">📡 监测触发（${wr.ts.slice(0, 16).replace('T', ' ')}）：${wr.changes.slice(0, 5).map(c => `${c.name} ${c.verdict}（dy ${c.dy != null ? c.dy.toFixed(2) + '%' : '—'}）`).join('；')}</div>`;
+      }
+      if (wr && wr.regime) html += `<div class="alert-item">🌡️ ${wr.regime.level}：${wr.regime.note}</div>`;
+      if (wr && wr.rateShift) html += `<div class="alert-item">🔄 ${wr.rateShift}</div>`;
+    } catch (e) {}
     el.innerHTML = html;
   }
 
@@ -1606,12 +1615,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* v1.9.13：分位线语义行（线源/线高低含义/红线/短样本告警） */
     const lineNoteHtml = v.lineNote ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 ${v.lineNote}</div>` : '';
     const sourceTxt = (extra && extra.source) ? extra.source : '研究数据';
+    const freshTxt = (extra && extra.period) ? `数据时效：${extra.period}` : '数据时效：实时/延迟（截至最新交易日）';
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="font-size:12px;font-weight:700">📋 报告卡 · ${periodLabel}${industry ? ' · ' + industry : '<span style="color:#e0a030"> · 行业待确认（仅核心三问）</span>'}</div>
         <div style="font-size:10px;color:var(--muted)">结论由引擎生成 · 可回源</div>
       </div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote} · <span style="border:1px solid var(--line);border-radius:4px;padding:0 4px">溢价分位·近3年·估值参考</span></div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">数据血缘：${sourceTxt} · ${periodLabel}${modeNote} · ${freshTxt} · <span style="border:1px solid var(--line);border-radius:4px;padding:0 4px">溢价分位·近3年·估值参考</span></div>
       ${finEvidHtml}
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px">
         ${v.trap ? `<div style="font-size:11px;margin-bottom:4px;${v.trap.level === 'hard' ? 'color:#e05a5a;font-weight:700' : 'color:#d9a45b'}">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.msg}${v.trap.level === 'hard' ? ' · 💱 换仓参考：继续持有=吃当前股息率（覆盖 ' + (cov != null ? (1 / cov).toFixed(1) + ' 倍' : '—') + '）；如需换仓可到决策台扫描对比更健康标的——注意换仓有交易成本+浮盈税（A股印花税 0.05%+佣金），历史数据非承诺' : ''}</div>` : ''}
@@ -1641,7 +1651,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig, industry, finGood: !!(extra && extra.deductNetProfit != null && extra.deductNetProfitPrev != null && extra.deductNetProfitPrev > 0 && extra.deductNetProfit > extra.deductNetProfitPrev), valuation: null });
           const col = ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a45b' : ts.action === 'watch' ? '#d9a45b' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)');
           const lvNote = ts.level ? ` <span style="font-weight:400;font-size:10px;color:var(--sub)">等级 ${ts.level} · 建议强度 ${ts.strength}</span>` : '';
-          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + lvNote + '<span style="font-weight:400;font-size:10px;color:var(--sub)"> — ' + ts.reason + '</span></div>';
+          const disclaimer = ts.level ? '<span style="font-weight:400;font-size:9px;color:var(--muted);display:block;margin-top:2px">⚠️ 等级=风险提示+建议，最终动作由您拍板</span>' : '';
+          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + lvNote + '<span style="font-weight:400;font-size:10px;color:var(--sub)"> — ' + ts.reason + '</span>' + disclaimer + '</div>';
         })()}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : (t.label || t.type) + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:9px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
         ${v.ref3D ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
