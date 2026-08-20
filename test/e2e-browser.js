@@ -41,13 +41,14 @@ function ensureServer() {
   });
 }
 
-function launchChrome(opts = {}) {
+async function launchChrome(opts = {}) {
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (!fs.existsSync(chrome)) die('Chrome 不存在');
   const port = opts.port || 9222;
   // v1.9.1：清理 9222 残留（防复用旧实例读到旧版本页面）+ 独立 profile（防缓存）
   // v1.9.29：execSync 加 timeout——macOS lsof 偶发挂起会同步堵死事件循环（实测 240s 总预算都不触发）；独立实例（opts.skipKill）不清理
   if (!opts.skipKill) { try { require('child_process').execSync('lsof -ti:' + port + ' | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {} }
+  else { await closeChrome(port); await new Promise(r => setTimeout(r, 500)); }   // v1.9.29：skipKill 也先 CDP 优雅关闭——残留实例占端口时 poll 会连到旧实例（发布闸门实测挂起）
   const profile = opts.profile || ('/tmp/dvt-browser-profile-' + process.pid + '-' + Date.now());
   const cp = require('child_process').spawn(chrome, [
     '--headless=new', '--disable-gpu', '--no-sandbox',   // v1.9.29：加 --no-sandbox——诊断脚本（3 次全过）带此参数，e2e 不带时 R7 导航后主线程挂起
