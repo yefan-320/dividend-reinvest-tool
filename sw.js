@@ -1,5 +1,6 @@
-/* v3.0 C6：PWA Service Worker——缓存静态资源（加速加载），数据缓存走 IndexedDB（两套不混） */
-const CACHE = 'divtool-v3';
+/* v3.2 S11：PWA Service Worker——缓存静态资源（加速加载），数据缓存走 IndexedDB（两套不混）
+ * 缓存名随版本号（?v= 参数），activate 清旧版本缓存 → 发布后用户不拿旧资源 */
+const CACHE = 'divtool-' + (new URL(self.location.href).searchParams.get('v') || '3.2');
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

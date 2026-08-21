@@ -1390,7 +1390,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   };
   // 版本号
   const ver = $('appVer');
-  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-22 · 若页面异常请强制刷新（下拉或清除缓存）';
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-22 · 数据在本地（IndexedDB），发布自动清旧缓存';
 
   // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
   // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
@@ -1410,7 +1410,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
 <script src="views.js?v=v3.1"></script>
-  /* v3.0 C6：PWA Service Worker 注册（本地服务/HTTPS 环境）——失败静默不影响使用 */
-  try { if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); } } catch (e) {}
+<script src="pwa.js?v=v3.2"></script>
 </body>
 </html>
