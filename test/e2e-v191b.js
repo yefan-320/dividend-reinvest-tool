@@ -70,9 +70,9 @@ async function main() {
   console.log('卖出信号卡:', sell.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 120));
   const sellOk = sell && sell.length > 50 && sell.includes('判定');
   console.log(sellOk ? '  ✅ 卖出信号卡渲染' : '  ❌ 卖出信号卡为空/缺判定');
-  // 发现器按钮存在
-  const btn = await evalJS(`!!document.querySelector('#btnDiscover')`);
-  console.log(btn ? '  ✅ 发现器按钮存在' : '  ❌ 发现器按钮缺失');
+  // 找机会按钮存在（P70：btnScan+btnDiscover 合并为一个入口）
+  const btn = await evalJS(`!!document.querySelector('#btnFindOpp')`);
+  console.log(btn ? '  ✅ 找机会按钮存在' : '  ❌ 找机会按钮缺失');
   // 对比页运行锁（O2）：点两次 cmpRun 不并发
   await evalJS(`document.querySelector('[data-tab="compare"]').click(); 1`);
   await sleep(1000);

@@ -155,6 +155,20 @@ async function main() {
     });
     lines.push(`| ${TIER_NAMES[k]} | ${cells.join(' | ')} | ${a.length} |`);
   }
+  /* C13/D9（2026-08-21）：--json 模式输出权威 JSON（test/rule-stats.json）——发布校验与 data-layer RULE_STATS 比对，防悄悄不同步 */
+  const wantJson = process.argv.includes('--json');
+  if (wantJson) {
+    const out = {};
+    for (const k of ['strong', 'buy', 'watch', 'avoid', 'avoid_small', 'wait']) {
+      const a = stats[k];
+      const sub3 = a.filter(x => x.y === 3);
+      out[k] = sub3.length
+        ? [mean(sub3) != null ? Math.round(mean(sub3) * 10) / 10 : null, winRate(sub3) != null ? Math.round(winRate(sub3)) : null, sub3.length]
+        : [null, null, a.length];
+    }
+    fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/rule-stats.json', JSON.stringify(out, null, 2) + '\n', 'utf8');
+    console.log('\nJSON 已写入 test/rule-stats.json：' + JSON.stringify(out));
+  }
   lines.push('', '等待档数值 = 等1年再买 vs 立即买的 3 年收益差（正=等待有价值）', '口径：分位375窗口TTM·价格+分红·不含交易成本·历史不代表未来');
   fs.writeFileSync(OUT_MD, lines.join('\n'), 'utf8');
   console.log('\n' + lines.join('\n'));

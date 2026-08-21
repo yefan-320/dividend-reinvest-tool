@@ -81,6 +81,11 @@ if [ -f test/div-cases.js ]; then
   echo "==> 口径边界 6 案例单测…"
   node test/div-cases.js || { echo "!! 口径单测失败，中止发布"; exit 1; }
 fi
+# C13/D9（2026-08-21）：RULE_STATS 同步校验——回测表与卡面数字不一致即阻断发布
+if [ -f test/check-rule-stats.js ]; then
+  echo "==> RULE_STATS 同步校验（回测表 vs data-layer）…"
+  node test/check-rule-stats.js || { echo "!! RULE_STATS 不同步，中止发布（先跑 node test/rule-tree-backtest.js --json 重出权威值）"; exit 1; }
+fi
 if [ -f test/e2e-v196.js ]; then
   echo "==> e2e-v196 用户视角回归（搜索框/真实输入/扫描mock/结论行/回本进度 10 断言）…"
   node test/e2e-v196.js || { echo "!! e2e-v196 失败，中止发布"; exit 1; }

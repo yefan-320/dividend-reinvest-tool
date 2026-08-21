@@ -149,6 +149,18 @@ async function waitDlg(timeout, desc) {
   throw new Error('等待弹窗超时: ' + desc);
 }
 
+/* O2（2026-08-21）：alert→toast 后，断言改读 #toast 文本（2.2s 消失，轮询 200ms） */
+async function waitToast(timeout, desc) {
+  const t0 = Date.now();
+  let last = '';
+  while (Date.now() - t0 < timeout) {
+    last = await evalIn(cdp, `(document.getElementById('toast')||{textContent:''}).textContent || ''`);
+    if (last) return last;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  throw new Error('等待toast超时: ' + desc);
+}
+
 async function nav(cdp, url) {
   await cdp.send('Page.navigate', { url });
   await waitFor(cdp, `typeof APP_VERSION !== 'undefined'`, 30000, '页面加载');
@@ -358,7 +370,7 @@ async function main() {
     await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 2`, 90000, '代码添加');
     dialogs.length = 0;
     await evalIn(cdp, `(() => { const i = document.getElementById('cmpInput'); i.value='600036'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
-    const dupMsg = await waitDlg(20000, '去重弹窗');
+    const dupMsg = await waitToast(20000, '去重toast');
     assert(dupMsg.includes('已在列表'), '去重提示错误: ' + dupMsg);
     for (const c of ['515080', '510300', '588000']) {
       await evalIn(cdp, `document.querySelector('#cmpEtfChips [data-c="${c}"]').click()`);
@@ -367,7 +379,7 @@ async function main() {
     await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 5`, 90000, '加满5个');
     dialogs.length = 0;
     await evalIn(cdp, `document.querySelector('#cmpEtfChips [data-c="159915"]').click()`);
-    const capMsg = await waitDlg(20000, '上限弹窗');
+    const capMsg = await waitToast(20000, '上限toast');
     assert(capMsg.includes('最多对比 5 个'), '上限提示错误: ' + capMsg);
     await evalIn(cdp, `(() => { document.querySelectorAll('#cmpList [data-del]')[4].click(); document.querySelectorAll('#cmpList [data-del]')[3].click(); document.querySelectorAll('#cmpList [data-del]')[2].click(); })()`);
     await waitFor(cdp, `document.querySelectorAll('#cmpList .wl-card').length === 2`, 10000, '删除标的');
@@ -387,7 +399,7 @@ async function main() {
     assert(on2 === 0, '日期输入后快捷按钮未熄灭');
     dialogs.length = 0;
     await evalIn(cdp, `(() => { const di = document.getElementById('cmpStartDate'); di.value='2099-01-01'; di.dispatchEvent(new Event('change')); })()`);
-    const futureMsg = await waitDlg(20000, '未来日期弹窗');
+    const futureMsg = await waitToast(20000, '未来日期toast');
     assert(futureMsg.includes('不能晚于今天'), '未来日期提示错误: ' + futureMsg);
     const dv = await evalIn(cdp, `document.getElementById('cmpStartDate').value`);
     assert(dv === '', '未来日期未清空: ' + dv);
@@ -398,7 +410,7 @@ async function main() {
   await S('C3 非法金额拦截', async () => {
     dialogs.length = 0;
     await evalIn(cdp, `(() => { document.getElementById('cmpPrincipal').value='abc'; document.getElementById('cmpMonthly').value='0'; document.getElementById('btnCmpRun').click(); })()`);
-    const msg = await waitDlg(20000, '金额弹窗');
+    const msg = await waitToast(20000, '金额toast');
     assert(msg.includes('有效金额'), '金额提示错误: ' + msg);
     const bc = await evalIn(cdp, `document.getElementById('cmpPrincipal').style.borderColor`);
     assert(bc.includes('red') || bc.includes('224, 102'), '非法金额未标红: ' + bc);
@@ -486,10 +498,10 @@ async function main() {
     await evalIn(cdp, `(async () => { try { const wl = await DL.Watchlist.list(); for (const w of wl) { await DL.Watchlist.remove(w.code); } return wl.length; } catch (e) { return -1; } })()`);
     await evalIn(cdp, `document.querySelector('.tabbar button[data-tab="home"]').click()`);
     await waitFor(cdp, `document.querySelectorAll('#homeWatchlist .chip').length > 0`, 20000, '空自选推荐chips');
-    // H1 时序修正（2026-08-18）：机会速览异步加载，等"非加载中且非空"再断言（防 null/时序误报）
-    await waitFor(cdp, `(() => { const el = document.getElementById('homeOpportunities'); if (!el) return false; const t = el.innerText || ''; return t && !t.includes('加载中') && t.length > 5; })()`, 60000, '机会速览就绪');
+    // H1 时序修正（2026-08-18）：机会速览异步加载，等"非加载中"再断言（P72：无自选时留空=自选卡空态统一引导）
+    await waitFor(cdp, `(() => { const el = document.getElementById('homeOpportunities'); if (!el) return false; const t = el.innerText || ''; return !t.includes('加载中'); })()`, 60000, '机会速览就绪');
     const op0 = await evalIn(cdp, `document.getElementById('homeOpportunities').innerText`);
-    assert(op0.includes('暂无自选') || op0.includes('🔔') || op0.includes('机会') || op0.includes('已到') || op0.includes('变化提醒'), '机会速览异常: ' + op0.slice(0, 60));
+    assert(op0 === '' || op0.includes('暂无自选') || op0.includes('🔔') || op0.includes('机会') || op0.includes('已到') || op0.includes('变化提醒'), '机会速览异常: ' + op0.slice(0, 60));
     dialogs.length = 0;
     // v1.9.6：空自选推荐 chips 可能来自 scan:last 真实扫描缓存（不再是固定 4 个 ETF）——取第一个 chip 测流程
     const chipCode = await evalIn(cdp, `document.querySelector('#homeWatchlist .chip') ? document.querySelector('#homeWatchlist .chip').dataset.code : null`);
@@ -508,7 +520,7 @@ async function main() {
   });
 
   await S('H2 全市场扫描器', async () => {
-    await evalIn(cdp, `document.getElementById('btnScan').click()`);
+    await evalIn(cdp, `document.getElementById('btnFindOpp').click(); document.querySelector('.opp-tab[data-opp="scan"]').click();`);
     await waitFor(cdp, `document.getElementById('scanPanel').style.display === 'block'`, 10000, '扫描面板');
     const t0 = Date.now();
     const msg = await waitFor(cdp, `(() => { const t = document.getElementById('scanPanel').innerText; return (t.includes('筛选出') || t.includes('快照获取失败') || t.includes('扫描失败')) ? t : ''; })()`, 180000, '扫描结束', 3000);
