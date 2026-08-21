@@ -822,6 +822,39 @@ function ttmDivsAtMode(divs, dateStr) {
   if (sum > 0) return { v: sum, mode: 'A' };
   return { v: leftBefore >= 0 ? sorted[leftBefore].dps : 0, mode: 'A' };
 }
+function reportYearDivAt(divs, dateStr) {
+  /* 2026-08-21 主人抓"宇通股息率上蹿下跳"：带状图原用 ttmDivsAt（含 A 兜底 366 天滚动窗口）
+   * A 窗口在一年多派时滑入滑出混 1.5 个财年 → 分子翻倍跳变 → 曲线锯齿
+   * 修复：纯报告期口径——每点分子=最近完整财年（报告期归组）分红合计，无 A 兜底
+   * 前瞻保留（v1.9.27 钦定：公告即算）；返回 0=无完整财年（调用方显示断档） */
+  divs = alignSendZhuan(divs);
+  divs = splitSpecialDivs(divs);
+  const byRepYear = {};
+  divs.forEach(d => {
+    if (!d.report || d.pending || !(d.dps > 0)) return;
+    const y = d.report.slice(0, 4);
+    if (!byRepYear[y]) byRepYear[y] = { sum: 0, hasAnnual: false };
+    byRepYear[y].sum += (d.regular != null ? d.regular : d.dps);
+    if (/-12-31$/.test(d.report)) byRepYear[y].hasAnnual = true;
+  });
+  const yearNow = parseInt(dateStr.slice(0, 4), 10);
+  const completeYears = Object.keys(byRepYear).map(Number)
+    .filter(y => byRepYear[y].hasAnnual && y < yearNow)
+    .sort((a, b) => b - a);
+  /* 2026-08-21：最近已公告完整财年——最新财年未全公告（年报预案未出）时往前找，
+   * 避免空窗期返回 0 断档（宇通 2025-01~04：2024 财年待公告 → 用 2023 财年 1.5，曲线连续） */
+  for (const y of completeYears) {
+    const yrDivs = divs.filter(d => d.report && d.report.startsWith(String(y)) && d.dps > 0);
+    const announced = yrDivs.length > 0 && yrDivs.every(d =>
+      (d.planNotice && d.planNotice <= dateStr) || (!d.planNotice && d.ex && d.ex <= dateStr));
+    if (announced) {
+      const bVal = yrDivs.reduce((s, d) => s + (d.regular != null ? d.regular : d.dps), 0);
+      if (bVal > 0) return bVal;
+    }
+    /* 未全公告 → 继续往前找更早的已公告完整财年（曲线不跳不断） */
+  }
+  return 0;
+}
 function ttmDivsAt(divs, dateStr) {
   // P0-A v1.9.7（2026-08-18）：B主（财年归组）+ A兜底（366天滚动窗口）
   // 问题（回源实锤）：366 天窗口在一年两派过渡期混入“2024末期+2025中期”=1.5 个财年
@@ -2276,7 +2309,7 @@ function sellSignalQuick(divs) {
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, fmtDate, fmtMonth, daysAgo, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
-  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield,
+  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield, reportYearDivAt,
   tierSpot, sellSignalQuick, sellFuse, TIER_LINE,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,

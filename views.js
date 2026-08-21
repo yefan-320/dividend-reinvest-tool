@@ -1376,17 +1376,20 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
      * 且"自然年到账"在年初无分红到账时曲线断档、年末集中跳变。TTM 滚动=平滑+与分位信号线同源 */
     const data = [];
     for (const d of dates) {
-      const t = DL.ttmDivsAt(divs, d);
+      /* 2026-08-21 主人抓"宇通上蹿下跳"：改纯报告期口径（最近完整财年÷当日价），去 A 兜底 366 窗口混入 */
+      const t = DL.reportYearDivAt(divs, d);
       if (t > 0) data.push({ d, y: t / kline[d] * 100 });
     }
     // v1.9.26 除息日告警区分（大师裁决 D）：非除息日 dy 单日突变>50% → 标注疑似异常；除息日跳变=正常不标
     const exDates = new Set(divs.filter(x => x.ex).map(x => x.ex));
+    const planDates = new Set(divs.filter(x => x.planNotice).map(x => x.planNotice));
     data.forEach((x, i) => {
       if (i === 0) return;
       const prev = data[i - 1];
       if (prev.y <= 0) return;
       const chg = Math.abs(x.y - prev.y) / prev.y;
-      if (chg > 0.5 && !exDates.has(x.d)) x.susp = true;   // 非除息日突变 → 疑似数据异常
+      /* 2026-08-21：除息日 + 公告日都排除——公告日=报告期口径分子切换（宇通 2026-03-31 公告 2025年报 1.5→2.5 被误标红） */
+      if (chg > 0.5 && !exDates.has(x.d) && !planDates.has(x.d)) x.susp = true;
     });
     const suspCount = data.filter(x => x.susp).length;
     if (!data.length) { chart.dispose(); el.innerHTML = '<div class="hint">暂无分红数据</div>'; return; }
@@ -1414,7 +1417,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (note) {
       // v1.8.13 功能A：当前股息率的历史分位结论值（窗口=所选年数，不裸报）
       const curPct = (cur != null && vals.length) ? (vals.filter(v => v <= cur).length / vals.length * 100) : null;
-      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=前瞻口径（每点=已公告年度分红÷价，公告即算、含未派发，与顶部信号线同源）${suspCount ? '；⚠️ ' + suspCount + ' 处疑似数据异常（红色标记，非除息日突变>50%，可能数据源错误）' : ''}；年化近2财年=${(() => { try { const ad = DL.calcAnnualDivYield(divs, kline[dates[dates.length-1]]); return ad ? ad.yieldPct.toFixed(2) + '%' : '—'; } catch (e) { return '—'; } })()}`;
+      note.textContent = `当前股息率 ${cur != null ? cur.toFixed(2) : '—'}% · 近 ${years||5} 年 ${curPct != null ? curPct.toFixed(0) : '—'}% 分位（25%~75%：${q25 != null ? q25.toFixed(2) : '—'}%~${q75 != null ? q75.toFixed(2) : '—'}%）· 本图=报告期口径（每点=最近完整财年分红÷当日价，公告即算；宇通类一年多派不再窗口混入）${suspCount ? '；⚠️ ' + suspCount + ' 处疑似数据异常（红色标记，非除息日突变>50%，可能数据源错误）' : ''}；年化近2财年=${(() => { try { const ad = DL.calcAnnualDivYield(divs, kline[dates[dates.length-1]]); return ad ? ad.yieldPct.toFixed(2) + '%' : '—'; } catch (e) { return '—'; } })()}`;
     }
   }
 
