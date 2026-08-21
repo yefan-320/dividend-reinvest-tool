@@ -72,7 +72,10 @@ async function fetchPriceTx(code) {
     const cagr = DL.calcDivCAGR(divs, 3);
     const yrSum = {};
     divs.forEach(d => { if (d.pending || !d.ex || !(d.dps > 0)) return; const y = (d.report || d.ex).slice(0, 4); yrSum[y] = (yrSum[y] || 0) + d.dps; });
-    const ys = Object.keys(yrSum).filter(y => yrSum[y] > 0).sort();
+    /* v2.0 口径同步：回源手工只用有年报的完整财年（与 calcDivCAGR 修复对齐，2026-08-21 平安案例） */
+    const hasAnnual = {};
+    divs.forEach(d => { if (d.report && /-12-31$/.test(d.report) && !d.pending) hasAnnual[d.report.slice(0, 4)] = true; });
+    const ys = Object.keys(yrSum).filter(y => yrSum[y] > 0 && hasAnnual[y]).sort();
     const fy = ys[ys.length - 4], ly = ys[ys.length - 1];
     const manual = fy && yrSum[fy] > 0.1 ? (Math.pow(yrSum[ly] / yrSum[fy], 1 / 3) - 1) : null;
     console.log(`A9  CAGR(3年): 工具=${cagr == null ? 'null' : (cagr * 100).toFixed(2) + '%'}  回源手工=(${fy}:${yrSum[fy]}→${ly}:${yrSum[ly]}) ${manual == null ? 'null(低基数)' : (manual * 100).toFixed(2) + '%'}`);

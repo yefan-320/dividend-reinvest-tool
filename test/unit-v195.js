@@ -119,5 +119,34 @@ T('储备年数 max 防虚高：报告期(2024=2.0) vs 年化(近2财年(2.0+1.0
   return maxDps === 2.0;
 })(), 'reportYearDivAt 空窗=2024 财年 2.0');
 
+// ===== 6. calcDivCAGR 排除未完成财年（2026-08-21 主人抓平安假缩水 -26% 实锤） =====
+// 平安真实数据：2022:2.42 → 2025:2.70（2026 只有中期 0.98，年报未派）——未修复前把 2026 当完整年 → 假缩水
+// 修复后 3 年 CAGR = (2.70/2.42)^(1/3)-1 = +3.7%（注释勿用 2023→2025 两年年化 +5.4% 误导）
+const pingan = cachePingAn();
+function cachePingAn() {
+  // 简化的平安分红（含未完成财年 2026-06-30 中期）
+  return [
+    { ex: '2026-09-10', report: '2026-06-30', dps: 0.98 },
+    { ex: '2026-06-10', report: '2025-12-31', dps: 1.75 },
+    { ex: '2025-10-24', report: '2025-06-30', dps: 0.95 },
+    { ex: '2025-06-30', report: '2024-12-31', dps: 1.62 },
+    { ex: '2024-10-18', report: '2024-06-30', dps: 0.93 },
+    { ex: '2024-07-26', report: '2023-12-31', dps: 1.5 },
+    { ex: '2023-10-20', report: '2023-06-30', dps: 0.93 },
+    { ex: '2023-07-25', report: '2022-12-31', dps: 1.5 },
+    { ex: '2022-10-25', report: '2022-06-30', dps: 0.92 },
+    { ex: '2022-07-25', report: '2021-12-31', dps: 1.5 },
+  ];
+}
+T('calcDivCAGR 排除未完成财年：平安近3年(2022→2025)=+3.7% 非假缩水', (() => {
+  const c = DL.calcDivCAGR(pingan, 3);
+  return c != null && c > 0 && c < 0.1;
+})(), String(DL.calcDivCAGR(pingan, 3)));
+T('calcDivCAGR 未完成财年不入列：lastY=2025（有年报）非 2026（只中期）', (() => {
+  const ys = DL.calcReportYearDivs(pingan).filter(y =>
+    pingan.some(d => (d.report || '').slice(0, 4) === y && /-12-31$/.test(d.report || '') && !d.pending));
+  return ys[ys.length - 1] === '2025';
+})(), 'lastY 应为 2025');
+
 console.log('\n结果:', pass + '/' + (pass + fail), '通过');
 process.exit(fail === 0 ? 0 : 1);
