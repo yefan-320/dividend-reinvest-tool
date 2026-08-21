@@ -2662,12 +2662,23 @@ function calcComboBacktest(combo, pool, opts) {
   const ys = Object.keys(divByYearOut).sort();
   const yearDiv = ys.length ? divByYearOut[ys[ys.length - 1]] : 0;
   /* 每只贡献（排除现金行） */
-  const perStock = rows.filter(r => !r.sim._cashRow).map(r => ({
-    code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
-    finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested,
-    cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
-    divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
-  }));
+  const perStock = rows.filter(r => !r.sim._cashRow).map(r => {
+    const byMonth = {};
+    r.sim.daily.forEach(dd => { byMonth[dd.date.slice(0, 7)] = dd; });
+    const navSeries = Object.keys(byMonth).sort().map(m => +(byMonth[m].value / Math.max(1, r.amount || 1)).toFixed(3)); /* v3.2 S7：迷你图序列（每月末采样归一化） */
+    const byYear = {};
+    r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; });
+    const ys = Object.keys(byYear).sort(); let prev = 0;
+    const yearlyDivs = {};
+    ys.forEach(y => { yearlyDivs[y] = +(byYear[y] - prev).toFixed(2); prev = byYear[y]; }); /* v3.2 S1：逐年分红（对账） */
+    return {
+      code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
+      finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested,
+      cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
+      divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
+      yearlyDivs, navSeries,
+    };
+  });
   /* 权重演化（每年末） */
   const weightEvol = [];
   const yearsList = {};

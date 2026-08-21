@@ -71,7 +71,14 @@ self.onmessage = e => {
       ys.forEach(y => { out[y] = +(byYear[y] - prev).toFixed(2); prev = byYear[y]; });
       return out;
     }
-    const perStock = rows.filter(r => !r._cash).map(r => ({ code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2), finalValue: r.sim.daily[r.sim.daily.length - 1].value, invested: r.sim.daily[r.sim.daily.length - 1].invested, cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.daily[r.sim.daily.length - 1].value / Math.max(1, r.amount) - 1, divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0, yearlyDivs: yearlyDivsOf(r.sim.daily), monthlyFlow: r.sim.monthlyFlow }));
+    /* 每只净值序列（每月末采样归一化——供 SVG 迷你图，≤120 点不占快照体积） */
+    function navSeriesOf(dailyArr, amount) {
+      const byMonth = {};
+      dailyArr.forEach(dd => { byMonth[dd.date.slice(0, 7)] = dd; });
+      const mKeys = Object.keys(byMonth).sort();
+      return mKeys.map(m => +(byMonth[m].value / Math.max(1, amount)).toFixed(3));
+    }
+    const perStock = rows.filter(r => !r._cash).map(r => ({ code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2), finalValue: r.sim.daily[r.sim.daily.length - 1].value, invested: r.sim.daily[r.sim.daily.length - 1].invested, cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.daily[r.sim.daily.length - 1].value / Math.max(1, r.amount) - 1, divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0, yearlyDivs: yearlyDivsOf(r.sim.daily), monthlyFlow: r.sim.monthlyFlow, navSeries: navSeriesOf(r.sim.daily, r.amount) }));
     const weightEvol = [];
     const yearsList = {}; totalAsset.forEach(t => { yearsList[t.d.slice(0, 4)] = true; });
     Object.keys(yearsList).sort().forEach(y => { const yearEnd = totalAsset.filter(t => t.d.slice(0, 4) === y).pop(); if (!yearEnd) return; const wt = {}; let sum = 0; rows.forEach(r => { const dd = r._cash ? null : (r.sim.daily.find(x => x.date === yearEnd.d)); const v = dd ? dd.value : 0; wt[r.code] = v; sum += v; }); Object.keys(wt).forEach(c => { wt[c] = sum > 0 ? wt[c] / sum * 100 : 0; }); weightEvol.push({ y, weights: wt }); });
