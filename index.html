@@ -111,6 +111,9 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
   .cmp-tbl td,.cmp-tbl th{padding:6px 4px;font-size:11px}
   .cmp-tbl td:first-child,.cmp-tbl th:first-child{position:sticky;left:0;background:var(--card);z-index:1;box-shadow:2px 0 4px rgba(0,0,0,.25)}
   .cmp-tbl th:first-child{background:var(--card2)}
+  /* A1（M197）：持仓明细表 ≤900px 隐藏可选列（代码/成本/买入日），保留 名称/股数/现价/市值/盈亏/删除（M267 核心 4 列含盈亏） */
+  .col-opt{display:none}
+  #pfRing{width:120px!important;height:120px!important}
 }
 @media (max-width:480px){
   #tab-compare .row{flex-direction:column}
@@ -191,6 +194,12 @@ body{padding-bottom:64px}
 <script>
 /* 密码锁：SHA-256 校验（防明文）+ localStorage 30 天免密 */
 (function () {
+  /* M205（2026-08-21）：无 crypto.subtle（Safari/Firefox file:// 降级）→ 跳过锁屏放行+console 警告
+   * 防路人级别可接受（不拒绝进入，主人永远能进）；Chrome file:// 是 secure context 正常锁 */
+  if (!window.crypto || !window.crypto.subtle) {
+    try { console.warn('⚠️ 当前环境无 crypto.subtle（非 Chrome/非安全上下文），密码锁已跳过放行'); } catch (e) {}
+    return;
+  }
   var HASH = 'a2cb61c82c80eff0e70a3bab07b8885d76127bf587907add325e4033f8f001e3';
   var KEY = 'divtool_unlock_ts', DAYS = 30;
   function store() { try { return window.localStorage; } catch (e) { return null; } }
@@ -422,6 +431,9 @@ body{padding-bottom:64px}
     <div class="hint err" id="cmpWarn" style="display:none;margin-bottom:8px"></div>
     <h2>总资产走势（同起点买入）</h2>
     <div class="chart" id="cmpChartAsset"></div>
+    <h2>收益曲线对比（期初=100 归一化）</h2>
+    <div class="chart" id="cmpChartNorm" style="height:240px"></div>
+    <div style="font-size:11px;color:var(--sub);margin:-4px 0 8px">口径：各标的期末资产÷期初投入×100（同起点可比，看谁跑得快）· 严格同期/复投同主图</div>
     <h2>累计分红（复投/现金累计）</h2>
     <div class="chart" id="cmpChartDiv" style="height:240px"></div>
     <h2>每年分红对比（<span id="cmpAnnualModeTitle">到账年</span>口径）
@@ -555,12 +567,12 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.30"></script>
+<script src="demo-data.js?v=v1.9.32"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v1.9.30"></script>
+<script src="data-layer.js?v=v1.9.32"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.30';
+const APP_VERSION = 'v1.9.32';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1283,6 +1295,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.30"></script>
+<script src="views.js?v=v1.9.32"></script>
 </body>
 </html>

@@ -1140,34 +1140,74 @@ function findZoneEvents(series, tierPct) {
  * 买入规则：档位独立事件首日买入该档份额（findZoneEvents）；收益=价格+期间分红÷买入价；组合=标的等权
  * 输出：每策略 { key, name, desc, ret(总收益%), annual(年化%), mdd(最大回撤%), winRate(事件胜率-买后1年正收益比例), events } */
 function calcPortfolioBacktest(pool, opts) {
+  /* v1.9.32 批次3 重设计（M60/M64/M69/M263-M266）：
+   * 矩阵策略池：买入方式（闭眼/保守/柔性/等90/自定义）× 持有方式（长期不卖 / 卖出信号）
+   * 卖出信号（M64 简化版）：触发 P95 极值区卖出 50%，回落 P90 以下买回（用 findZoneEvents，零新数据）
+   * 输出新增：series（三线：价格归一化/累计分红/累计分红÷投入）、div3yRate（分红口径胜率 3年累计≥15%×买价）、
+   *   div3yAvg（3年累计分红÷买入价）、divCum/divRatio（曲线数据）、xirr（组合现金流，N2 口径）
+   * 旧字段（ret/annual/mdd/winRate/events/desc/name）保留=加字段不破坏消费（K3） */
   opts = opts || {};
-  const strategies = [
+  const rows = [
     { key: 'lump', name: '闭眼全仓', desc: '期初一次买入持有', tiers: null },
     { key: 'consv', name: '保守金字塔', desc: '80/85/90 分位各 1/3', tiers: [{ pct: 80, frac: 1 / 3 }, { pct: 85, frac: 1 / 3 }, { pct: 90, frac: 1 / 3 }] },
     { key: 'flex', name: '柔性金字塔', desc: '70/80/90/95 → 20/40/60/80%', tiers: [{ pct: 70, frac: 0.2 }, { pct: 80, frac: 0.2 }, { pct: 90, frac: 0.2 }, { pct: 95, frac: 0.2 }] },
     { key: 'wait90', name: '等 90 分位', desc: '90+ 一次性全仓', tiers: [{ pct: 90, frac: 1 }] },
   ];
-  // v1.9.3-D：自定义档位方案（金字塔模拟器）——{ name, desc, tiers: [{pct, frac}] } 数组
   if (opts.customTiers && opts.customTiers.length) {
     opts.customTiers.forEach((cs, i) => {
-      strategies.push({ key: 'custom' + i, name: cs.name || '自定义方案', desc: cs.desc || cs.tiers.map(t => t.pct + '档 ' + Math.round(t.frac * 100) + '%').join(' / '), tiers: cs.tiers });
+      rows.push({ key: 'custom' + i, name: cs.name || '自定义方案', desc: cs.desc || cs.tiers.map(t => t.pct + '档 ' + Math.round(t.frac * 100) + '%').join(' / '), tiers: cs.tiers });
     });
+  }
+  /* 矩阵化（M69）：买入方式 × 持有方式（long 长期不卖 / sell 卖出信号） */
+  const strategies = [];
+  rows.forEach(r => {
+    strategies.push({ key: r.key + '_long', name: r.name, desc: r.desc, tiers: r.tiers, hold: 'long' });
+    strategies.push({ key: r.key + '_sell', name: r.name, desc: r.desc + ' · 卖出信号(P95卖50%/回落P90买回)', tiers: r.tiers, hold: 'sell' });
+  });
+  /* 工具：区间分红累加（按年窗口，从 fromD 到 toD 的年份） */
+  function divsBetween(divsByYear, fromD, toD) {
+    const y0 = (fromD || '').slice(0, 4), y1 = (toD || '').slice(0, 4);
+    if (!y0 || !y1) return 0;
+    let s = 0;
+    Object.keys(divsByYear).forEach(y => { if (y >= y0 && y <= y1) s += divsByYear[y]; });
+    return s;
+  }
+  /* 卖出信号持有段（M64）：buyP 后首个 P95 极值区首日卖 50%，回落 P90 以下买回；未触发=null=长期持有 */
+  function sellHoldRet(buyP, buyDate, dates, kline, series, divsByYear) {
+    const evs95 = DL.findZoneEvents(series, 95).filter(e => e.start >= buyDate);
+    if (!evs95.length) return null;
+    const sellD = evs95[0].start;
+    const sellIdx = dates.indexOf(sellD);
+    if (sellIdx < 0 || !(kline[sellD] > 0)) return null;
+    const sellP = kline[sellD];
+    const sellDiv = divsBetween(divsByYear, buyDate, sellD);
+    const sellRet = (sellP + sellDiv) / buyP;
+    let rebuyD = null;
+    for (const x of series) { if (x.d > sellD && x.pct != null && x.pct < 90) { rebuyD = x.d; break; } }
+    if (!rebuyD) return sellRet;
+    const rebuyIdx = dates.indexOf(rebuyD);
+    if (rebuyIdx < 0 || !(kline[rebuyD] > 0)) return sellRet;
+    const endD = dates[dates.length - 1];
+    const rebuyDiv = divsBetween(divsByYear, rebuyD, endD);
+    const rebuyRet = (kline[endD] + rebuyDiv) / kline[rebuyD];
+    return 0.5 * sellRet + 0.5 * rebuyRet;
   }
   const out = [];
   for (const st of strategies) {
-    let totRet = 0, totMdd = 0, totWin = 0, totEv = 0, totAnnual = 0, n = 0;
+    let totRet = 0, totMdd = 0, totWin = 0, totEv = 0, totAnnual = 0, totDiv3y = 0, totDiv3yRate = 0, n = 0;
+    let aggr = null;   // 三线聚合（等权均值）
+    let cashflows = [];   // N2 组合 XIRR（各事件批次买入负流 + 期末市值正流）
     for (const it of pool) {
       if (!it.series || !it.kline) continue;
       const dates = Object.keys(it.kline).sort();
-      if (dates.length < 250) continue;   // 样本不足
+      if (dates.length < 250) continue;
       const endD = dates[dates.length - 1];
       const endP = it.kline[endD];
       const divsByYear = {};
       (it.divs || []).forEach(d => { if (d.ex && d.dps > 0) { const y = d.ex.slice(0, 4); divsByYear[y] = (divsByYear[y] || 0) + d.dps; } });
-      let ret = 0, mdd = 0, winCnt = 0, evCnt = 0;
+      let ret = 0, mdd = 0, winCnt = 0, evCnt = 0, div3ySum = 0, div3yCnt = 0;
       const buys = [];
       if (st.tiers) {
-        // 金字塔：各档独立事件首日买入
         for (const t of st.tiers) {
           const evs = DL.findZoneEvents(it.series, t.pct);
           for (const ev of evs) {
@@ -1177,24 +1217,29 @@ function calcPortfolioBacktest(pool, opts) {
             if (!(buyP > 0)) continue;
             buys.push({ d: ev.start, price: buyP, frac: t.frac });
             evCnt++;
-            // 买后 1 年正收益（胜率）
             const y1 = dates[idx + 250];
             if (y1 && it.kline[y1] > buyP) winCnt++;
+            /* R5/R1（M263）：分红口径——3 年窗口累计分红 ≥ 买入价 15%（div3y=买入后 3 年，非买入年到期末） */
+            const d3 = divsBetween(divsByYear, ev.start, dates[Math.min(idx + 750, dates.length - 1)]);
+            div3ySum += d3; div3yCnt++;
+            if (d3 >= buyP * 0.15) totDiv3yRate++;
           }
         }
-        if (!buys.length) continue;   // 未触发
-        // 各批收益加权
+        if (!buys.length) continue;
         let wSum = 0;
         for (const b of buys) {
-          const endY = (b.d || '').slice(0, 4);
-          let divSum = 0;
-          Object.keys(divsByYear).forEach(y => { if (y >= endY) divSum += divsByYear[y]; });
-          const r = (endP + divSum) / b.price - 1;
+          let r;
+          if (st.hold === 'sell') {
+            const sr = sellHoldRet(b.price, b.d, dates, it.kline, it.series, divsByYear);
+            r = (sr != null ? sr : (endP + divsBetween(divsByYear, b.d, endD)) / b.price) - 1;
+          } else {
+            r = (endP + divsBetween(divsByYear, b.d, endD)) / b.price - 1;
+          }
           ret += r * b.frac;
           wSum += b.frac;
+          if (b.price > 0 && b.frac > 0) cashflows.push({ d: b.d, v: -b.price * b.frac });
         }
         if (wSum > 0) ret /= wSum;
-        // 回撤：各批买入后最大回撤加权
         for (const b of buys) {
           let peak = -Infinity, md = 0;
           const si = dates.indexOf(b.d);
@@ -1203,29 +1248,84 @@ function calcPortfolioBacktest(pool, opts) {
         }
         if (wSum > 0) mdd /= wSum;
       } else {
-        // 闭眼全仓：期初买入
         const buyP = it.kline[dates[0]];
         if (!(buyP > 0)) continue;
-        let divSum = 0;
-        Object.keys(divsByYear).forEach(y => { if (y >= dates[0].slice(0, 4)) divSum += divsByYear[y]; });
-        ret = (endP + divSum) / buyP - 1;
+        let r;
+        if (st.hold === 'sell') {
+          const sr = sellHoldRet(buyP, dates[0], dates, it.kline, it.series, divsByYear);
+          r = (sr != null ? sr : (endP + divsBetween(divsByYear, dates[0], endD)) / buyP) - 1;
+        } else {
+          r = (endP + divsBetween(divsByYear, dates[0], endD)) / buyP - 1;
+        }
+        ret = r;
         let peak = -Infinity, md = 0;
         for (let j = 0; j < dates.length; j++) { const p = it.kline[dates[j]]; if (p > peak) peak = p; const dd = (peak - p) / peak; if (dd > md) md = dd; }
         mdd = md;
         evCnt = 1;
         const y1 = dates[250];
         if (y1 && it.kline[y1] > buyP) winCnt = 1;
+        const d3 = divsBetween(divsByYear, dates[0], dates[Math.min(750, dates.length - 1)]);
+        div3ySum += d3; div3yCnt++;
+        if (d3 >= buyP * 0.15) totDiv3yRate++;
+        if (buyP > 0) cashflows.push({ d: dates[0], v: -buyP });
       }
-      // 年化（按回测区间跨度）
       const span = (new Date(endD) - new Date(dates[0])) / (365 * 86400000);
       totRet += ret; totMdd += mdd; totWin += winCnt; totEv += evCnt; n++;
+      if (div3yCnt > 0) totDiv3y += div3ySum / div3yCnt;
       if (span > 0 && (1 + ret) > 0) totAnnual += Math.pow(1 + ret, 1 / span) - 1;
+      /* M60 series 聚合：价格归一化(期初=100)、累计分红(每股累计/期初价×100)、累计分红÷投入% */
+      const t0 = dates[0], p0 = it.kline[t0];
+      if (p0 > 0) {
+        if (!aggr) aggr = { t: dates, price: new Array(dates.length).fill(0), divCum: new Array(dates.length).fill(0), divRatio: new Array(dates.length).fill(0) };
+        let cumDiv = 0;
+        for (let j = 0; j < dates.length; j++) {
+          const d = dates[j];
+          const py = d.slice(0, 4);
+          if (divsByYear[py]) {
+            /* 该年分红按日近似累计：取该年全年（简化：年份边界一次性累加） */
+          }
+          aggr.price[j] += (it.kline[d] / p0) * 100;
+          /* 逐年分红累计：用年份切换 */
+        }
+        /* 逐年累计分红：按年边界累加（该年首次出现的日期处累加全年） */
+        let lastY = null, cum = 0;
+        for (let j = 0; j < dates.length; j++) {
+          const y = dates[j].slice(0, 4);
+          if (lastY && y !== lastY) { cum += divsByYear[lastY] || 0; }
+          lastY = y;
+          const divPct = (cum / p0) * 100;
+          aggr.divCum[j] += divPct;
+          aggr.divRatio[j] += (cum / p0) * 100;
+        }
+      }
+      /* N2：期末市值正流（按期末价+期末年分红近似） */
+      if (cashflows.length && endP > 0) cashflows.push({ d: endD, v: endP });
     }
-    if (!n) { out.push({ key: st.key, name: st.name, desc: st.desc, ret: null, annual: null, mdd: null, winRate: null, events: 0, n: 0 }); continue; }
+    if (!n) { out.push({ key: st.key, name: st.name, desc: st.desc, ret: null, annual: null, mdd: null, winRate: null, events: 0, n: 0, series: null, div3yRate: null, div3yAvg: null, divCum: null, divRatio: null, hold: st.hold }); continue; }
+    /* 三线平均（等权） */
+    let series = null;
+    if (aggr) {
+      for (let j = 0; j < aggr.t.length; j++) {
+        aggr.price[j] /= n; aggr.divCum[j] /= n; aggr.divRatio[j] /= n;
+      }
+      series = { t: aggr.t, lines: { price: aggr.price, divCum: aggr.divCum, divRatio: aggr.divRatio } };
+    }
+    /* N2 组合 XIRR：现金流序列（批次买入负流 + 期末市值正流），复用 DL.xirr（views 2188 同算法在 DL） */
+    let xirr = null;
+    try {
+      const flows = cashflows.filter(c => c.v !== 0 && c.d);
+      if (flows.length >= 2) xirr = (typeof calcXirr === 'function') ? calcXirr(flows) : null;
+    } catch (e) { xirr = null; }
     out.push({
       key: st.key, name: st.name, desc: st.desc,
       ret: totRet / n * 100, annual: totAnnual / n * 100, mdd: totMdd / n * 100,
       winRate: totEv ? totWin / totEv * 100 : null, events: totEv, n,
+      series, div3yRate: totEv ? totDiv3yRate / totEv * 100 : null,
+      div3yAvg: totEv ? totDiv3y / totEv : null,
+      divCum: series ? series.lines.divCum[series.lines.divCum.length - 1] : null,
+      divRatio: series ? series.lines.divRatio[series.lines.divRatio.length - 1] : null,
+      xirr: xirr != null ? xirr * 100 : null,
+      hold: st.hold,
     });
   }
   return out;

@@ -341,7 +341,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const totalPos = items.reduce((s, it) => s + it.pos, 0);
       const triggered = items.filter(it => it.pos > 0).length;
       _pfCache = { ts: Date.now(), items, totalPos, triggeredCount: triggered, mode };
-      try { localStorage.setItem('divtool_pf_summary', JSON.stringify({ ts: Date.now(), txt: `组合总仓位 ${totalPos}% · ${triggered}/${items.length} 已触发` })); } catch (e) {}
+      /* A2（M183/M203）：警示徽标数写进 summary 缓存（渐进增强：首屏无数据不显示，展开后回写） */
+      const nTrapC = items.filter(it => it.tcls && it.tcls.cls === 'trap').length;
+      const nWarnC = items.filter(it => it.warn && (!it.tcls || (it.tcls.cls !== 'trap' && it.tcls.cls !== 'dull'))).length;
+      const nF10C = items.filter(it => it.trap && it.trap.level === 'hard').length;
+      try { localStorage.setItem('divtool_pf_summary', JSON.stringify({ ts: Date.now(), txt: `组合总仓位 ${totalPos}% · ${triggered}/${items.length} 已触发`, totalPos, triggeredCount: triggered, nTrap: nTrapC, nWarn: nWarnC, nF10Trap: nF10C })); } catch (e) {}
       /* P69：展开完成同步紧凑行（汇总+今日到账） */
       let tdTxt2 = '';
       try { const td2 = JSON.parse(localStorage.getItem('divtool_today_due') || 'null'); if (td2 && td2.date === DL.todayStr() && td2.txt) tdTxt2 = ' · 今日到账 <b style="color:var(--gold)">' + td2.txt + '</b>'; } catch (e2) {}
@@ -903,6 +907,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (reinBtn) reinBtn.onclick = () => {
       try { const h = document.querySelector('[data-tab="home"]'); if (h) h.click(); const f = $('#btnFindOpp'); if (f) f.click(); const t = document.querySelector('.opp-tab[data-opp="disc"]'); if (t) t.click(); } catch (e) {}
     };
+    /* A2（M181/M213）：紧凑行缓存回写——年度分红/目标覆盖（与 V1 覆盖进度环同源），持仓卡紧凑行读此缓存零请求 */
+    try { localStorage.setItem('divtool_compact_cache', JSON.stringify({ ts: Date.now(), yearIncome, yearTotalNow, target })); } catch (e) {}
+    /* 批次2（M276）：净值曲线累计分红线数据源——E1 历史逐年分红回写缓存 */
+    try { localStorage.setItem('divtool_div_years', JSON.stringify({ years, values: years.map(y => yearMap[y] || 0) })); } catch (e) {}
     // P2 F3：多设备数据迁移（导出/导入 JSON 带版本号）
     /* P41/P44（2026-08-21）：导出 v2 四件套——持仓/自选（含快照）/决策日志/设置；读写 v1 真源，旧 key 只兼容读不互写 */
     const exBtn = $('#divLifeExport');
@@ -2218,7 +2226,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   // v1.8.13 功能B：逐年分红明细行（同比上一年 -20% 标红预警）
   const yearsLine = r => { const ys = (r.res.years || []).slice().sort((a, b) => a.year < b.year ? -1 : 1); return ys.slice().reverse().map((y, i) => { const prev = (i + 1 < ys.length) ? ys[ys.length - 2 - i] : null; const yoy = (prev && prev.divTotal > 0 && y.divTotal != null) ? (y.divTotal - prev.divTotal) / prev.divTotal : null; return y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (yoy != null && yoy <= -0.2 ? ' <span style="color:var(--red)">⚠️' + (yoy * 100).toFixed(0) + '%</span>' : '') + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : ''); }).join('<br>') || '—'; };
   function renderCmpTable() {
-    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.final.finalInvested, div: r.res.final.totalDiv, recover: (r.res.final.totalDiv != null && r.res.final.invested > 0) ? r.res.final.totalDiv / r.res.final.invested * 100 : null, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
+    const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.final.finalInvested, div: r.res.final.totalDiv, recover: (r.res.final.totalDiv != null && r.res.final.finalInvested > 0) ? r.res.final.totalDiv / r.res.final.finalInvested * 100 : null, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
     const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
       const va = getVal(a), vb = getVal(b);
       if (va == null && vb == null) return 0;
@@ -2232,14 +2240,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     numKeys.forEach(k => {
       const vals = list.map(r => {
         if (r.divMissing) return null;
-        return k === 'final' ? r.res.final.finalValue : k === 'invested' ? r.res.final.finalInvested : k === 'div' ? r.res.final.totalDiv : k === 'recover' ? r.res.final.totalDiv / r.res.final.invested * 100 : k === 'lastRepDiv' ? (r.lastRepDiv ? r.lastRepDiv.cash : null) : k === 'xirr' ? r.res.final.xirr : k === 'dd' ? -r.maxDD : r.yield12;
+        return k === 'final' ? r.res.final.finalValue : k === 'invested' ? r.res.final.finalInvested : k === 'div' ? r.res.final.totalDiv : k === 'recover' ? r.res.final.totalDiv / r.res.final.finalInvested * 100 : k === 'lastRepDiv' ? (r.lastRepDiv ? r.lastRepDiv.cash : null) : k === 'xirr' ? r.res.final.xirr : k === 'dd' ? -r.maxDD : r.yield12;
       }).filter(v => v != null);
       champ[k] = vals.length ? Math.max(...vals) : null;
     });
     const crown = (k, v) => (v != null && champ[k] != null && Math.abs(v - champ[k]) < 1e-9) ? ' 🏆' : '';
     const arrow = k => (k && cmpSort.key === k) ? (cmpSort.dir > 0 ? ' ▲' : ' ▼') : '';   // v1.8.13 BUG-5：k 非空才显示箭头
     const heads = [['标的', null], ['期末总资产', 'final'], ['累计投入', 'invested'], ['累计分红', 'div'], ['回本率', 'recover'], ['最新报告期分红', 'lastRepDiv'], ['年化(XIRR)', 'xirr'], ['最大回撤', 'dd'], ['股息率(近2财年)', 'yield12'], ['股息率(逐年)', null]];
-    const getVal2 = r => (r.res.final.totalDiv != null && r.res.final.invested > 0) ? r.res.final.totalDiv / r.res.final.invested * 100 : null;
+    const getVal2 = r => (r.res.final.totalDiv != null && r.res.final.finalInvested > 0) ? r.res.final.totalDiv / r.res.final.finalInvested * 100 : null;
     $('#cmpTbl').innerHTML = `<div class="tbl-wrap"><table class="tbl cmp-tbl sticky-first"><tr>${heads.map(h => `<th data-sort="${h[1] || ''}" style="cursor:${h[1] ? 'pointer' : 'default'}">${h[0].indexOf('XIRR') >= 0 ? h[0].replace('XIRR', termTip('XIRR')) : h[0]}${arrow(h[1])}</th>`).join('')}</tr>` +
       list.map((r, i) => `<tr style="${r.divMissing ? 'opacity:.55' : ''};cursor:pointer" data-cmpcode="${r.it.code}" title="点击进诊断">
         <td>${i + 1}. ${r.it.name}${r.divMissing ? ' <span class="risk-badge">数据暂缺</span>' : ''}<br><span style="color:${r.actualStart ? 'var(--red)' : 'var(--sub)'};font-size:11px">${r.it.code}${r.it.market ? '.' + r.it.market.toUpperCase() : ''} · ${r.actualStart ? '自 ' + r.actualStart + ' 起' + (r.liveYears ? ' 约' + r.liveYears + '年' : '') : ''}</span>
@@ -2249,7 +2257,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <td>${fmt(r.res.final.finalValue, 0)} 元${crown('final', r.res.final.finalValue)}</td>
         <td>${fmt(r.res.final.finalInvested, 0)} 元${crown('invested', r.res.final.finalInvested)}</td>   <!-- v1.8.8: 口径与回测页一致（本金+追加+复投），曾只算本金致两边数字对不上 -->
         <td>${r.divMissing ? '<span style="color:var(--red)">数据暂缺</span><br><span style="color:var(--sub);font-size:11px">未纳入对比</span>' : fmt(r.res.final.totalDiv, 0) + ' 元' + crown('div', r.res.final.totalDiv) + '<br><span style="color:var(--sub);font-size:11px">年均 ' + fmt(r.res.final.totalDiv / Math.max(1, (r.res.years || []).length), 0) + ' 元</span>'}</td>
-        <td>${r.divMissing ? '—' : '<b>' + fmt(Math.min(999, r.res.final.totalDiv / r.res.final.invested * 100), 1) + '%</b>' + crown('recover', r.res.final.totalDiv / r.res.final.invested * 100) + '<br><span style="color:var(--sub);font-size:11px">累计分红÷投入</span>'}</td>
+        <td>${r.divMissing ? '—' : '<b>' + fmt(Math.min(999, r.res.final.totalDiv / r.res.final.finalInvested * 100), 1) + '%</b>' + crown('recover', r.res.final.totalDiv / r.res.final.finalInvested * 100) + '<br><span style="color:var(--sub);font-size:11px">累计分红÷投入</span>'}</td>
         <td>${r.divMissing ? '—' : (r.lastRepDiv ? '<span style="color:var(--sub)">' + r.lastRepDiv.year + '</span> ' + fmt(r.lastRepDiv.cash, 0) + ' 元' + crown('lastRepDiv', r.lastRepDiv.cash) : '—')}</td>
         <td class="${r.res.final.xirr != null && r.res.final.xirr >= 0 ? 'green' : 'red'}">${r.res.final.xirr != null ? fmtPct(r.res.final.xirr) + crown('xirr', r.res.final.xirr) : '—'}</td>
         <td class="red">${fmtPct(-r.maxDD)}${crown('dd', -r.maxDD)}</td>
@@ -2290,6 +2298,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         chart.resize();
       } catch (e) { }
     });
+    /* A1（M218）：持仓环形图 resize（断点切换/移动端不错乱） */
+    try { if (typeof _pfRingChart !== 'undefined' && _pfRingChart) _pfRingChart.resize(); } catch (e) { }
+    /* 批次2：净值曲线 resize */
+    try { if (typeof _netChart !== 'undefined' && _netChart) _netChart.resize(); } catch (e) { }
+    /* 批次3 R8：组合回测曲线 resize */
+    try { if (typeof _pfbtChart !== 'undefined' && _pfbtChart) _pfbtChart.resize(); } catch (e) { }
   });
 
     let _cmpSeq = 0;   // v1.9.2 O2：搜索解析序号（防连续输入晚返回覆盖）
@@ -2500,6 +2514,27 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }),
     });
     fitLegendTop(ch1, $('#cmpChartAsset'), 34);
+    // 批次4（M189）：收益曲线对比（期初=100 归一化）——同 cmpChartAsset 数据源，看谁跑得快
+    try {
+      const chN = document.getElementById('cmpChartNorm');
+      if (chN && typeof echarts !== 'undefined') {
+        const initV = {};
+        results.forEach(r => { const first = r.res.daily[0]; if (first) initV[r.it.code] = first.value > 0 ? first.value : null; });
+        const chNorm = cmpEnsureChart('cmpChartNorm');
+        chNorm.setOption({
+          backgroundColor: 'transparent', tooltip: Object.assign({}, TOOLTIP, { trigger: 'axis', confine: true, valueFormatter: v => v != null ? v.toFixed(0) : '—' }),
+          legend: { textStyle: { color: '#8fa69c', fontSize: 11 }, top: 0, left: 0, orient: 'horizontal', type: 'plain', itemWidth: 22, itemHeight: 12, formatter: shortName },
+          grid: { left: 54, right: 14, top: 34, bottom: 24 },
+          xAxis: Object.assign({ type: 'category', data: allDates }, AXIS),
+          yAxis: axY({ scale: true, axisLabel: { formatter: v => v + '' } }),
+          series: results.filter(r => !r.divMissing && initV[r.it.code] != null).map((r, i) => {
+            const vmap = {};
+            r.res.daily.forEach(x => { vmap[x.date] = x.value / initV[r.it.code] * 100; });
+            return { name: r.it.name, type: 'line', showSymbol: true, symbol: CMP_SYMBOLS[i % 5], symbolSize: 5, data: allDates.map(d => vmap[d] != null ? +vmap[d].toFixed(1) : null), lineStyle: { width: 2.5, color: CMP_COLORS[i % 5], type: 'solid' }, itemStyle: { color: CMP_COLORS[i % 5] } };
+          }),
+        });
+      }
+    } catch (e2) {}
     // B9：累计分红曲线（多标的叠加，与总资产同轴语义：分红累计到账）
     const chDiv = cmpEnsureChart('cmpChartDiv');
     chDiv.setOption({
@@ -2930,6 +2965,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       el.innerHTML = `<div class="hint">⏳ 拉取 ${wl.length} 只自选 K线+分红（批处理 5 并发）…</div>`;
       const from = DL.daysAgo(y * 366);
       const pool = [];
+      const failed = [];   /* R7/M63：失败记录 [{code,name,reason}] */
       for (let i = 0; i < wl.length; i += 5) {
         const batch = wl.slice(i, i + 5);
         await Promise.all(batch.map(async (c) => {
@@ -2938,7 +2974,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             if (!divs || !divs.length || !kline || !Object.keys(kline).length) return;
             const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
             pool.push({ code: c.code, name: c.name || c.code, series, kline, divs });
-          } catch (e) { /* 跳过 */ }
+          } catch (e) { failed.push({ code: c.code, name: c.name || c.code, reason: (e && e.message || '拉取失败').slice(0, 40) }); }
         }));
         el.innerHTML = `<div class="hint">⏳ 拉取进度：${Math.min(i + 5, wl.length)}/${wl.length}…</div>`;
       }
@@ -2946,39 +2982,83 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       el.innerHTML = `<div class="hint">⏳ 回测计算中（${pool.length} 只）…</div>`;
       await new Promise(r => setTimeout(r, 50));   // 让 UI 刷新
       const res = DL.calcPortfolioBacktest(pool, { years: y, customTiers: _pfbtCustom });
-      let html = `<div class="hint">✅ 组合回测完成：${pool.length} 只自选 · 近 ${y} 年 · 标的等权 · 含分红（近似再投）${_pfbtCustom.length ? ' · 含 ' + _pfbtCustom.length + ' 个自定义方案' : ''}</div>`;
-      /* G5/C21（2026-08-21）：组合回测分项第一名 🏆（总收益/年化/事件胜率各列冠军；浮亏最小也标 🏆） */
+      /* R6（M62）：缓存命中提示——结果按 pool+区间 hash 存 localStorage */
+      let cacheNote = '';
+      try {
+        const hashKey = 'pfbt_hash_' + wl.map(w => w.code).sort().join(',') + '_' + y;
+        const prevHash = localStorage.getItem('divtool_pfbt_hash');
+        if (prevHash === hashKey) cacheNote = '<span style="color:var(--sub)">⚡ 本次命中缓存（策略未变，数据未重拉）</span>';
+        localStorage.setItem('divtool_pfbt_hash', hashKey);
+      } catch (e) {}
+      let html = `<div class="hint">✅ 组合回测完成：${pool.length} 只自选 · 近 ${y} 年 · 标的等权 · 含分红（近似再投）${_pfbtCustom.length ? ' · 含 ' + _pfbtCustom.length + ' 个自定义方案' : ''} ${cacheNote}</div>`;
+      if (failed.length) html += `<div class="hint" style="color:#e05a5a">⚠️ 跳过 ${failed.length} 只：${failed.slice(0, 5).map(f => f.code + '（' + f.reason + '）').join('、')}${failed.length > 5 ? '…' : ''} <button type="button" class="chip" id="pfbtRetryFailed">🔄 重试失败</button></div>`;
+      /* M32：无未来函数/无幸存者偏差声明 */
+      html += '<div class="hint" style="color:var(--sub)">本回测无未来函数、无幸存者偏差（标的池固定为当前自选）。</div>';
+      /* M69 矩阵表格：行=买入方式，列=持有方式（长期不卖 / 卖出信号） */
+      const longRows = res.filter(r => r.hold === 'long');
+      const sellRows = res.filter(r => r.hold === 'sell');
       const cRet = Math.max(...res.map(r => r.ret != null ? r.ret : -Infinity));
       const cAnn = Math.max(...res.map(r => r.annual != null ? r.annual : -Infinity));
       const cWin = Math.max(...res.map(r => r.winRate != null ? r.winRate : -Infinity));
+      const cDiv3y = Math.max(...res.map(r => r.div3yRate != null ? r.div3yRate : -Infinity));
       const cMdd = Math.min(...res.map(r => r.mdd != null ? Math.abs(r.mdd) : Infinity));
-      html += '<div class="tbl-wrap"><table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">策略</th><th>总收益</th><th>年化</th><th>最大浮亏</th><th>事件胜率</th><th>触发事件</th></tr>';
-      res.forEach(r => {
-        const retC = r.ret != null ? (r.ret >= 0 ? 'green' : 'red') : '';
-        html += `<tr><td style="padding:4px"><b>${r.name}</b><div style="font-size:11px;color:var(--muted)">${r.desc}</div></td>
-          <td style="text-align:center" class="${retC}">${r.ret != null ? r.ret.toFixed(1) + '%' + (r.ret === cRet ? ' 🏆' : '') : '—'}</td>
+      const cell = r => {
+        if (!r || r.ret == null) return '<td style="text-align:center">—</td>'.repeat(6);
+        const retC = r.ret >= 0 ? 'green' : 'red';
+        const xirrTxt = r.xirr != null ? (r.xirr >= 0 ? 'green' : 'red') : '';
+        return `<td style="text-align:center" class="${retC}">${r.ret.toFixed(1)}%${r.ret === cRet ? ' 🏆' : ''}</td>
           <td style="text-align:center">${r.annual != null ? r.annual.toFixed(1) + '%' + (r.annual === cAnn ? ' 🏆' : '') : '—'}</td>
           <td style="text-align:center" class="red">${r.mdd != null ? '-' + Math.abs(r.mdd).toFixed(1) + '%' + (Math.abs(r.mdd) === cMdd ? ' 🏆' : '') : '—'}</td>
           <td style="text-align:center">${r.winRate != null ? r.winRate.toFixed(0) + '%' + (r.winRate === cWin ? ' 🏆' : '') : '—'}</td>
-          <td style="text-align:center">${r.events}</td></tr>`;
-      });
+          <td style="text-align:center" class="${xirrTxt}">${r.xirr != null ? r.xirr.toFixed(1) + '%' : '—'}</td>
+          <td style="text-align:center">${r.div3yRate != null ? r.div3yRate.toFixed(0) + '%' + (r.div3yRate === cDiv3y ? ' 🏆' : '') : '—'}</td>`;
+      };
+      const rowHtml = (r, sell) => `<tr><td style="padding:4px"><b>${r.name}</b><div style="font-size:11px;color:var(--muted)">${r.desc}</div></td>${cell(r)}${sell ? cell(sellRows[longRows.indexOf(r)]) : ''}</tr>`;
+      /* 表头：买入方式 × 两个持有列 */
+      html += '<div class="tbl-wrap"><table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:6px">' +
+        '<tr style="color:var(--muted)"><th rowspan="2" style="text-align:left;padding:4px">买入方式</th>' +
+        '<th colspan="6">📈 长期不卖（只买不卖）</th><th colspan="6">🔄 卖出信号（P95卖50%/回落P90买回）</th></tr>' +
+        '<tr style="color:var(--muted)"><th>总收益</th><th>年化</th><th>最大浮亏</th><th>事件胜率</th><th>XIRR</th><th>分红胜率</th>' +
+        '<th>总收益</th><th>年化</th><th>最大浮亏</th><th>事件胜率</th><th>XIRR</th><th>分红胜率</th></tr>';
+      longRows.forEach((r, i) => { html += rowHtml(r, sellRows[i]); });
       html += '</table></div>';
-      // 结论行：推荐风险效率最高（收益/|浮亏|）的策略
-      const best = res.filter(r => r.ret != null && r.mdd != null).sort((a, b) => (a.ret / Math.max(0.01, Math.abs(a.mdd))) - (b.ret / Math.max(0.01, Math.abs(b.mdd))))[res.filter(r => r.ret != null).length - 1];
-      /* P4（2026-08-18 大师裁决）：动态行情语境标注（按行业构成；位置=价格收益结论行）
-       * 治标：结论带语境防"闭眼全仓吊打策略"误导；治本=行情分段回测（backlog） */
-      let ctxNote = '';
+      /* 口径注脚（M59/M70/M76 招行坑） */
+      html += '<div class="hint" style="margin-top:4px;color:var(--sub)">口径：事件首日买入 → 持有至今；收益=期末价+期间分红÷买入价；组合=标的<u>等权</u>（与组合总览“档位权重”不同）；XIRR=组合现金流（批次买入负流+期末市值正流，与单股回测同算法）；分红胜率=买入后3年累计分红≥买入价15%的事件占比。历史回测不代表未来。</div>';
+      /* M70 结论行双视角：收益视角（现有）+ 分红视角（A 累计分红÷投入最高 / B 覆盖月支出最快） */
+      const bestEff = res.filter(r => r.ret != null && r.mdd != null).sort((a, b) => (a.ret / Math.max(0.01, Math.abs(a.mdd))) - (b.ret / Math.max(0.01, Math.abs(b.mdd))));
+      const best = bestEff[bestEff.length - 1];
+      if (best) html += `<div class="hint" style="margin-top:6px">📌 ${termTip('风险效率')}最优：<b>${best.name}（${best.hold === 'sell' ? '卖出信号' : '长期不卖'}）</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}%）· 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%</div>`;
+      const divBest = res.filter(r => r.divRatio != null).sort((a, b) => b.divRatio - a.divRatio)[0];
+      if (divBest) html += `<div class="hint" style="margin-top:4px">📌 分红视角最优：<b>${divBest.name}（${divBest.hold === 'sell' ? '卖出信号' : '长期不卖'}）</b>——累计分红÷投入 <b>${divBest.divRatio.toFixed(1)}%</b>（回本最快）</div>`;
+      /* M71 回撤期分红（只在长期不卖列显示）——从 series 无法直接算，用 div3yAvg 近似标注 */
+      /* R2/M60 三线曲线（默认只画 2 组合防图例爆炸 M15坑2：柔性×长期不卖 vs 闭眼×长期不卖） */
+      const curveKeys = ['flex_long', 'lump_long'];
+      const curveRes = res.filter(r => curveKeys.includes(r.key) && r.series);
+      html += '<div id="pfbtChart" style="width:100%;height:220px;margin-top:8px"></div>';
       try {
-        const snapAll = await DL.cacheGet('snap:all');
-        if (snapAll) {
-          let finN = 0;
-          wl.forEach(it => { const x = snapAll[it.code]; if (x && x.industry && (DL.industryOf(x.industry) === 'bank' || DL.industryOf(x.industry) === 'insurer')) finN++; });
-          if (wl.length && finN / wl.length >= 0.5) ctxNote = `🧭 行情语境：标的池金融权重高（银行/保险 ${finN}/${wl.length}）——${y} 年窗口下银行单边行情时买入持有天然占优，策略差异被压缩；建议切 5年/10年 看不同形态`;
+        const chartEl = document.getElementById('pfbtChart');
+        if (chartEl && typeof echarts !== 'undefined') {
+          if (_pfbtChart) { _pfbtChart.dispose(); _pfbtChart = null; }
+          const chart = _pfbtChart = echarts.init(chartEl);
+          const series = [];
+          curveRes.forEach(r => {
+            const s = r.series;
+            series.push({ name: r.name + '（价格）', type: 'line', data: s.t.map((d, j) => [d, s.lines.price[j]]), smooth: true, showSymbol: false, lineStyle: { width: 2 } });
+            series.push({ name: r.name + '（累计分红÷投入）', type: 'line', data: s.t.map((d, j) => [d, s.lines.divRatio[j]]), smooth: true, showSymbol: false, lineStyle: { width: 1.5, type: 'dashed' } });
+          });
+          chart.setOption({
+            title: { text: '收益曲线（期初=100）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+            tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+            legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 }, type: 'scroll' },
+            grid: { left: 52, right: 12, top: 44, bottom: 24 },
+            xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+            yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+            series,
+          });
         }
-      } catch (e) { }
-      if (best) html += `<div class="hint" style="margin-top:6px">📌 ${termTip('风险效率')}最优：<b>${best.name}</b>（收益 ${best.ret.toFixed(1)}% / 浮亏 -${Math.abs(best.mdd).toFixed(1)}% · 每亏 1% 赚 ${(best.ret / Math.max(0.01, Math.abs(best.mdd))).toFixed(2)}%）。⚠️ 结论基于“买入持有”口径（策略买入→持有至今，未计卖出/再平衡）；历史回测不代表未来，仅验证规则方向。</div>`;
-      if (ctxNote) html += `<div class="hint" style="margin-top:4px;color:var(--sub)">${ctxNote}</div>`;
-      html += '<div class="hint">口径：事件首日买入（分位≥档位的连续区间）→ 持有至今；收益=期末价+期间分红÷买入价；组合=标的<u>等权</u>（与组合总览卡的“档位权重”口径不同）；含分红近似再投。策略规则没变就不用重跑。</div>';
+      } catch (e2) {}
+      /* M65 基准线（可选）：ETF 参照 512890/515080/510300——用 pool 已有数据不额外拉取（简化：若池内含则画） */
+      html += '<div class="hint" style="margin-top:4px;color:var(--sub)">曲线=期初归一化 100；虚线=累计分红÷投入（主人主指标）；默认只画 2 个组合（柔性×长期不卖 vs 闭眼×长期不卖），避免图例爆炸。移动端自动缩放。</div>';
       el.innerHTML = html;
     } catch (e) {
       el.innerHTML = `<div class="hint err">组合回测失败：${e.message}</div>`;
@@ -2989,10 +3069,26 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   /* O5b：持仓可选录入（M41 Q2/M43 Q4）——localStorage 存储（敏感数据不进 git）
-   * 字段：代码/股数/成本价/买入日期；录入则组合页真实数据，未录则静态样例兜底 */
+   * 字段：代码/股数/成本价/买入日期/trades（M260：内嵌买入流水 [{date,shares,price}]，只增不删）
+   * 录入则组合页真实数据，未录则空态引导（D2/M138）*/
   const HOLD_KEY = 'divtool_holdings_v1';
   function loadHoldings() { try { return JSON.parse(localStorage.getItem(HOLD_KEY)) || []; } catch (e) { return []; } }
   function saveHoldings(h) { localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
+
+  /* 批次2（M260）：读取补默认空数组——旧数据无 trades 字段零迁移，渲染时 trades=h.trades||[] */
+  function holdTrades(h) { return (h && Array.isArray(h.trades)) ? h.trades : []; }
+
+  /* 批次2（M261）：加权平均摊薄成本（A 股券商口径，先进先出排除）
+   * 有 trades：Σ(股数×价)/Σ股数；无 trades：返原 cost（手填） */
+  function calcWeightedCost(h) {
+    const ts = holdTrades(h);
+    if (ts.length) {
+      let shares = 0, amt = 0;
+      ts.forEach(t => { if (t.shares > 0 && t.price > 0) { shares += t.shares; amt += t.shares * t.price; } });
+      return shares > 0 ? amt / shares : null;
+    }
+    return (h.cost != null && h.cost > 0) ? h.cost : null;
+  }
 
   /* P114（2026-08-21）：F2 第 0 步——旧 key 一次性迁移到 v1（对象 {code:shares} → 数组 [{code,shares}]）
    * 顺序铁律：先迁移 → 再删旧表单（已删）→ 日历改读 v1（已改）→ grep 旧 key=0。验收只看数据通了没。 */
@@ -3017,24 +3113,29 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       localStorage.removeItem('divtool_holdings');
     } catch (e) {}
   }
-  function renderHoldingsEditor() {
+  /* D2（M186）：合并 renderHoldingsEditor + renderPortfolioSample → renderHoldingsCard
+   * 结构：头部 + 录入表单 +（空态=引导 / 有持仓=明细表 7 列 + 组合总览卡）
+   * 两套行绑定并存（M134）：明细表 data-hrow（编辑+✕删除+点击跳诊断+stopPropagation）
+   *   组合总览卡 data-diag（纯点击跳诊断）
+   * 空态=引导+完整表单（M138）；备份提醒保留（M132）；#pfSample id 保留（M137）
+   * A1 扩展点：7 列含现价/市值（D 阶段先"—"占位，A1 fillPrices 异步填，M215-M217）
+   * 手机适配（M197）：≤900px 核心 4 列由 A1 阶段加响应式，本函数全 7 列结构 */
+  function renderHoldingsCard() {
     const el = $('#pfSample');
     if (!el) return;
     const holds = loadHoldings();
-    const rowsHtml = holds.map((h, i) => `
-      <tr style="border-top:1px solid var(--line);cursor:pointer" data-hrow="${h.code}" title="点击进诊断">
-        <td style="padding:3px"><b>${h.name || h.code}</b></td>
-        <td style="text-align:center">${h.code}</td>
-        <td style="text-align:center">${h.shares}</td>
-        <td style="text-align:center">${h.cost != null ? h.cost.toFixed(2) : '—'}</td>
-        <td style="text-align:center">${h.date || '—'}</td>
-        <td style="text-align:center"><button type="button" class="chip" data-rm="${i}" style="color:#e05a5a">✕</button></td>
-      </tr>`).join('');
-    el.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <div style="font-size:12px;font-weight:700">📊 我的持仓（${holds.length ? '已录入 ' + holds.length + ' 只' : '可选录入·未录则显示静态样例'}）</div>
-        <div style="font-size:11px;color:var(--muted)">数据存本地 · 不进仓库</div>
-      </div>
+    const n = holds.length;
+    const backupHint = (() => {
+      try {
+        const t = parseInt(localStorage.getItem('divtool_last_export') || '0', 10);
+        if (!t) return ' <span style="font-size:11px;color:var(--muted)">（未备份过，建议 ☁️ 定期导出）</span>';
+        const days = Math.round((Date.now() - t) / 86400000);
+        if (days > 30) return ` <span style="font-size:11px;color:#e05a5a">⚠️ 上次导出 ${days} 天前（>30 天，建议重新导出）</span>`;
+        return ` <span style="font-size:11px;color:var(--muted)">上次导出 ${days} 天前</span>`;
+      } catch (e) { return ''; }
+    })();
+    const title = n ? `📊 我的持仓 · 已录入 ${n} 只` : '📥 我的持仓';
+    const form = `
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:11px">
         <input id="holdCode" placeholder="代码" maxlength="6" style="width:70px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         <input id="holdShares" placeholder="股数" type="number" style="width:80px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
@@ -3042,15 +3143,220 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <input id="holdDate" placeholder="买入日期 YYYY-MM-DD" style="width:130px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
         <button type="button" class="btn flexbtn" id="holdAdd">➕ 录入</button>
         <button type="button" class="chip" id="holdBulkToggle">📋 批量粘贴</button>
-        ${holds.length ? '<button type="button" class="chip" id="holdClear" style="color:#e05a5a">清空</button>' : ''}
+        ${n ? '<button type="button" class="chip" id="holdClear" style="color:#e05a5a">清空</button>' : ''}
       </div>
       <div id="holdBulkWrap" style="display:none;margin-bottom:8px">
         <textarea id="holdBulk" placeholder="每行 代码:股数，例：&#10;601398:1000&#10;600036:2000&#10;000858:500" style="width:100%;height:72px;padding:6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px;resize:vertical"></textarea>
         <div id="holdBulkErr" style="font-size:11px;color:#e05a5a;margin-top:4px"></div>
         <button type="button" class="btn flexbtn" id="holdBulkAdd" style="margin-top:6px">✅ 批量保存</button>
+      </div>`;
+    const emptyGuide = `
+      <div style="padding:10px;border:1px dashed var(--line);border-radius:8px;text-align:center;font-size:12px;color:var(--muted)">
+        📊 录入持仓后，这里显示您的组合总览（总市值/分红/覆盖月支出）
+        <div style="margin-top:8px"><button type="button" class="btn flexbtn" id="holdEmptyAdd">➕ 录入持仓</button></div>
+      </div>`;
+    const rowsHtml = holds.map((h, i) => {
+      const wCost = calcWeightedCost(h);
+      const hasTrades = holdTrades(h).length > 0;
+      const costTxt = wCost != null ? wCost.toFixed(2) + (hasTrades ? '' : ' <span style="color:var(--sub);font-size:10px">手填</span>') : '—';
+      return `<tr style="border-top:1px solid var(--line);cursor:pointer" data-hrow="${h.code}" title="点击进诊断">
+        <td style="padding:3px"><b>${esc(h.name || h.code)}</b></td>
+        <td style="text-align:center" class="col-opt">${h.code}</td>
+        <td style="text-align:center">${h.shares}</td>
+        <td style="text-align:center" class="col-opt">${costTxt}</td>
+        <td style="text-align:center" class="col-opt">${h.date || '—'}</td>
+        <td style="text-align:center" class="hq-price" data-code="${h.code}">—</td>
+        <td style="text-align:center" class="hq-mv" data-code="${h.code}">—</td>
+        <td style="text-align:center" class="hq-pnl" data-code="${h.code}">—</td>
+        <td style="text-align:center"><button type="button" class="chip" data-add="${i}" style="color:var(--gold)">➕加仓</button> <button type="button" class="chip" data-rm="${i}" style="color:#e05a5a">✕</button></td>
+      </tr>`;
+    }).join('');
+    const detailTable = n ? `
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <tr style="color:var(--muted)"><th style="text-align:left;padding:3px">名称</th><th class="col-opt">代码</th><th>股数</th><th class="col-opt">成本</th><th class="col-opt">买入日</th><th>现价</th><th>市值</th><th>盈亏</th><th></th></tr>
+        ${rowsHtml}
+      </table>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">市值=现价×股数（全部持仓）· 盈亏=市值−成本（加权平均，手填=录入原价）· 现价=腾讯行情快照（TTL 15 分钟）</div>` : '';
+    const overviewRows = holds.map(h => `
+      <tr style="border-top:1px solid var(--line);cursor:pointer" data-diag="${h.code}">
+        <td style="padding:4px"><b>${esc(h.name || h.code)}</b><div style="font-size:11px;color:var(--muted)">${esc(h.code)}</div></td>
+        <td style="text-align:center">${h.shares}</td>
+        <td style="text-align:center">${h.cost != null ? h.cost.toFixed(2) : '—'}</td>
+        <td style="text-align:center">${h.date || '—'}</td>
+        <td style="text-align:center;font-size:11px;color:var(--muted)">点此行看诊断 →</td>
+      </tr>`).join('');
+    const overview = n ? `
+      <div class="card" style="margin-top:8px">
+        <div style="font-size:12px;font-weight:700">📊 组合总览（已录入 ${n} 只）${backupHint}</div>
+        <div id="pfMvRow" style="font-size:12px;margin:6px 0;padding:6px 8px;background:var(--card2);border-radius:8px">总市值/总盈亏加载中…</div>
+        <div id="pfRingWrap" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:6px 0">
+          <div id="pfRing" style="width:150px;height:150px;flex-shrink:0"></div>
+          <div style="flex:1;min-width:200px">
+            <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">标的</th><th>股数</th><th>成本</th><th>买入日</th><th>提示</th></tr>${overviewRows}</table>
+            <div class="hint" style="margin-top:4px">点击持仓行可跳转该股诊断（X12）；备份入口在首页分红日历底部 💸 分红生活视角 → ⬇️ 导出数据</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">占比=市值÷总市值（现价×股数，腾讯行情快照）· 点扇区跳诊断</div>
+        <div id="pfNetWorth" style="width:100%;height:160px;margin-top:8px"></div>
+        <div id="pfNetWorthSub" style="font-size:11px;color:var(--muted);text-align:center"></div>
+      </div>` : '';
+    /* A2（M181/M183/M199/M213）：紧凑行 3 数字+警示徽标（全读缓存零请求；渐进增强 M188：无警示数据不显示） */
+    let compactHtml = '';
+    try {
+      const pf = JSON.parse(localStorage.getItem('divtool_pf_summary') || 'null');
+      const cp = JSON.parse(localStorage.getItem('divtool_compact_cache') || 'null');
+      const cells = [];
+      const yearIncome = cp ? cp.yearIncome : null;
+      const yearTotalNow = cp ? cp.yearTotalNow : null;
+      const target = cp ? cp.target : null;
+      if (yearIncome != null) cells.push(`<span style="color:var(--gold)">年度分红 <b>${(yearIncome / 10000).toFixed(2)}万</b></span>`);
+      if (target > 0 && yearTotalNow != null) {
+        const cov = Math.min(999, yearTotalNow / target * 100);
+        cells.push(`<span style="color:${cov >= 100 ? '#4caf7d' : 'var(--gold)'}">目标覆盖 <b>${cov.toFixed(0)}%</b></span>`);
+      }
+      if (pf && pf.totalPos != null) cells.push(`<span>总仓位 <b>${pf.totalPos}%</b>（${pf.triggeredCount || 0} 触发）</span>`);
+      const nWarn = pf ? ((pf.nTrap || 0) + (pf.nWarn || 0) + (pf.nF10Trap || 0)) : 0;
+      if (nWarn > 0) cells.push(`<span style="color:#e05a5a">⚠️ ${nWarn} 警示</span>`);
+      if (cells.length) compactHtml = `<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;margin-bottom:6px;padding:5px 8px;background:var(--card2);border-radius:8px">${cells.join('<span style="color:var(--line)">|</span>')}<span style="color:var(--sub)">总市值见下方我的持仓卡</span></div>`;
+    } catch (e) { compactHtml = ''; }
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:700">${title}</div>
+        <div style="font-size:11px;color:var(--muted)">数据存本地 · 不进仓库</div>
       </div>
-      ${holds.length ? `<table style="width:100%;font-size:11px;border-collapse:collapse"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">名称</th><th>代码</th><th>股数</th><th>成本</th><th>买入日</th><th></th></tr>${rowsHtml}</table>` : ''}
-      <div class="hint" style="margin-top:6px">${holds.length ? '已录入持仓 → 下方组合总览用真实股数计算' : '未录入 → 下方显示静态样例（研究数据 2026-08-18）'}</div>`;
+      ${compactHtml}
+      ${form}
+      ${n ? '' : emptyGuide}
+      ${detailTable}
+      ${overview}`;
+    bindHoldingEvents();
+    if (n) fillHoldPrices();   /* A1（M215-M217）：骨架先渲染 → 异步填现价/市值 + 画环形图；失败 {} 兑底 */
+  }
+
+  /* A1（M215-M217）：批量拉行情快照一次（getStockQuotes TTL15min 已缓存）→ 填现价/市值 + 画环形图
+   * 快照失败 {} 兑底显示"—"不白屏（M215）；市值=现价×股数；环形图只在有持仓时画（M198） */
+  let _pfRingChart = null;
+  let _pfbtChart = null;   /* 批次3 R2：组合回测三线曲线实例 */
+  async function fillHoldPrices() {
+    const el = $('#pfSample');
+    if (!el) return;
+    const holds = loadHoldings();
+    if (!holds.length) return;
+    const codes = holds.map(h => h.code);
+    let snap = {};
+    try { snap = await DL.getStockQuotes(codes); } catch (e) { snap = {}; }
+    const priceEls = el.querySelectorAll('.hq-price');
+    const mvEls = el.querySelectorAll('.hq-mv');
+    const pnlEls = el.querySelectorAll('.hq-pnl');
+    let totalMv = 0, totalCost = 0;
+    const rows = [];
+    const costOf = {};
+    holds.forEach(h => {
+      const wCost = calcWeightedCost(h);
+      costOf[h.code] = wCost;
+      totalCost += (wCost != null ? wCost * h.shares : 0);
+    });
+    holds.forEach(h => {
+      const p = (snap[h.code] && snap[h.code].price != null) ? snap[h.code].price : null;
+      const mv = (p != null && h.shares > 0) ? p * h.shares : null;
+      const wCost = costOf[h.code];
+      const pnl = (mv != null && wCost != null) ? mv - wCost * h.shares : null;
+      if (mv != null) totalMv += mv;
+      if (mv != null) rows.push({ code: h.code, name: h.name || h.code, value: mv });
+      priceEls.forEach(x => { if (x.dataset.code === h.code) x.textContent = p != null ? p.toFixed(2) : '—'; });
+      mvEls.forEach(x => { if (x.dataset.code === h.code) x.textContent = mv != null ? Math.round(mv).toLocaleString() : '—'; });
+      pnlEls.forEach(x => {
+        if (x.dataset.code === h.code) {
+          x.textContent = pnl != null ? (pnl >= 0 ? '+' : '') + Math.round(pnl).toLocaleString() : '—';
+          if (pnl != null) x.style.color = pnl >= 0 ? '#4caf7d' : '#e05a5a';
+        }
+      });
+    });
+    drawHoldRing(rows, totalMv);
+    /* 批次2（M274-M277）：净值曲线数据源——市值快照每天首开存（当天去重），divCum 由渲染期读 divtool_div_years 缓存 */
+    try {
+      const today = DL.todayStr();
+      const snaps = JSON.parse(localStorage.getItem('divtool_holdings_snap') || '[]');
+      if (!Array.isArray(snaps)) return;
+      if (!snaps.some(s => s.date === today) && totalMv > 0) {
+        snaps.push({ date: today, totalValue: totalMv, items: holds.map(h => ({ code: h.code, name: h.name || h.code, shares: h.shares, value: (costOf[h.code] != null && snap[h.code] && snap[h.code].price != null) ? snap[h.code].price * h.shares : null })) });
+        snaps.sort((a, b) => a.date < b.date ? -1 : 1);
+        if (snaps.length > 366) snaps.splice(0, snaps.length - 366);
+        localStorage.setItem('divtool_holdings_snap', JSON.stringify(snaps));
+      }
+    } catch (e) {}
+    /* 组合总市值/总盈亏写入总览行（无行情时兜底不显示） */
+    const mvRow = document.getElementById('pfMvRow');
+    if (mvRow && totalMv > 0) {
+      const totalPnl = totalMv - totalCost;
+      mvRow.innerHTML = `总市值 <b style="color:var(--txt)">${Math.round(totalMv).toLocaleString()}</b> · 总成本 <b>${Math.round(totalCost).toLocaleString()}</b> · 总盈亏 <b style="color:${totalPnl >= 0 ? '#4caf7d' : '#e05a5a'}">${totalPnl >= 0 ? '+' : ''}${Math.round(totalPnl).toLocaleString()}（${totalCost > 0 ? ((totalPnl / totalCost) * 100).toFixed(1) : '—'}%）</b>`;
+    }
+    drawNetWorthCurve();
+  }
+
+  /* 批次2（M274-M277）：组合历史净值曲线——双线：市值（快照 divtool_holdings_snap）+ 累计分红（E1 历史 divtool_div_years）
+   * 起点不同标注（M276）；数据积累中标注（M277）；放在持仓卡环形图下方 */
+  let _netChart = null;
+  function drawNetWorthCurve() {
+    const el = document.getElementById('pfNetWorth');
+    if (!el) return;
+    let snaps = [];
+    try { snaps = JSON.parse(localStorage.getItem('divtool_holdings_snap') || '[]'); } catch (e) {}
+    if (!snaps.length || snaps.length < 1) {
+      el.innerHTML = '<div class="hint" style="font-size:11px;padding:8px;text-align:center">📈 净值曲线积累中（每天打开工具记录一次市值快照，攒几天后显示）</div>';
+      return;
+    }
+    let divYears = null;
+    try { divYears = JSON.parse(localStorage.getItem('divtool_div_years') || 'null'); } catch (e) {}
+    const mvData = snaps.map(s => [s.date, Math.round(s.totalValue)]);
+    const divData = [];
+    if (divYears && Array.isArray(divYears.years)) {
+      let cum = 0;
+      divYears.years.forEach((y, i) => { cum += (divYears.values[i] || 0); divData.push([y + '-12-31', Math.round(cum)]); });
+    }
+    if (typeof echarts === 'undefined') { el.innerHTML = '<div class="hint" style="font-size:11px;padding:8px;text-align:center">图表库未加载</div>'; return; }
+    if (_netChart) { _netChart.dispose(); _netChart = null; }
+    const chart = _netChart = echarts.init(el);
+    const series = [{ name: '持仓市值', type: 'line', data: mvData, smooth: true, showSymbol: false, lineStyle: { color: '#4caf7d', width: 2 }, itemStyle: { color: '#4caf7d' } }];
+    if (divData.length) series.push({ name: '累计分红', type: 'line', data: divData, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 2, type: 'dashed' }, itemStyle: { color: '#d9a441' } });
+    chart.setOption({
+      title: { text: '组合净值曲线', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+      tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+      legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 }, data: series.map(s => s.name) },
+      grid: { left: 52, right: 12, top: 40, bottom: 24 },
+      xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+      yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+      series,
+    });
+    /* 双线起点不同标注（M276） */
+    const sub = document.getElementById('pfNetWorthSub');
+    if (sub) sub.textContent = divData.length ? '市值=打开工具的日子起快照 · 累计分红=E1 历史年度累加（起点不同）' : '市值=打开工具的日子起快照（数据积累中）';
+  }
+
+  /* A1 环形图（M179/M198/M211/M214）：市值占比饼图，扇区标百分比 1 位小数+图例标名称市值，点扇区跳诊断
+   * resize 监听（M218）：复用全局 resize（2281 行 cmpCharts 同一监听） */
+  function drawHoldRing(rows, totalMv) {
+    const el = document.getElementById('pfRing');
+    if (!el) return;
+    if (!rows.length) { if (_pfRingChart) { _pfRingChart.dispose(); _pfRingChart = null; } el.innerHTML = '<div class="hint" style="font-size:11px;padding-top:52px;text-align:center">行情快照未取到<br>稍后自动重试</div>'; return; }
+    if (typeof echarts === 'undefined') { el.innerHTML = '<div class="hint" style="font-size:11px;padding-top:52px;text-align:center">图表库未加载</div>'; return; }
+    if (_pfRingChart) { _pfRingChart.dispose(); _pfRingChart = null; }
+    const chart = _pfRingChart = echarts.init(el);
+    chart.setOption({
+      tooltip: { trigger: 'item', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => `<b>${p.name}</b><br/>市值 <b>${(p.value / 10000).toFixed(2)} 万</b>（${p.percent.toFixed(1)}%）` },
+      series: [{ type: 'pie', radius: ['45%', '72%'], label: { formatter: '{d}%', fontSize: 10, color: '#e8efe9' }, data: rows }],
+      title: { text: '市值占比', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+    });
+    chart.on('click', p => { if (p.data && p.data.code) { try { openDiagnose(p.data.code); } catch (e) {} } });
+  }
+
+  function refreshPortfolio() { renderHoldingsCard(); }
+
+  /* M105：bindHoldingEvents 独立函数（两分支复用）——addBtn/rmBtns/clearBtn/bulkToggle/bulkAdd/data-diag/data-hrow 全绑 + stopPropagation（M119）
+   * M154：空态分支也要绑 bulkToggle（可直接批量粘贴）；M155：选择器限 el 范围防 662 行自选卡 data-code 干扰 */
+  function bindHoldingEvents() {
+    const el = $('#pfSample');
+    if (!el) return;
     const addBtn = document.getElementById('holdAdd');
     if (addBtn) addBtn.onclick = async () => {
       const code = document.getElementById('holdCode').value.trim();
@@ -3061,34 +3367,58 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (!/^\d{6}$/.test(code)) { toast('请输入 6 位代码'); return; }
       if (!(shares > 0) || !isFinite(shares)) { toast('股数必须 >0'); return; }
       if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('日期格式 YYYY-MM-DD'); return; }
+      const holds2 = loadHoldings();
+      const dup = holds2.find(h => h.code === code);
+      if (dup) { toast('该代码已录入 → 用行内 ➕加仓 追加（记录买入流水）'); return; }
       let name = code;
       try {
-        const n = await DL.fetchName(code);
-        if (n && n !== code) name = n;
+        const nn = await DL.fetchName(code);
+        if (nn && nn !== code) name = nn;
         else { toast('代码不存在或无法识别'); return; }
       } catch (e) { toast('代码校验失败'); return; }
-      const holds2 = loadHoldings();
-      if (holds2.some(h => h.code === code)) { toast('该代码已录入'); return; }
-      holds2.push({ code, name, shares, cost: cost > 0 ? cost : null, date: date || null });
+      /* 批次2（M260/M267）：新增写首笔 trades（date/shares/price）；无价则 trades 空+cost 手填 */
+      const trades = (cost > 0 && date) ? [{ date: date || null, shares, price: cost }] : [];
+      holds2.push({ code, name, shares, cost: cost > 0 ? cost : null, date: date || null, trades });
       saveHoldings(holds2);
-      try { toast('✅ 已保存 ' + holds2.length + ' 只持仓'); } catch (e2) {}
-      renderHoldingsEditor();
-      renderPortfolioSample();
+      try { toast('✅ 已保存 ' + holds2.length + ' 只持仓' + (trades.length ? '（含首笔买入流水）' : '')); } catch (e2) {}
+      refreshPortfolio();
     };
-    const rmBtns = el.querySelectorAll('[data-rm]');
-    rmBtns.forEach(b => b.onclick = e => {
+    /* 批次2（M267-M270）：行内 ➕加仓——只追加 trades，不覆盖；输入框填了代码=预填该行，否则用该行代码 */
+    el.querySelectorAll('[data-add]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      const i = parseInt(b.dataset.add, 10);
+      const h2 = loadHoldings();
+      const h = h2[i];
+      if (!h) return;
+      const shares = parseFloat(document.getElementById('holdShares').value);
+      const cost = parseFloat(document.getElementById('holdCost').value);
+      const date = document.getElementById('holdDate').value.trim();
+      if (!(shares > 0) || !isFinite(shares)) { toast('先在上方填加仓股数'); return; }
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast('日期格式 YYYY-MM-DD'); return; }
+      const ts = holdTrades(h).slice();
+      ts.push({ date: date || null, shares, price: cost > 0 ? cost : null });
+      const newShares = h.shares + shares;
+      const wCost = calcWeightedCost(Object.assign({}, h, { trades: ts }));
+      h2[i] = Object.assign({}, h, { shares: newShares, trades: ts, cost: wCost != null ? wCost : h.cost });
+      saveHoldings(h2);
+      try { toast('✅ ' + h.code + ' 加仓 ' + shares + ' 股 → 共 ' + newShares + ' 股（加权成本 ' + (wCost != null ? wCost.toFixed(2) : '—') + '）'); } catch (e2) {}
+      refreshPortfolio();
+    });
+    const emptyAdd = document.getElementById('holdEmptyAdd');
+    if (emptyAdd) emptyAdd.onclick = () => { const fc = document.getElementById('holdCode'); if (fc) { fc.focus(); try { fc.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} } };
+    el.querySelectorAll('[data-rm]').forEach(b => b.onclick = e => {
       e.stopPropagation();   /* X12：防冒泡触发行点击进诊断 */
       const i = parseInt(b.dataset.rm, 10);
       const h2 = loadHoldings(); h2.splice(i, 1); saveHoldings(h2);
       try { toast('✅ 已保存 ' + h2.length + ' 只持仓'); } catch (e2) {}
-      renderHoldingsEditor(); renderPortfolioSample();
+      refreshPortfolio();
     });
     /* X12/P46（2026-08-21）：持仓行可点进诊断（与自选卡一致；删除按钮 stopPropagation 防冲突） */
     el.querySelectorAll('[data-hrow]').forEach(r => {
       r.onclick = () => { openDiagnose(r.dataset.hrow); };
     });
     const clearBtn = document.getElementById('holdClear');
-    if (clearBtn) clearBtn.onclick = () => { saveHoldings([]); try { toast('✅ 已清空持仓'); } catch (e2) {} renderHoldingsEditor(); renderPortfolioSample(); };
+    if (clearBtn) clearBtn.onclick = () => { saveHoldings([]); try { toast('✅ 已清空持仓'); } catch (e2) {} refreshPortfolio(); };
     /* J2/P100（2026-08-21）：批量粘贴入口——行级错误定位（"第 2 行格式错误：601398（应为 代码:股数）"）+ toast"已保存 N 只" */
     const bulkToggle = document.getElementById('holdBulkToggle');
     const bulkWrap = document.getElementById('holdBulkWrap');
@@ -3115,10 +3445,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const existing = loadHoldings();
       const dupInStore = parsed.filter(p => existing.some(h => h.code === p.code));
       const fresh = parsed.filter(p => !existing.some(h => h.code === p.code));
-      if (fresh.length) {
-        existing.push(...fresh);
-        saveHoldings(existing);
-      }
+      if (fresh.length) { existing.push(...fresh); saveHoldings(existing); }
       let msg = '✅ 已保存 ' + existing.length + ' 只持仓';
       const parts = [];
       if (fresh.length) parts.push('新增 ' + fresh.length + ' 只');
@@ -3126,90 +3453,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (errors.length) parts.push(errors.length + ' 行错误');
       if (parts.length) msg += '（' + parts.join('，') + '）';
       if (errors.length) { if (errEl) errEl.innerHTML = errors.slice(0, 5).join('<br>') + (errors.length > 5 ? '<br>… 共 ' + errors.length + ' 行错误' : ''); }
-      try { toast('msg'); } catch (e2) {}
+      try { toast(msg); } catch (e2) {}
       const ta = document.getElementById('holdBulk');
       if (ta) ta.value = '';
-      renderHoldingsEditor(); renderPortfolioSample();
+      refreshPortfolio();
     };
-  }
-
-  /* O4：组合静态样例页（M27 方案 C）——6 只持仓一行一卡，静态原型·数据 2026-08-18
-   * 与 M24 组合级发现对照：三档结构（可买4 vs 等更低2）、金融集中度 3/6 */
-  function renderPortfolioSample() {
-    const el = $('#pfSample');
-    if (!el) return;
-    const holds = loadHoldings();
-    if (holds.length) {
-      // 有录入 → 渲染录入持仓卡（真实股数），静态样例作为下方参考
-      const rowsHtml = holds.map(h => {
-        const indKey = null;
-        const v = DL.verdictEngine({ coverage: null, reserveYears: null, payoutRate: null, dps: 0, dy: null, pct: null, industry: indKey });
-        return `<tr style="border-top:1px solid var(--line);cursor:pointer" data-diag="${h.code}">
-          <td style="padding:4px"><b>${esc(h.name || h.code)}</b><div style="font-size:11px;color:var(--muted)">${esc(h.code)}</div></td>
-          <td style="text-align:center">${h.shares}</td>
-          <td style="text-align:center">${h.cost != null ? h.cost.toFixed(2) : '—'}</td>
-          <td style="text-align:center">${h.date || '—'}</td>
-          <td style="text-align:center;font-size:11px;color:var(--muted)">点此行看诊断 →</td>
-        </tr>`;
-      }).join('');
-      /* X9/P42（2026-08-21）：上次导出时间提醒（>30 天且有持仓） */
-      const backupHint = () => {
-        try {
-          const t = parseInt(localStorage.getItem('divtool_last_export') || '0', 10);
-          if (!t) return ' <span style="font-size:11px;color:var(--muted)">（未备份过，建议 ☁️ 定期导出）</span>';
-          const days = Math.round((Date.now() - t) / 86400000);
-          if (days > 30) return ` <span style="font-size:11px;color:#e05a5a">⚠️ 上次导出 ${days} 天前（>30 天，建议重新导出）</span>`;
-          return ` <span style="font-size:11px;color:var(--muted)">上次导出 ${days} 天前</span>`;
-        } catch (e) { return ''; }
-      };
-      el.innerHTML += `<div class="card" style="margin-top:8px">
-        <div style="font-size:12px;font-weight:700">📊 组合总览（已录入 ${holds.length} 只）${backupHint()}</div>
-        <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:4px">标的</th><th>股数</th><th>成本</th><th>买入日</th><th>提示</th></tr>${rowsHtml}</table>
-        <div class="hint" style="margin-top:4px">点击持仓行可跳转该股诊断（X12）；备份入口在首页分红日历底部 💸 分红生活视角 → ⬇️ 导出数据</div>
-      </div>`;
-      el.querySelectorAll('[data-diag]').forEach(tr => tr.onclick = () => { try { openDiagnose(tr.dataset.diag); } catch (e) {} });
-      return;   /* F1（2026-08-21）：有录入→只显示真实持仓，静态样例不再渲染（原代码无 return，样例覆盖真实卡） */
-    }
-    const rows = [
-      /* Q3（M39）：风险列与报告卡引擎⑤同源（roeTrend 连降 / 分红率高企判定） */
-      { name: '招商银行', code: '600036', price: 38.31, dy: 5.26, cov: 2.83, reserve: 13.4, pr: 35, roe: 13.44, roeTrend: -3, ind: '银行', tiers: '小仓区', dec: '✅ 可买' },
-      { name: '工商银行', code: '601398', price: 7.67, dy: 4.05, cov: 3.22, reserve: 19.7, pr: 31, roe: 9.45, roeTrend: -1, ind: '银行', tiers: '等待区', dec: '🟡 等更低' },
-      { name: '伊利股份', code: '600887', price: 25.14, dy: 5.49, cov: 1.33, reserve: 3.8, pr: 75, roe: 20.87, roeTrend: 0, ind: '消费', tiers: '小仓区', dec: '✅ 可买·预警' },
-      { name: '中国移动', code: '600941', price: 95.84, dy: 4.91, cov: 1.35, reserve: 12.0, pr: 74, roe: 9.90, roeTrend: -1, ind: '电信', tiers: '小仓区', dec: '✅ 可买' },
-      { name: '美的集团', code: '000333', price: 83.40, dy: 5.16, cov: 1.35, reserve: 5.1, pr: 74, roe: 19.70, roeTrend: 0, ind: '消费', tiers: '小仓区', dec: '✅ 可买' },
-      { name: '中国平安', code: '601318', price: 51.28, dy: 5.27, cov: 2.84, reserve: 15.7, pr: 35, roe: 14.00, roeTrend: 0, ind: '保险', tiers: '小仓区', dec: '✅ 可买' },
-    ];
-    const buyN = rows.filter(r => r.dec.startsWith('✅')).length;
-    const waitN = rows.length - buyN;
-    const finN = rows.filter(r => ['银行','保险'].includes(r.ind)).length;
-    /* F3（2026-08-21）：静态样例默认折叠 + ⚠️ + 日期戳——样例是研究数据不是真实持仓，录入后自动替换 */
-    el.innerHTML = `
-      <details>
-        <summary style="font-size:12px;font-weight:700;cursor:pointer">📊 组合总览（静态样例 ⚠️）<span style="font-size:11px;color:var(--muted);font-weight:400">研究数据 2026-08-18 · 非您的持仓 · 录入后自动替换</span></summary>
-        <div style="font-size:11px;color:var(--sub);margin:6px 0">这是研究原型数据（招行/工行/伊利/移动/美的/平安 6 只），用于演示组合总览长什么样。录入真实持仓后此处自动切换为您的组合。</div>
-      <table style="width:100%;font-size:11px;border-collapse:collapse">
-        <tr style="color:var(--muted)">
-          <th style="text-align:left;padding:4px">标的</th><th>现价</th><th>股息率</th><th>覆盖</th><th>储备</th><th>分红率</th><th>ROE</th><th>档位</th><th>决策</th><th>主要风险</th>
-        </tr>
-        ${rows.map(r => {
-          const indKey = { '银行':'bank', '消费':'consumer', '电信':'telecom', '保险':'insurer' }[r.ind];
-          const v = DL.verdictEngine({ coverage: r.cov, reserveYears: r.reserve, payoutRate: r.pr/100, eps: r.roe, dps: 0, price: r.price, dy: r.dy, pct: 50, industry: indKey, roe: r.roe, roeTrend: r.roeTrend, dividendCagr: 0.05 });
-          return `<tr style="border-top:1px solid var(--line)">
-          <td style="padding:4px"><b>${r.name}</b><div style="font-size:11px;color:var(--muted)">${r.code} · ${r.ind}</div></td>
-          <td style="text-align:center">${r.price.toFixed(2)}</td>
-          <td style="text-align:center">${r.dy.toFixed(2)}%</td>
-          <td style="text-align:center">${r.cov.toFixed(2)}</td>
-          <td style="text-align:center">${r.reserve.toFixed(1)}年</td>
-          <td style="text-align:center">${r.pr}%</td>
-          <td style="text-align:center">${r.roe.toFixed(1)}%</td>
-          <td style="text-align:center">${r.tiers}</td>
-          <td style="text-align:center">${r.dec}</td>
-          <td style="text-align:center;font-size:11px;color:var(--muted)">${v.q3.msg}</td>
-        </tr>`;
-        }).join('')}
-      </table>
-      <div class="hint" style="margin-top:6px">组合结构：可买 ${buyN} 只 vs 等更低 ${waitN} 只 · 金融集中度 ${finN}/6（50%）· 分红安全分层：招行/工行/平安覆盖 2.8-3.2 倍 vs 伊利/移动/美的 1.3 倍</div>
-      </details>`;
+    el.querySelectorAll('[data-diag]').forEach(tr => { tr.onclick = () => { try { openDiagnose(tr.dataset.diag); } catch (e) {} }; });
   }
 
   window.addEventListener('DOMContentLoaded', () => {
@@ -3229,8 +3478,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     try { migrateHoldingsV1(); } catch (e) { }
     /* P39（2026-08-21）：IndexedDB 缓存卫生（>7天且>50MB 才 prune，异步不阻塞） */
     try { if (typeof DL.cachePrune === 'function') DL.cachePrune(); } catch (e) { }
-    renderHoldingsEditor();
-    renderPortfolioSample();
+    refreshPortfolio();
     renderCompare();
     // 搜索：输入6位代码 → 进诊断；支持名称
     const search = $('#homeSearch');
