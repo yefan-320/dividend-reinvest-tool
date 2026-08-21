@@ -332,7 +332,9 @@ async function main() {
   });
 
   await S('D2 诊断页内容完整性', async () => {
-    await waitFor(cdp, `(document.getElementById('diagStats').innerText||'').includes('当前股息率') && !(document.getElementById('diagStats').innerText||'').includes('加载中')`, 60000, '诊断统计');
+    // 2026-08-21：诊断页 diagStats 依赖 K线渲染（腾讯风控→新浪降级需 25s+；release.sh 连续 Chrome 实例后网络限流更慢）
+    // 60s 曾连续 2 次误报 → 提到 120s（与 B6 上市日回填 150s 同量级），网络慢时不误报
+    await waitFor(cdp, `(document.getElementById('diagStats').innerText||'').includes('当前股息率') && !(document.getElementById('diagStats').innerText||'').includes('加载中')`, 120000, '诊断统计');
     const st = await evalIn(cdp, `document.getElementById('diagStats').innerText`);
     for (const k of ['当前股息率', '每股分红', '分红率(近2财年)', '年化', '最大回撤', 'PE / PB'])
       assert(st.includes(k), '缺诊断项: ' + k);
