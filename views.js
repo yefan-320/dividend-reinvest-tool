@@ -3560,8 +3560,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     </div>`;
     if (meta.failed && meta.failed.length) html += `<div class="hint v3-blink" style="color:#e05a5a;border:1px solid rgba(224,90,90,.3);padding:4px 8px;border-radius:6px">⚠️ 数据可信度：${meta.failed.length}/${combo.items.length} 只数据缺失（${meta.failed.join('、')}），结果未含——请检查网络或数据源</div>`;
     else html += `<div class="hint" style="color:var(--sub)">✅ 数据可信度：${res.rows}/${combo.items.length} 只数据完整（本地缓存/实时行情）</div>`;
-    /* 主图（三层：总资产+投入虚线+回撤阴影） */
-    html += `<div id="cockpitMain" style="width:100%;height:280px;margin-top:4px"></div>`;
+    /* 主图（净值从1起 + 双基准 + 下挂回撤副图——v3.2 S5/D3） */
+    html += `<div id="cockpitMain" style="width:100%;height:320px;margin-top:4px"></div>`;
     /* 辅助 3 图（覆盖率环/分红质量环/健康雷达） */
     html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
       <div id="cockpitRing" style="width:32%;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
@@ -3650,26 +3650,57 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (_cockpitChart) { _cockpitChart.dispose(); _cockpitChart = null; }
       const ch = _cockpitChart = echarts.init(mainEl);
       const t = res.totalAsset;
-      /* 回撤阴影：计算峰值回撤 */
+      const baseVal = t[0] && t[0].value > 0 ? t[0].value : 1; /* 净值从 1 起（雪球口径） */
+      /* 回撤副图数据（灰蓝，非红——主人点名"回测搞成红色太难看"） */
       const ddData = []; let peak = -Infinity;
       t.forEach(x => { if (x.value > peak) peak = x.value; ddData.push(+( (x.value - peak) / peak * 100).toFixed(2)); });
+      const navData = t.map(x => [x.d, +(x.value / baseVal).toFixed(4)]);
+      const investNav = t.map(x => [x.d, +(x.invested / baseVal).toFixed(4)]);
       ch.setOption({
-        title: { text: '组合总资产（含分红再投+追加） vs 累计投入（虚线）', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
-        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
-        legend: { top: 18, textStyle: { color: '#8fa69c', fontSize: 10 } },
-        grid: { left: 56, right: 14, top: 44, bottom: 26 },
-        xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, axisPointer: { snap: true, lineStyle: { color: 'rgba(157,180,171,.6)', type: 'dashed' } } },
+        legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 }, selected: { '沪深300': true, '红利低波': true } },
+        grid: [
+          { left: 56, right: 14, top: 28, height: '62%' },
+          { left: 56, right: 14, top: '74%', height: '20%' },
+        ],
+        xAxis: [
+          { type: 'time', gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+          { type: 'time', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+        ],
         yAxis: [
-          { type: 'value', name: '万元', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-          { type: 'value', name: '回撤%', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { show: false } },
+          { type: 'value', gridIndex: 0, name: '净值', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v.toFixed(1) }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, scale: true },
+          { type: 'value', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v + '%' }, splitLine: { show: false }, min: 'dataMin' },
+        ],
+        dataZoom: [
+          { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
+          { type: 'slider', xAxisIndex: [0, 1], bottom: 2, height: 14, borderColor: '#2a3d36', backgroundColor: '#16211d', fillerColor: 'rgba(217,164,65,.12)', textStyle: { color: '#8fa69c', fontSize: 9 } },
         ],
         series: [
-          { name: '总资产', type: 'line', data: t.map(x => [x.d, x.value]), smooth: true, showSymbol: false, lineStyle: { color: '#4caf7d', width: 2.5 }, areaStyle: { color: 'rgba(76,175,125,.12)' } },
-          { name: '累计投入', type: 'line', data: t.map(x => [x.d, x.invested]), smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.5, type: 'dashed' } },
-          { name: '回撤%', type: 'line', yAxisIndex: 1, data: t.map((x, i) => [x.d, ddData[i]]), smooth: true, showSymbol: false, lineStyle: { color: 'rgba(224,90,90,.5)', width: 1 }, areaStyle: { color: 'rgba(224,90,90,.08)' } },
+          { name: '组合净值', type: 'line', data: navData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.25)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
+          { name: '累计投入', type: 'line', data: investNav, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.5, type: 'dashed' } },
+          { name: '沪深300', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#8fa69c', width: 1.25 } },
+          { name: '红利低波', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#5b8db8', width: 1.25 } },
+          { name: '回撤', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.map((x, i) => [x.d, ddData[i]]), smooth: true, showSymbol: false, lineStyle: { color: 'rgba(100,130,160,.6)', width: 1 }, areaStyle: { color: 'rgba(100,130,160,.15)' } },
         ],
         animationDuration: 800,
       });
+      /* v3.2 S5：基准对比异步拉取（沪深300+红利低波，同起点归一为 1；失败静默——基准是参考非阻塞） */
+      (async () => {
+        try {
+          const from = t[0] ? t[0].d : (() => { const x = new Date(); x.setDate(x.getDate() - (res.span || 10) * 366); return x.toISOString().slice(0, 10); })();
+          const to = t[t.length - 1] ? t[t.length - 1].d : DL.todayStr();
+          const [k300, khv] = await Promise.all([
+            DL.getIndexKline('000300', from, to).catch(() => null),
+            DL.getIndexKline('000922', from, to).catch(() => null),
+          ]);
+          const norm = k => { if (!k || !Object.keys(k).length) return []; const ks = Object.keys(k).sort(); const b = k[ks[0]]; if (!(b > 0)) return []; return ks.map(d => [d, +(k[d] / b).toFixed(4)]); };
+          ch.setOption({ series: [
+            { name: '组合净值', data: navData }, { name: '累计投入', data: investNav },
+            { name: '沪深300', data: norm(k300) }, { name: '红利低波', data: norm(khv) },
+            { name: '回撤', data: t.map((x, i) => [x.d, ddData[i]]) },
+          ] });
+        } catch (e) { /* 基准失败不影响主图 */ }
+      })();
     }
     /* 覆盖率环（用年分红 vs 月支出 12 倍估算） */
     const ringEl = document.getElementById('cockpitRing');
