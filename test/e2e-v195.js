@@ -116,9 +116,10 @@ async function main() {
   check('tooltip 无"平滑"字样', !tip.includes('平滑'), tip.replace(/<[^>]+>/g, ''));
 
   // 2. 带状图 note 口径标注（v1.9.27：前瞻口径——公告即算含未派发，主人钦定）
-  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('前瞻口径')`);
+  /* 2026-08-21 主人抓宇通上蹿下跳：带状图改报告期口径（reportYearDivAt，去 A 兜底窗口），note 词从"前瞻口径"改"报告期口径" */
+  const note = await waitFor(`(document.getElementById('diagYieldNote')||{}).textContent && document.getElementById('diagYieldNote').textContent.includes('报告期口径')`);
   const noteTxt = await evalJS(`document.getElementById('diagYieldNote').textContent`);
-  check('带状图 note 含口径标注（前瞻+年化近2财年）', note && noteTxt.includes('前瞻口径') && noteTxt.includes('年化近2财年'), noteTxt.slice(0, 80));
+  check('带状图 note 含口径标注（报告期+年化近2财年）', note && noteTxt.includes('报告期口径') && noteTxt.includes('年化近2财年'), noteTxt.slice(0, 80));
   check('带状图 note 无旧“逐年滚动”字样', !noteTxt.includes('逐年滚动'), noteTxt.slice(0, 80));
 
   // 3. diagStats 年化口径标注
