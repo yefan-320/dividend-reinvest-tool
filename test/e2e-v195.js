@@ -80,7 +80,7 @@ async function main() {
   await evalJS(`window.DL.fetchName = async () => '招商银行'; 1`);
   await evalJS(`window.DL.getStockQuotes = async (cs) => Object.fromEntries(cs.map(c=>[c,{price:38.5}])); 1`);
   await evalJS(`window.DL.fetchDividendsOne = async () => [
-    { ex:'2024-07-11', report:'2024-06-30', dps:1.972 },
+    { ex:'2024-07-11', report:'2023-12-31', dps:1.972 },
     { ex:'2025-07-11', report:'2024-12-31', dps:2.000 },
     { ex:'2026-01-16', report:'2025-06-30', dps:1.013 },
     { ex:'2026-07-10', report:'2025-12-31', dps:1.003 },
@@ -89,7 +89,8 @@ async function main() {
     const fmt = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     const k = {};
     const end = new Date('2026-01-20');
-    for (let i=299;i>=0;i--){ const d=new Date(end); d.setDate(d.getDate()-i); k[fmt(d)]=40; }
+    /* 报告期口径：需覆盖到 2023 财年全公告（2024-07-11 除息）之后，序列才有≥250 有效点出分位；原 299 天从 2025-03 起前段全 0 致图不渲染 */
+    for (let i=799;i>=0;i--){ const d=new Date(end); d.setDate(d.getDate()-i); k[fmt(d)]=40; }
     k['2026-01-16']=38.55; k['2026-01-19']=38.6; k['2026-01-20']=38.5;
     window.DL.getKline = async () => k;
     return 1;
@@ -112,7 +113,7 @@ async function main() {
     const lastIdx = opt.xAxis[0].data.length - 1;
     return fmt([{ dataIndex: lastIdx }]);
   })()`);
-  check('tooltip 含“前瞻口径·公告即算”', tip.includes('前瞻口径'), tip.replace(/<[^>]+>/g, ''));
+  check('tooltip 含“报告期口径·公告即算”', tip.includes('报告期口径'), tip.replace(/<[^>]+>/g, ''));
   check('tooltip 无"平滑"字样', !tip.includes('平滑'), tip.replace(/<[^>]+>/g, ''));
 
   // 2. 带状图 note 口径标注（v1.9.27：前瞻口径——公告即算含未派发，主人钦定）
