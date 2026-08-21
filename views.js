@@ -4231,6 +4231,21 @@ async function comboLoadCardData() {
           const meta = document.querySelector(`[data-meta="${i}"]`);
           if (meta) meta.innerHTML += ` <span style="color:${color}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>`;
         }
+        /* D6 估值分位徽章（hover 显示，低/中/高）——用 K线+分红算滚动分位 */
+        try {
+          const divs = await DL.fetchDividendsOne(it.code);
+          const series = DL.calcRollingPercentile(kl, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
+          const lastPct = series.filter(x => x.pct != null).pop();
+          if (lastPct && lastPct.pct != null) {
+            const p = lastPct.pct;
+            const tag = p < 30 ? '低估' : p < 70 ? '中估' : '高估';
+            const col = p < 30 ? '#4caf7d' : p < 70 ? '#5aa9e6' : '#e05a5a';
+            const el2 = document.querySelector(`[data-dy="${i}"]`);
+            if (el2) {
+              el2.innerHTML += ` <span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:9px;cursor:help" title="估值分位 ${p.toFixed(0)}%（近5年股息率滚动分位）">${tag}</span>`;
+            }
+          }
+        } catch (e) {}
       } else {
         const sp = document.querySelector(`[data-spark="${i}"]`);
         if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:9px">—</span>';
