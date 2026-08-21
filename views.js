@@ -3432,6 +3432,85 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     } catch (e) { }
   }
 
+  /* v3.2 S3：年度战绩表数据（分红列优先：当年分红/YoY/当年收益率/当年XIRR/年末资产）
+   * 分红YoY走图标通道（▲绿▼红），收益率/XIRR走数字着色（A股红涨绿跌）——双语义分离防撞色 */
+  function buildYearTable(res) {
+    const t = res.totalAsset || [];
+    const divByYear = res.divByYear || {};
+    const mfMap = {};
+    (res.perStock || []).forEach(p => (p.monthlyFlow || []).forEach(m => { mfMap[m.date] = (mfMap[m.date] || 0) + m.amount; }));
+    const years = Object.keys(divByYear).sort();
+    const rows = years.map((y, i) => {
+      const div = divByYear[y] || 0;
+      const prevDiv = i > 0 ? (divByYear[years[i - 1]] || 0) : null;
+      const yoy = (prevDiv != null && prevDiv > 0) ? (div - prevDiv) / prevDiv * 100 : null;
+      const pts = t.filter(x => x.d.startsWith(y));
+      const lastPt = pts[pts.length - 1];
+      const firstPt = pts[0];
+      let ret = null;
+      if (lastPt) {
+        if (i === 0) ret = lastPt.invested > 0 ? (lastPt.value / lastPt.invested - 1) * 100 : null;
+        else {
+          const prevPts = t.filter(x => x.d.startsWith(years[i - 1]));
+          const prevLast = prevPts[prevPts.length - 1];
+          if (prevLast && prevLast.value > 0) ret = (lastPt.value / prevLast.value - 1) * 100;
+        }
+      }
+      let xirr = null;
+      if (firstPt && lastPt && lastPt.d !== firstPt.d) {
+        try {
+          const flows = [{ d: firstPt.d, v: -firstPt.value }];
+          Object.keys(mfMap).sort().forEach(d => { if (d.startsWith(y)) flows.push({ d, v: -mfMap[d] }); });
+          flows.push({ d: lastPt.d, v: lastPt.value });
+          if (flows.length >= 2 && typeof calcXirr === 'function') { const x = calcXirr(flows); xirr = x != null ? x * 100 : null; }
+        } catch (e) { xirr = null; }
+      }
+      return { year: y, div, yoy, ret, xirr, endValue: lastPt ? lastPt.value : null };
+    });
+    return rows;
+  }
+  /* 年度战绩表渲染（第一屏·分红列优先；表头可排序；首年/断档"—";竖屏<768 只显核心列） */
+  function renderYearTable(res, sortKey, sortDir) {
+    let rows = buildYearTable(res);
+    const keys = ['year', 'div', 'yoy', 'ret', 'xirr', 'endValue'];
+    if (sortKey && keys.indexOf(sortKey) >= 0 && sortKey !== 'year') {
+      rows = rows.slice().sort((a, b) => {
+        const av = a[sortKey] == null ? -Infinity : a[sortKey];
+        const bv = b[sortKey] == null ? -Infinity : b[sortKey];
+        return (av - bv) * (sortDir === 'asc' ? 1 : -1);
+      });
+    } else rows = rows.slice().reverse();
+    const head = (label, k) => `<th data-skey="${k}" style="text-align:right;padding:5px 8px;cursor:pointer;font-size:11px;color:var(--muted);white-space:nowrap;user-select:none">${label} ${sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : ''}</th>`;
+    const fmtW = v => (v / 10000).toFixed(2) + '万';
+    const rowHtml = r => {
+      const yoyTxt = r.yoy == null ? '—' : `<span style="color:${r.yoy >= 0 ? 'var(--div-up,#4caf7d)' : 'var(--div-down,#e05a5a)'}">${r.yoy >= 0 ? '▲' : '▼'}${Math.abs(r.yoy).toFixed(1)}%</span>`;
+      const retTxt = r.ret == null ? '—' : `<span style="color:${r.ret >= 0 ? 'var(--up,#e05a5a)' : 'var(--down,#4caf7d)'}">${r.ret >= 0 ? '+' : ''}${r.ret.toFixed(1)}%</span>`;
+      const xirrTxt = r.xirr == null ? '—' : `<span style="color:${r.xirr >= 0 ? 'var(--up,#e05a5a)' : 'var(--down,#4caf7d)'}">${r.xirr >= 0 ? '+' : ''}${r.xirr.toFixed(1)}%</span>`;
+      const divTxt = r.div > 0 ? fmtW(r.div) : '<span style="color:var(--muted)">—</span>';
+      return `<tr style="border-top:1px solid var(--line)">
+        <td style="text-align:left;padding:5px 8px;font-weight:600">${r.year}</td>
+        <td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums">${divTxt}</td>
+        <td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums;white-space:nowrap">${yoyTxt}</td>
+        <td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums;white-space:nowrap">${retTxt}</td>
+        <td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums;white-space:nowrap">${xirrTxt}</td>
+        <td style="text-align:right;padding:5px 8px;font-variant-numeric:tabular-nums">${r.endValue != null ? fmtW(r.endValue) : '—'}</td>
+      </tr>`;
+    };
+    return `<div class="v3-year-table">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:700">📅 年度战绩</span>
+        <span style="font-size:10px;color:var(--muted)">分红列优先·点列头排序·当年收益率=XIRR 双口径</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted)">▲分红增长 · ▼分红下滑（图标通道）｜收益率红涨绿跌（数字通道）</span>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="width:100%;font-size:11px;border-collapse:collapse;background:var(--card2);border-radius:10px;overflow:hidden">
+        <thead><tr style="background:var(--card)">${head('年份','year')}${head('当年分红','div')}${head('分红YoY','yoy')}${head('当年收益率','ret')}${head('当年XIRR','xirr')}${head('年末资产','endValue')}</tr></thead>
+        <tbody>${rows.map(rowHtml).join('')}</tbody>
+      </table>
+      </div>
+    </div>`;
+  }
+
   /* 三问卡 + 驾驶舱渲染 */
   function renderCockpit(res, combo, pool, meta) {
     const el = $('#pfbtResult');
@@ -3466,6 +3545,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       ${card(q2, q2sub, q2c, true)}
       ${card(q3, q3sub, q3c, true)}
     </div>`;
+    /* v3.2 S3：年度战绩表（第一屏·分红列优先）——插入 KPI 行之下、主图之上 */
+    const yearTableId = 'cockpitYearTable_' + Date.now();
+    let sortKey = null, sortDir = 'desc';
+    html += `<div id="${yearTableId}" style="margin-bottom:8px">${renderYearTable(res, sortKey, sortDir)}</div>`;
     html += `<div class="hint" style="margin-bottom:6px">✅ 组合「${esc(combo.name || '未命名')}」· ${res.rows} 只 · 近 ${res.span} 年 · 月追加模式：${meta.modeTxt}${meta.cacheNote ? ' ⚡' + meta.cacheNote : ''}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
       <button type="button" class="chip" id="rptFile" style="font-size:11px">💾 报告存本地</button>
@@ -3524,6 +3607,18 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     html += `<div class="hint" style="margin-top:6px;color:var(--sub)">口径：事件首日买入→持有至今；收益=期末价+期间分红÷买入价；月追加按所选模式分配（weight=按初始金额比例，口径见上）；${meta.cashTxt || ''}历史回测不代表未来。</div>`;
     el.innerHTML = html;
     _cockpitRes = res; _cockpitPool = pool; _cockpitCombo = combo;
+    /* v3.2 S3：年度表表头排序（事件委托） */
+    try {
+      const yt = document.getElementById(yearTableId);
+      if (yt) yt.querySelectorAll('th[data-skey]').forEach(th => {
+        th.onclick = () => {
+          const k = th.dataset.skey;
+          if (sortKey === k) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+          else { sortKey = k; sortDir = 'desc'; }
+          yt.innerHTML = renderYearTable(res, sortKey, sortDir);
+        };
+      });
+    } catch (e) { }
     /* v3.0 动效：三问卡数字滚动 + 卡片进场 */
     try {
       const nums = el.querySelectorAll('.v3-card > div:first-child');
