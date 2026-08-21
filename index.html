@@ -243,6 +243,10 @@ body{padding-bottom:64px}
 <section id="tab-home" class="tab-panel">
   <div id="onboardGuide" style="display:none"></div>
   <div id="dailyBar" style="display:none"></div>
+  <div style="margin-bottom:8px"><button type="button" class="chip" id="paramToggle" style="color:#5aa9e6;border-color:#5aa9e6">⚙️ 参数中心</button></div>
+  <div id="paramPanel" style="display:none"></div>
+  <div id="dataHealthBar" style="display:none"></div>
+  <div id="caliberPanel" style="display:none"></div>
   <div id="zoneBanner"></div>
   <div class="card">
     <h2>🔍 搜索</h2>
@@ -567,12 +571,12 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.34"></script>
+<script src="demo-data.js?v=v2.0"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v1.9.34"></script>
+<script src="data-layer.js?v=v2.0"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.34';
+const APP_VERSION = 'v2.0';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1295,6 +1299,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.34"></script>
+<script src="views.js?v=v2.0"></script>
 </body>
 </html>

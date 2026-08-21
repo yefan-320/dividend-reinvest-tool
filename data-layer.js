@@ -140,6 +140,42 @@ async function cacheGetFresh(key, ttl) {
 const _srcLog = {};
 function srcMark(key, s) { _srcLog[key] = { s, ts: Date.now() }; }
 function srcOf(key) { const v = _srcLog[key]; return v || null; }
+function srcLogAll() { return Object.keys(_srcLog).map(k => Object.assign({ key: k }, _srcLog[k])); }
+
+/* ---------- v2.0 批次1：#9 异常分级（防狼来了） ----------
+ * major（全挂）=横幅 / mid（缓存）=标注 / minor（备源降级）=小字
+ * 输入：key（srcLog key）、有缓存？ */
+function dataHealthLevel(key, hasCache) {
+  const r = _srcLog[key];
+  if (!r) return hasCache ? { level: 'mid', msg: '数据来自缓存（来源待刷新）' } : { level: 'major', msg: '数据源全挂：无实时无缓存' };
+  if (r.s === 'fallback') return { level: 'minor', msg: '数据来自备源（新浪降级）' };
+  if (r.s === 'proxy') return { level: 'minor', msg: '数据经代理获取' };
+  if (r.s === 'cache') return { level: 'mid', msg: '数据来自缓存' };
+  return { level: 'ok', msg: '' };
+}
+
+/* ---------- v2.0 批次1：#6 运行时口径自检核心（?debug=caliber 用） ----------
+ * 返回 { key, caliber, func, ok }[]——遍历 srcLog + 已知口径函数表，核对标注×实现
+ * 外部 TTM 豁免：ETF/基金无报告期 → TTM 口径合法 */
+function caliberAudit() {
+  const CALIBER_FUNCS = {
+    'annual-2y': ['calcAnnualDivYield', 'reportYearDivAt', 'latestAnnouncedYear'],
+    'report-year': ['reportYearDivAt', 'calcReportYearDivs', 'calcDivCAGR', 'ttmDivsAtMode'],
+    'ttm': ['ttmDivsAt', 'ttmDivsAtMode'],
+    'locked-ttm': ['calcLockedTTM'],
+  };
+  const rows = [];
+  Object.keys(_srcLog).forEach(key => {
+    const r = _srcLog[key];
+    rows.push({ key, caliber: r.caliber || (r.s === 'cache' ? 'cache' : 'net'), func: '—', ok: true });
+  });
+  Object.keys(CALIBER_FUNCS).forEach(cal => {
+    CALIBER_FUNCS[cal].forEach(fn => {
+      rows.push({ key: fn, caliber: cal, func: fn, ok: typeof DL[fn] === 'function' });
+    });
+  });
+  return rows;
+}
 
 /* P39（2026-08-21）：IndexedDB 缓存卫生——>7天 且 >50MB 才 prune（防误删高频小缓存），
  * 删除 7 天前写入的 key（30 天访问 key 保留策略：ts=写入时间，保留近 7 天；高频 key 会持续刷新 ts） */
@@ -281,23 +317,34 @@ function sanitizeDividends(code, divs) {
   const out = (divs || []).map(d => ({ ...d }));
   const valid = out.filter(d => d.ex && d.dps > 0);
   if (!valid.length) return out;
+  const dropped = [];
   // 逻辑级：除息日格式 + dps 范围
   const logical = valid.filter(d => {
     const okDate = /^\d{4}-\d{2}-\d{2}$/.test(d.ex || '');
     const okDps = d.dps > 0 && d.dps < 1000;
+    if (!okDate) dropped.push({ report: d.report, ex: d.ex, dps: d.dps, reason: '除息日非法' });
+    else if (!okDps) dropped.push({ report: d.report, ex: d.ex, dps: d.dps, reason: 'DPS超限' });
     return okDate && okDps;
   });
   // 单位级：单笔异常大 → 对比历史均值（8/20 漏除10 根因：单笔 10x 历史）
   const mean = logical.reduce((s, d) => s + d.dps, 0) / Math.max(1, logical.length);
-  const unitOk = logical.filter(d => d.dps <= 30 || d.dps <= mean * 8);
+  const unitOk = logical.filter(d => {
+    const ok = d.dps <= 30 || d.dps <= mean * 8;
+    if (!ok) dropped.push({ report: d.report, ex: d.ex, dps: d.dps, reason: '单笔异常大(' + d.dps + ' vs 均值' + mean.toFixed(2) + ')' });
+    return ok;
+  });
   // 行业级：股息率合理区间（警告不剔除）——按 TIER_LINE 行业
   const ind = (DL.TIER_LINE && DL.TIER_LINE[code] && DL.TIER_LINE[code].ind) || '';
   const IND_RANGE = { bank: [0, 8], consumer: [0, 10], manufacture: [0, 10], telecom: [0, 8], energy: [0, 15], utility: [0, 12] };
   const range = IND_RANGE[DL.SIG_STATS && DL.SIG_STATS[ind] ? ind : ''] || [0, 15];
+  const suspicious = [];
   const withSusp = unitOk.map(d => {
-    if (d.exPrice && d.dps / d.exPrice * 100 > range[1] * 3) d.suspicious = true;
+    if (d.exPrice && d.dps / d.exPrice * 100 > range[1] * 3) { d.suspicious = true; suspicious.push({ report: d.report, ex: d.ex, dps: d.dps }); }
     return d;
   });
+  /* #7 数据源头校验（v2.0 批次1）：剔除留标记——UI 警示"该年分红异常已剔除" */
+  if (dropped.length) withSusp._dropped = dropped;
+  if (suspicious.length) withSusp._suspicious = suspicious;
   return withSusp;
 }
 
@@ -757,7 +804,10 @@ function calcReportYearDivs(divs) {
  * 口径：首年/末年都用报告期归组；基数检查：首年 <0.1 元视为低基数，返回 null 防高基数假象（好想你案例） */
 function calcDivCAGR(divs, yearsN) {
   const n = yearsN || 3;
-  const ys = calcReportYearDivs(divs);
+  /* 2026-08-21 主人抓"平安缩水-26%"是假数据：calcReportYearDivs 含未完成财年（2026 只有中期 0.98，年报未派）
+   * → lastY=2026 分子只算 0.98 → 假缩水。修复：只保留有年报(-12-31)记录的完整财年 */
+  const ys = calcReportYearDivs(divs).filter(y =>
+    divs.some(d => (d.report || '').slice(0, 4) === y && /-12-31$/.test(d.report || '') && !d.pending));
   if (ys.length < n + 1) return null;
   const firstY = ys[ys.length - 1 - n];
   const lastY = ys[ys.length - 1];
@@ -1043,6 +1093,90 @@ function divForecast(divs, price) {
     dps: { conservative: +base.toFixed(2), base: +mid.toFixed(2), optimistic: +opt.toFixed(2) },
     text: { conservative: fmt(base), base: fmt(mid), optimistic: fmt(opt) },
     note: years.length < 7 ? '数据不足7年：区间参考性弱，仅展示最近年度派息' : null
+  };
+}
+
+/* ---------- v2.0 批次3：#12 退休时间点模拟 ----------
+ * 输入：annualDivNow(当前年分红元), cagr(分红增速), inflation(通胀), monthlyExp(月支出元)
+ * 逐年推：覆盖率 = 年分红×(1+cagr)^y / (月支出×12×(1+通胀)^y)
+ * 返回 { 达标年, 表 }；永不达标 → 达标年=null + 提示 */
+function retirementSim(annualDivNow, cagr, inflation, monthlyExp, yearsMax) {
+  const Y = yearsMax || 30;
+  if (!(annualDivNow > 0) || !(monthlyExp > 0)) return null;
+  const rows = [];
+  let hit = null;
+  for (let y = 0; y <= Y; y++) {
+    const div = annualDivNow * Math.pow(1 + cagr, y);
+    const exp = monthlyExp * 12 * Math.pow(1 + inflation, y);
+    const cov = div / exp * 100;
+    rows.push({ y, div, exp, cov });
+    if (hit == null && cov >= 100) hit = y;
+  }
+  return { hitYear: hit, rows };
+}
+
+/* ---------- v2.0 批次3：#13 反向本金（要月支出 W 需本金 X） ----------
+ * 双答案：当前股息率（dyCur）/ 预期股息率（dyExp，默认 5%） */
+function requiredPrincipal(monthlyExp, dyCur, dyExp) {
+  if (!(monthlyExp > 0)) return null;
+  const annual = monthlyExp * 12;
+  const d = dyCur || 0.05;
+  const e = dyExp || 0.05;
+  return {
+    atCurrent: annual / d,
+    atExpected: annual / e,
+    dyCur: d,
+    dyExp: e,
+  };
+}
+
+/* ---------- v2.0 批次2：#1 决策语言（组合级，M373：Σ每股DPS×股数） ----------
+ * pool: [{ code, name, shares, price, divs }]
+ * opts: { yearsN(默认5), monthlyExp, cagrAssumption(默认0.08中性) }
+ * 三情景 = divForecast 每股 DPS 三情景 × 股数 × (1+cagr)^N（分红增长）
+ */
+function decisionSentence(pool, opts) {
+  const o = opts || {};
+  const yearsN = o.yearsN || 5;
+  const cagr = o.cagrAssumption != null ? o.cagrAssumption : 0.08;
+  const monthlyExp = o.monthlyExp || 0;
+  if (!pool || !pool.length) return null;
+  let invest = 0, cons = 0, base = 0, opt = 0, divsN = 0;
+  const grow = Math.pow(1 + cagr, yearsN);
+  pool.forEach(p => {
+    const shares = p.shares || 0;
+    if (p.price > 0) invest += shares * p.price;
+    const f = divForecast(p.divs, p.price);
+    if (!f) return;
+    cons += f.dps.conservative * shares;
+    base += f.dps.base * shares;
+    opt += f.dps.optimistic * shares;
+    divsN++;
+  });
+  if (!divsN || !invest) return null;
+  const consY = cons * grow, baseY = base * grow, optY = opt * grow;
+  const cov = monthlyExp > 0 ? (baseY / 12) / monthlyExp * 100 : null;
+  return {
+    invest, yearsN, cagr,
+    annual: { conservative: consY, base: baseY, optimistic: optY },
+    monthly: { conservative: consY / 12, base: baseY / 12, optimistic: optY / 12 },
+    coverage: cov,
+    sentence: `投入 ${(invest / 10000).toFixed(1)} 万，${yearsN} 年后中性每年分红 ${(baseY / 10000).toFixed(1)} 万（保守 ${(consY / 10000).toFixed(1)} ~ 乐观 ${(optY / 10000).toFixed(1)}）${cov != null ? '覆盖月支出 ' + cov.toFixed(0) + '%' : ''}`,
+  };
+}
+
+/* ---------- v2.0 批次2：#2 无风险基准对比（吃分红 vs 存银行） ----------
+ * 输入：组合市值 + 年分红；输出对比（名义口径未扣通胀） */
+function riskFreeCompare(marketValue, annualDiv, treasuryNow) {
+  const t = treasuryNow != null ? treasuryNow : TREASURY_NOW;
+  const bank = marketValue * t / 100;
+  return {
+    treasury: t,
+    bankAnnual: bank,
+    divAnnual: annualDiv,
+    diff: annualDiv - bank,
+    better: annualDiv >= bank ? '分红' : '国债',
+    note: '名义口径·未扣通胀',
   };
 }
 
@@ -1383,6 +1517,34 @@ function calcPortfolioBacktest(pool, opts) {
       hold: st.hold,
     });
   }
+  /* v2.0 #10/#11：真实持仓回测——真实成本/股数/买入日/trades流水 → 真实 XIRR + 累计分红 vs 浮盈亏 */
+  const realHold = [];
+  try {
+    pool.forEach(p => {
+      if (!p.hold || !p.hold.shares) return;
+      const h = p.hold;
+      const ks = Object.keys(p.kline || {}).sort();
+      const endP = ks.length ? p.kline[ks[ks.length - 1]] : 0;
+      if (!(endP > 0)) return;
+      const flows = [];
+      let shares = 0, totalCost = 0, firstD = null;
+      if (h.trades && h.trades.length) {
+        h.trades.forEach(t => { if (t && t.date && t.shares > 0) { flows.push({ d: t.date, v: -(t.shares * (t.price || 0)) }); shares += t.shares; totalCost += t.shares * (t.price || 0); if (!firstD || t.date < firstD) firstD = t.date; } });
+      } else if (h.date && h.cost != null && h.shares > 0) {
+        flows.push({ d: h.date, v: -(h.shares * h.cost) });
+        shares = h.shares; totalCost = h.shares * h.cost; firstD = h.date;
+      }
+      if (!flows.length) return;
+      flows.push({ d: ks[ks.length - 1], v: shares * endP });
+      const x = (typeof calcXirr === 'function') ? calcXirr(flows) : null;
+      let cumDiv = 0;
+      (p.divs || []).forEach(d => { if (d.ex && d.dps > 0 && (!firstD || d.ex >= firstD)) cumDiv += d.dps * shares; });
+      const mktVal = shares * endP;
+      const pnl = mktVal - totalCost;
+      realHold.push({ code: p.code, name: p.name, shares, cost: totalCost, mktVal, pnl, pnlPct: totalCost > 0 ? pnl / totalCost * 100 : null, cumDiv, divVsPnl: totalCost > 0 ? cumDiv / totalCost * 100 : null, xirr: x != null ? x * 100 : null });
+    });
+  } catch (e) {}
+  out.realHold = realHold;
   return out;
 }
 
@@ -2346,9 +2508,10 @@ window.DL = {
   /* P39（2026-08-21）：缓存卫生 */
   cachePrune,
   /* W10（2026-08-21）：数据源状态 */
-  srcMark, srcOf,
+  srcMark, srcOf, srcLogAll, dataHealthLevel, caliberAudit,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
   calcDivTrend, classifyTier, DEFAULT_WINDOW_DAYS, WINDOW_PRESETS, divForecast,
+  decisionSentence, riskFreeCompare, retirementSim, requiredPrincipal,
   calcFutureCashflow,
   /* v1.9.6 新增：结论行规则树 */
   divTrendBadAt, coverageAt, ruleVerdict, RULE_STATS, RULE_TIER_LABEL,
