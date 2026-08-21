@@ -50,7 +50,8 @@ function launchChrome() {
   if (!fs.existsSync(chrome)) die('Chrome 不存在');
   // v1.9.30（2026-08-21）：启动前清理残留实例（v1.9.29 只修了 e2e-browser，e2e-full 漏同步）——
   // 残留实例占 CDP_PORT 时 poll 连到旧页面（旧 localStorage 有 cmpState → C1 误报"已在列表"超时，实测 40 个残留）
-  try { require('child_process').execSync('lsof -ti:' + CDP_PORT + ' | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
+  // -sTCP:LISTEN 必须加：lsof -i 会把 node 自己的 WebSocket 连接也算进去 → kill -9 自杀（实测 release 里 27/27 后 Killed: 9）
+  try { require('child_process').execSync('lsof -tiTCP:' + CDP_PORT + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   const cp = require('child_process').spawn(chrome, [
     '--headless=new', '--disable-gpu', `--remote-debugging-port=${CDP_PORT}`,
     '--window-size=800,1600', `--user-data-dir=${PROFILE}`, 'about:blank',
@@ -581,8 +582,8 @@ async function main() {
     pageErrors.slice(0, 20).forEach(e => console.log('  ⚠️ ' + e));
   }
   cdp.close();
-  // v1.9.30：跑完清理本实例 Chrome（防残留堆积——残留实例是 C1 误报的根因）
-  try { require('child_process').execSync('lsof -ti:' + CDP_PORT + ' | xargs kill -9 2>/dev/null', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
+  // v1.9.30：跑完清理本实例 Chrome（防残留堆积——残留实例是 C1 误报的根因）；-sTCP:LISTEN 防误杀自身连接
+  try { require('child_process').execSync('lsof -tiTCP:' + CDP_PORT + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   process.exit(fails.length || pageErrors.length ? 1 : 0);
 }
 
