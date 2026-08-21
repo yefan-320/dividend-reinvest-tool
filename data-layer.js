@@ -430,7 +430,10 @@ async function fetchEtfDividends(code) {
 /* ---------- K线（腾讯主源分段 / 新浪备源；缓存走 IndexedDB） ---------- */
 async function fetchKlineTx(txPrefix, start, end) {
   const map = {}; let cur = start; let guard = 0; let prevLast = null;
-  while (cur < end && guard++ < 12) {
+  // 2026-08-21 主人抓 R2 卡死（90s 超时）：腾讯 K线白天被风控挂起（Chrome 无 Cookie/UA 被拒），无总预算时
+  // 5 段 × 15s 超时 = 200s+ 才转新浪备源（1.4s 即成功）→ 加 25s 总预算：腾讯不通时快速失败切备源，腾讯通时不受影响（每段 <1s）
+  const BUDGET = 12000, t0 = Date.now();
+  while (cur < end && guard++ < 12 && Date.now() - t0 < BUDGET) {
     const d0 = new Date(cur);
     const segEnd = new Date(Date.UTC(d0.getUTCFullYear() + 2, d0.getUTCMonth() + 6, d0.getUTCDate()));
     const endStr = segEnd > new Date(end) ? end : fmtDate(segEnd);
@@ -439,7 +442,9 @@ async function fetchKlineTx(txPrefix, start, end) {
     const url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + txPrefix + ',day,' + cur + ',' + endStr + ',800,';
     let rows = [];
     try {
-      const d = await txQueue.push(() => fetchJson(url));
+      // 2026-08-21 R6 修复：不走 txQueue（maxRetry=2 → 每段 8s×3+退避=27s，且队列全局串行让多标的互相排队 160s+）
+      // 腾讯被风控挂起时重试无意义 → 单次请求 8s 超时立即失败；BUDGET 兜底总时长；恢复后段间由 BUDGET+段数自然限流
+      const d = await fetchJson(url, 8000);
       const node = d && d.data && d.data[txPrefix];
       rows = (node && node.day) || [];
     } catch (e) { /* 尝试下一段 */ }
@@ -527,7 +532,8 @@ async function getStockQuotes(codes) {
   const hit = await cacheGetFresh(key, CALIB.CACHE_TTL.snapshot);
   if (hit) { srcMark('qt:' + codes.join(','), 'cache'); return hit.data; }
   let out = {};
-  try { out = await txQueue.push(() => loadQtQuotes(codes)); } catch (e) { }
+  // 2026-08-21：不走 txQueue（maxRetry=2 → 快照失败 15s×3+退避=47s，拖垮对比页/加自选）；单次 8s，失败即返回空（调用方 K线末价兑底）
+  try { out = await loadQtQuotes(codes, 8000); } catch (e) { }
   if (Object.keys(out).length) { await cacheSet(key, { ts: Date.now(), data: out }); srcMark('qt:' + codes.join(','), 'net'); }
   else { srcMark('qt:' + codes.join(','), 'fallback'); }
   return out;
@@ -1288,8 +1294,12 @@ function ruleVerdict(pct, cls, trendBad, cov) {
  * P0-E 修复（2026-08-18）：重跑规则树（40只×16年）——本地复制版 divTrendBad/coverageRatio 改用 DL 修复版
  * （P0-B 年度终值 EPS + P0-A 财年归组 TTM），旧表（44.8/41.8/39.1）为 P0 修复前脏输入产物 */
 const RULE_STATS = {
-  strong: [40.7, 70, 2205], buy: [37.6, 69, 4545], watch: [39.6, 74, 3225],
-  avoid: [33.2, 67, 95], avoid_small: [17.4, 55, 32], wait: [null, null, 976],
+  strong: [43, 74, 684],
+  buy: [37.6, 72, 1468],
+  watch: [42.2, 77, 1029],
+  avoid: [33, 67, 30],
+  avoid_small: [16.5, 55, 11],
+  wait: [0.8, 52, 958]
 };
 const RULE_TIER_LABEL = { strong: '条件建仓（小仓）', buy: '可建仓', watch: '观望', wait: '等待', avoid: '回避', avoid_small: '回避/小仓' };
 /* v1.9.15 语义修正：strong 档文案（强烈建仓→条件建仓（小仓））——防'强烈'二字诱导重仓（大师验收动作，规则树/卡面/日志三处同步） */

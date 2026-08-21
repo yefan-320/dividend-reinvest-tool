@@ -28,9 +28,19 @@ window.REPORT_CARD_EXTRA = {
   --bg:#0e1412; --card:#16211d; --card2:#1b2a25; --line:#2a3d36;
   --gold:#d9a441; --green:#4caf7d; --red:#e05a5a; --blue:#5aa9e6;
   --txt:#e8efe9; --sub:#8fa69c;
+  /* M1/P117（2026-08-21）：全站统一断点常量——md=900 平板竖屏，sm=480 手机。media query 不支持 var()，此声明为文档级常量，下方 @media 数值必须与此一致 */
+  --bp-md:900px; --bp-sm:480px;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;padding-bottom:48px}
+/* W10（2026-08-21）：数据状态徽章三色——实时绿/缓存灰金/降级橙/过期红 */
+data-badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid;vertical-align:middle}
+data-badge[source="live"]{color:#4caf7d;border-color:rgba(76,175,125,.5);background:rgba(76,175,125,.12)}
+data-badge[source="cache"]{color:#d9a441;border-color:rgba(217,164,65,.5);background:rgba(217,164,65,.1)}
+data-badge[source="degraded"]{color:#e8a13a;border-color:rgba(232,161,58,.5);background:rgba(232,161,58,.12)}
+data-badge[source="expired"]{color:#e05a5a;border-color:rgba(224,90,90,.5);background:rgba(224,90,90,.12)}
+body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;padding-bottom:48px;font-variant-numeric:tabular-nums}  /* D11/Y1：等宽数字防抖动 */
+/* D9：键盘可达 focus-visible 全站 */
+:focus-visible{outline:2px solid var(--gold);outline-offset:1px;border-radius:3px}
 .wrap{max-width:1280px;margin:0 auto;padding:14px}
 @media (min-width:900px){.wrap{max-width:1400px}}
 header{display:flex;align-items:baseline;gap:10px;padding:18px 0 6px}
@@ -67,7 +77,7 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .status{font-size:12px;color:var(--sub);margin-top:8px;min-height:16px}
 .status.err{color:var(--red)}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-@media (max-width:420px){.stats{grid-template-columns:repeat(2,1fr)}.stat .v{font-size:clamp(12px,3.5vw,14px)}}
+@media (max-width:480px){.stats{grid-template-columns:repeat(2,1fr)}.stat .v{font-size:clamp(12px,3.5vw,14px)}}  /* M1：420px 并入统一断点 480px */
 .stat{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .stat .k{font-size:11px;color:var(--sub)}
 .stat .v{font-size:18px;font-weight:700;margin-top:3px}
@@ -79,6 +89,13 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .tbl th{color:var(--sub);font-weight:500;font-size:11px}
 .tbl td:first-child,.tbl th:first-child{text-align:left}
 .tbl tr:last-child td{border-bottom:none}
+/* C4/W1（2026-08-21）：表头 sticky（滚动看数不丢列名）；首列 sticky 防横向滚动丢标的 */
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tbl thead th{position:sticky;top:0;background:var(--card);z-index:2}
+.tbl.sticky-first td:first-child,.tbl.sticky-first th:first-child{position:sticky;left:0;background:var(--card);z-index:3}
+/* C2/Y3（2026-08-21）：spinner——网络 pending 视觉反馈 */
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(217,164,65,.25);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .foot{font-size:11px;color:var(--sub);line-height:1.7;margin-top:16px}
 .foot b{color:var(--txt)}
@@ -101,6 +118,12 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
   #tab-compare .field[style*="width:170px"]{width:100%}
   #cmpYears .quick button{flex:1 1 28%;min-width:70px}
   #cmpStrict~*{display:inline-block}
+  /* M1/P117（2026-08-21）：回测双仪表小屏堆叠 + 决策台小屏规则 */
+  .gauge-row{flex-direction:column}
+  .gauge-box{width:100%}
+  #homeSearch{flex:1 1 100%!important}
+  #homeSearchAdd{width:100%}
+  #pfSummary{float:none;display:block;text-align:right;margin-top:2px}
 }
 
 /* ===== v1.7.0 UI 美化（大师清单：卡片层级/数字规范/线型辅助） ===== */
@@ -116,8 +139,22 @@ header .sub{font-size:12px;color:var(--sub);margin-left:auto}
 .tabbar{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);z-index:100;padding-bottom:env(safe-area-inset-bottom)}
 .tabbar button{flex:1;padding:10px 0;background:transparent;border:none;color:var(--sub);font-size:12px;cursor:pointer;transition:color .2s}
 .tabbar button.active{color:var(--gold);font-weight:700}
+/* C16/E3（2026-08-21）：术语 tooltip 样式——虚线下划线悬停 */
+.tt{border-bottom:1px dotted var(--gold);cursor:help;color:var(--txt)}
+/* C9（2026-08-21）：打印报告视图——白底黑字，隐藏交互控件 */
+@media print{
+  body{background:#fff !important;color:#111 !important}
+  .tabbar,.btn,.chip,#toTop,.quick button,.wl-del,.wl-tohold,header .sub{display:none !important}
+  .card{border:none !important;box-shadow:none !important;break-inside:avoid}
+  .chart{height:240px !important}
+  .hint{color:#444 !important}
+  .g{color:#111 !important}
+}
 body{padding-bottom:64px}
 .chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;margin:3px;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+/* P70/P73（2026-08-21）：找机会三通道 tab——激活态高亮 */
+.opp-tab.active{background:var(--gold);color:#111;border-color:var(--gold);font-weight:700}
+.opp-tab:disabled{opacity:.55;cursor:wait}
 .mode-chip{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:4px 10px;font-size:11px;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;justify-content:center}
 .mode-chip.on{background:var(--gold);color:#111;border-color:var(--gold);font-weight:600}
 .wl-card{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
@@ -206,12 +243,10 @@ body{padding-bottom:64px}
     </div>
     <div class="hint" id="homeSearchHint">例：600036 或 招商银行（回车=诊断，➕=加入自选）</div>
   </div>
-  <div class="card">
-    <h2>📌 机会速览</h2>
-    <div id="homeOpportunities"><div class="hint">加载中…</div></div>
-  </div>
-  <div class="card">
+  <div class="card" id="watchlistCard">
     <h2>⭐ 我的自选 <span class="hint" style="float:right" id="wlFresh">—</span></h2>
+    <!-- P72（2026-08-21）：机会速览并入自选卡头部（父卡收子卡，首页 6 元素） -->
+    <div id="homeOpportunities" style="margin-bottom:8px"></div>
     <div id="homeWatchlist"></div>
   </div>
   <div class="card">
@@ -220,16 +255,25 @@ body{padding-bottom:64px}
   </div>
   <div class="card" id="pfSample"></div>
   <div class="card" id="portfolioCard">
-    <h2>🧺 组合建仓总览 <span class="hint" style="float:right" id="pfSummary">…</span></h2>
+    <!-- P69（2026-08-21）：组合总览紧凑常显行——总仓位·覆盖·触发·今日到账一行+展开箭头，懒加载保留 -->
+    <h2 style="cursor:pointer">🧺 组合建仓总览 <span id="pfArrow" style="font-size:12px;color:var(--muted)">▸</span> <span class="hint" style="float:right;font-weight:400" id="pfSummary">…</span></h2>
+    <!-- C6/P50（2026-08-21）：生成报告→白底→Cmd+P 即 PDF -->
+    <div style="margin-bottom:6px"><button type="button" class="chip" id="pfReport" style="font-size:11px">📄 生成报告（打印/PDF）</button></div>
     <div id="portfolioBody" style="display:none">
       <div class="hint">展开加载中…</div>
     </div>
   </div>
   <div class="card" id="scanPanel" style="display:none">
-    <h2>🔍 红利股扫描器</h2>
+    <h2>🔍 找机会 <span class="hint" style="font-weight:400">三通道：自选 / 扫描 / 发现器</span></h2>
+    <!-- P70/P73（2026-08-21）：三通道 tab（原 btnScan+btnDiscover 两个按钮合并为一个入口） -->
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <button type="button" class="chip opp-tab" data-opp="watch">⭐ 我的自选</button>
+      <button type="button" class="chip opp-tab" data-opp="scan">📡 扫描新机会</button>
+      <button type="button" class="chip opp-tab" data-opp="disc">🔭 发现器</button>
+    </div>
+    <div id="scanBody"></div>
   </div>
-  <button class="btn" id="btnScan">🔍 扫描新机会（全市场高股息）</button>
-  <button class="btn" id="btnDiscover" style="margin-top:8px">🔭 发现器（双通道：股息率≥3% ∪ 增长榜 CAGR≥10%）</button>
+  <button class="btn" id="btnFindOpp">🔍 找机会（自选 / 扫描 / 发现器）</button>
   <div class="hint" style="margin-top:8px">扫描口径：近12月已宣告分红÷现价 ≥ 4%、市值≥50亿、排除ST（阈值后续可调）；发现器：第一通道股息率≥3%，第二通道增长榜（≥2%+CAGR≥10%）</div>
 </section>
 
@@ -242,17 +286,57 @@ body{padding-bottom:64px}
   <div id="diagContent" style="display:none">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <h2 id="diagTitle" style="margin:0">诊断</h2>
-        <button type="button" class="btn flexbtn" id="diagWlBtn" style="display:none">⭐ 加自选</button>
+        <!-- C19/P80（2026-08-21）：返回决策台 + C14/E1 自选快捷切换（←/→ 保留上下文）+ C18/E5 刷新 3s 冷却 -->
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <button type="button" class="chip" id="diagBack" title="返回决策台">← 返回</button>
+          <button type="button" class="chip" id="diagPrev" title="上一只自选" style="display:none">‹</button>
+          <button type="button" class="chip" id="diagNext" title="下一只自选" style="display:none">›</button>
+          <h2 id="diagTitle" style="margin:0">诊断</h2>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button type="button" class="chip" id="diagRefresh" title="刷新数据（3 秒冷却）">🔄</button>
+          <button type="button" class="btn flexbtn" id="diagWlBtn" style="display:none">⭐ 加自选</button>
+        </div>
       </div>
     </div>
-    <div class="card" id="diagReportCard" style="display:none"></div>
+    <!-- C1（2026-08-21）：诊断页 16 模块→7 卡整合（P61/P62/P65-P68）——按回答什么问题归并
+     * ①决策主卡（结论+依据展开+风险条+卖出信号）②关键数据 ③买入决策（分位+信号线+画像+策略折叠）
+     * ④分红全景（趋势+增长+节奏）⑤风险体检 ⑦参考（多起点折叠） -->
     <div class="card" id="diagSummary" style="display:none">
-      <h2>🎯 决策摘要 <span class="hint" style="font-weight:400">基于历史数据 · 非投资建议</span></h2>
+      <h2>① 决策主卡 <span class="hint" style="font-weight:400">结论先行 · 依据可展开 · 风险条不折叠</span></h2>
       <div id="diagSummaryBody"></div>
+      <div id="diagReportCard" style="display:none"></div>
+      <!-- ⑥ 卖出信号并入决策主卡（同一决策轴两端：买点↔卖点） -->
+      <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
+        <h3 style="font-size:13px;margin:0 0 4px">🛡 卖出信号（买点对面·同一决策轴）</h3>
+        <div id="diagSellSignals"></div>
+      </div>
     </div>
     <div class="card">
-      <h2>📊 股息率历史分位（<span id="diagYieldYears">5</span>年）</h2>
+      <h2>② 关键数据 <span class="hint" style="font-weight:400">6 项速览 + 分红预测三情景（预测非承诺）</span></h2>
+      <!-- W11（2026-08-21）：页头数据状态条——仅缺失时显示，✗ 项点击重试（复用 W6 重试） -->
+      <div id="diagDataState"></div>
+      <div id="diagStats"></div>
+    </div>
+    <div class="card" id="diagZoneCard">
+      <h2>③ 买入决策 <span class="hint" style="font-weight:400">分位线 + 档位画像 + 策略对比（可展开）</span></h2>
+      <div id="diagZone"></div>
+      <div class="hint" id="diagZoneNote"></div>
+      <details style="margin-top:8px"><summary style="font-size:12px;color:var(--sub);cursor:pointer">📈 分位信号线（滚动分位 · 默认 375 天窗口，无未来函数）</summary>
+        <div class="chart" id="diagSignalChart"><div class="hint">加载中…</div></div>
+        <div class="hint" id="diagSignalNote"></div>
+      </details>
+      <details style="margin-top:4px"><summary style="font-size:12px;color:var(--sub);cursor:pointer">🎯 档位画像（该标的历史等90档特征）</summary>
+        <div id="diagTierProfile"></div>
+      </details>
+      <details style="margin-top:4px"><summary style="font-size:12px;color:var(--sub);cursor:pointer">⚖️ 策略对比（近5年回测：收益+浮亏+风险效率）</summary>
+        <div id="diagStrategy"></div>
+        <div class="hint" id="diagStrategyGuide"></div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>④ 分红全景 <span class="hint" style="font-weight:400">趋势 + 增长 + 节奏</span></h2>
+      <div style="font-size:12px;font-weight:600;margin:4px 0">股息率历史分位（<span id="diagYieldYears">5</span>年）</div>
       <div class="quick" id="diagYieldQuick">
         <button type="button" data-y="1">1年</button><button type="button" data-y="3">3年</button>
         <button type="button" data-y="5" class="on">5年</button><button type="button" data-y="10">10年</button>
@@ -262,55 +346,32 @@ body{padding-bottom:64px}
       <div class="chart tall" id="diagYieldChart"><div class="hint">加载中…</div></div>
       <div class="hint" id="diagYieldNote"></div>
       <div class="hint err" id="diagEtfNote" style="display:none"></div>
+      <div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:6px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">分红增长趋势（报告期归组，含中期+末期）</div>
+        <div id="diagDivTrend"></div>
+      </div>
+      <div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:6px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">分红节奏（每年几月派息）</div>
+        <div id="diagRhythm"></div>
+      </div>
     </div>
     <div class="card">
-      <h2>🔑 关键数据</h2>
-      <div id="diagStats"></div>
-    </div>
-    <div class="card" id="diagZoneCard">
-      <h2>🎯 建仓区状态（J 方案：80 建1/3 / 85 加1/3 / 90 加满）</h2>
-      <div id="diagZone"></div>
-      <div class="hint" id="diagZoneNote"></div>
-    </div>
-    <div class="card">
-      <h2>📈 分位信号线（滚动分位 · 默认 375 天窗口，无未来函数）</h2>
-      <div class="chart" id="diagSignalChart"><div class="hint">加载中…</div></div>
-      <div class="hint" id="diagSignalNote"></div>
-    </div>
-    <div class="card">
-      <h2>💹 分红增长趋势（报告期归组，含中期+末期）</h2>
-      <div id="diagDivTrend"></div>
-    </div>
-    <div class="card">
-      <h2>🛡 卖出信号（基本面：EPS 趋势 + 分红连续性 + 估值放大器）</h2>
-      <div id="diagSellSignals"></div>
-    </div>
-    <div class="card">
-      <h2>🎯 档位画像（R9-R14 研究固化：该标的历史等90档特征）</h2>
-      <div id="diagTierProfile"></div>
-    </div>
-    <div class="card">
-      <h2>🏥 财报体检卡（事实层/假设层/结论层）</h2>
+      <h2>⑤ 风险体检 <span class="hint" style="font-weight:400">财报事实层/假设层/结论层</span></h2>
       <div id="diagRiskCheck"></div>
     </div>
     <div class="card">
-      <h2>⚖️ 策略对比（近5年历史回测：收益 + 最大浮亏 + 风险效率）</h2>
-      <div id="diagStrategy"></div>
-      <div class="hint" id="diagStrategyGuide"></div>
-    </div>
-    <div class="card">
-      <h2>🗓 分红节奏</h2>
-      <div id="diagRhythm"></div>
-    </div>
-    <div class="card">
-      <h2>⏱ 多起点敏感度（现在买划不划算？）</h2>
-      <div id="diagMultiStart"></div>
+      <details><summary style="font-size:13px;cursor:pointer">⏱ 参考：多起点敏感度（现在买划不划算？）</summary>
+        <div id="diagMultiStart"></div>
+      </details>
     </div>
     <button class="btn" id="btnDiagBacktest">📊 回测验证这只股票</button>
   </div>
 </section>
 
 <!-- ===== 对比 tab（第二批占位） ===== -->
+
+<!-- C5（2026-08-21）：回到顶部（滚动 >800px 出现） -->
+<button id="toTop" title="回到顶部" style="display:none;position:fixed;right:16px;bottom:72px;width:44px;height:44px;border-radius:50%;background:var(--gold);color:#111;border:none;font-size:18px;cursor:pointer;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.35)">↑</button>
 <section id="tab-compare" class="tab-panel" style="display:none">
   <div class="card">
     <h2>📈 对比（本金 / 月供 / 复投可调）</h2>
@@ -384,7 +445,10 @@ body{padding-bottom:64px}
 <div class="card">
   <h2>参数设置</h2>
   <div class="row">
-    <div class="field"><label>股票代码</label><input id="code" value="600036" inputmode="numeric" placeholder="如 600036 / 000001"><div class="hint" id="codeHint"></div></div>
+    <div class="field"><label>股票代码</label><input id="code" value="600036" inputmode="numeric" placeholder="如 600036 / 000001"><div class="hint" id="codeHint"></div>
+      <!-- C20/F2（2026-08-21）：用我的持仓参数一键带入（可改不锁定） -->
+      <button type="button" class="chip" id="btUseHoldings" title="从「我的持仓」带入代码/买入日/本金">📥 用我的持仓参数</button>
+    </div>
     <div class="field"><label>初始本金（元）</label><input id="principal" value="1000000" inputmode="decimal"></div>
     <div class="field"><label>买入日期</label><input id="buyDate" type="date">
       <div class="quick" id="buyDateQuick">
@@ -491,12 +555,12 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v1.9.29"></script>
+<script src="demo-data.js?v=v1.9.30"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v1.9.29"></script>
+<script src="data-layer.js?v=v1.9.30"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v1.9.29';
+const APP_VERSION = 'v1.9.30';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1219,6 +1283,6 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v1.9.29"></script>
+<script src="views.js?v=v1.9.30"></script>
 </body>
 </html>
