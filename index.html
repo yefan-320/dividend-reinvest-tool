@@ -30,6 +30,10 @@ window.REPORT_CARD_EXTRA = {
   --bg:#0e1412; --card:#16211d; --card2:#1b2a25; --line:#2a3d36;
   --gold:#d9a441; --green:#4caf7d; --red:#e05a5a; --blue:#5aa9e6;
   --txt:#e8efe9; --sub:#8fa69c;
+  /* v3.2 S9 语义色板（双通道分离）：行情红涨绿跌 / 分红好绿坏红，互不混用 */
+  --up:#e05a5a; --down:#4caf7d;       /* 行情语义（A股） */
+  --div-up:#4caf7d; --div-down:#e05a5a; /* 分红语义 */
+  --muted-blue:#8fa69c; --bench-2:#5b8db8;
   /* M1/P117（2026-08-21）：全站统一断点常量——md=900 平板竖屏，sm=480 手机。media query 不支持 var()，此声明为文档级常量，下方 @media 数值必须与此一致 */
   --bp-md:900px; --bp-sm:480px;
 }
@@ -203,6 +207,21 @@ body{padding-bottom:64px}
 .v3-step { animation: v3stepIn .3s ease-out both; }
 /* reduced-motion：系统“减少动态”时全部关闭 */
 @media (prefers-reduced-motion: reduce) { .v3-card, .v3-flash-up, .v3-flash-down, .v3-blink, .v3-skeleton, .v3-step { animation: none !important; } }
+
+/* ===== v3.2 S9/S10 驾驶舱排版（配色变量已入 :root） ===== */
+/* 卡片栅格：≥1280 4列 / 900-1280 2列 / <900 1列（平板横2竖1） */
+.v3-stock-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+@media (min-width:1280px){ .v3-stock-grid{grid-template-columns:repeat(4,1fr)} }
+@media (min-width:900px) and (max-width:1279px){ .v3-stock-grid{grid-template-columns:repeat(2,1fr)} }
+/* 年度表：竖屏隐藏次要列（保留年份/分红/收益率/XIRR） */
+.v3-year-table th:nth-child(6),.v3-year-table td:nth-child(6){display:table-cell}
+@media (max-width:900px){ .v3-year-table th:nth-child(2),.v3-year-table td:nth-child(2){display:none} } /* YoY 隐藏 */
+@media (max-width:480px){ .v3-year-table th:nth-child(6),.v3-year-table td:nth-child(6){display:none} } /* 年末资产隐藏 */
+/* KPI 行平板 2×2 */
+@media (max-width:900px){ #pfbtResult .v3-card{min-width:calc(50% - 8px)} }
+/* 卡片 hover（桌面） */
+.v3-stock-card{transition:border-color .2s}
+@media (hover:hover){ .v3-stock-card:hover{border-color:rgba(217,164,65,.5)} }
 </style>
 </head>
 <body>
