@@ -3511,6 +3511,63 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     </div>`;
   }
 
+  /* v3.2 S6/S7：个股卡片区（4 层架构 L1-L4）——SVG 迷你图不卡平板；栅格断点 1280/768；贡献拆解分列
+   * L1 名称/代码/行业徽章/数据源点 · L2 股息率+分位徽章 · L3 六格指标+贡献%进度条 · L4 SVG迷你线+分红小柱
+   * 迷你图统一中性绿（语义只走徽章，防一屏霓虹灯） */
+  function renderStockCards(res) {
+    const ps = res.perStock || [];
+    if (!ps.length) return '';
+    const totalGain = ps.reduce((s, p) => s + (p.finalValue - p.invested) + p.cumDiv, 0); /* 价格盈亏+分红 */
+    const divTotal = ps.reduce((s, p) => s + p.cumDiv, 0);
+    const priceTotal = ps.reduce((s, p) => s + (p.finalValue - p.invested), 0);
+    const sorted = ps.slice().sort((a, b) => ((b.finalValue - b.invested) + b.cumDiv) - ((a.finalValue - a.invested) + a.cumDiv)); /* 默认贡献降序 */
+    const svgSpark = (ns) => {
+      if (!ns || ns.length < 2) return '<div style="font-size:10px;color:var(--muted)">—</div>';
+      const pts = ns.length > 50 ? ns.filter((_, i) => i % Math.ceil(ns.length / 50) === 0) : ns; /* 降采样≤50 */
+      const w = 100, h = 24, min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
+      const span = (max - min) || 1;
+      const coords = pts.map((v, i) => `${(i / (pts.length - 1) * w).toFixed(1)},${(h - 2 - (v - min) / span * (h - 4)).toFixed(1)}`).join(' ');
+      return `<svg viewBox="0 0 100 24" preserveAspectRatio="none" style="width:100%;height:24px;display:block"><polyline points="${coords}" fill="none" stroke="rgba(76,175,125,.85)" stroke-width="1.5"/></svg>`;
+    };
+    const divSpark = (yd) => {
+      const ys = Object.keys(yd || {}).sort();
+      if (!ys.length) return '';
+      const vals = ys.slice(-8).map(y => yd[y]);
+      const max = Math.max.apply(null, vals.concat([1]));
+      const bars = vals.map((v, i) => {
+        const h = Math.max(2, Math.round(v / max * 6));
+        const c = v <= 0 ? '#2a3d36' : (i > 0 && vals[i - 1] > 0 && v < vals[i - 1] ? '#e05a5a' : '#4caf7d');
+        return `<rect x="${i * 12}" y="${6 - h}" width="8" height="${h}" rx="1" fill="${c}"/>`;
+      }).join('');
+      return `<svg viewBox="0 0 96 6" preserveAspectRatio="none" style="width:100%;height:6px;display:block">${bars}</svg>`;
+    };
+    const cards = sorted.map(p => {
+      const contrib = ((p.finalValue - p.invested) + p.cumDiv) / (Math.abs(totalGain) || 1) * 100;
+      const priceContrib = (p.finalValue - p.invested) / (Math.abs(priceTotal) || 1) * 100;
+      const divContrib = p.cumDiv / (Math.abs(divTotal) || 1) * 100;
+      const cagr = p.ret != null && p.ret > -1 ? (Math.pow(1 + p.ret, 1 / Math.max(1, (res.span || 10))) - 1) * 100 : null;
+      const dy = p.cumDiv > 0 && p.amount > 0 ? p.cumDiv / p.amount * 100 : null;
+      const badge = dy == null ? '<span style="font-size:10px;color:var(--muted)">—</span>' : dy >= 6 ? '<span style="font-size:10px;background:rgba(76,175,125,.2);color:#4caf7d;border-radius:4px;padding:1px 5px">高息</span>' : dy >= 4 ? '<span style="font-size:10px;background:rgba(217,164,65,.18);color:#d9a441;border-radius:4px;padding:1px 5px">中息</span>' : '<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">低息</span>';
+      const contribPct = contrib >= 0 ? `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:3px;background:var(--line);border-radius:2px"><div style="width:${Math.min(100, contrib)}%;height:3px;background:#d9a441;border-radius:2px"></div></div><span style="font-size:10px;color:var(--gold,#d9a441)">${contrib >= 0 ? '+' : ''}${contrib.toFixed(0)}%</span></div>` : '<span style="font-size:10px;color:#e05a5a">' + contrib.toFixed(0) + '%</span>';
+      return `<div class="v3-stock-card" style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px"><b style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</b><span style="font-size:10px;color:var(--muted)">${esc(p.code || '')}</span><span style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:${p.cumDiv > 0 ? '#4caf7d' : '#d9a441'}" title="分红数据：${p.cumDiv > 0 ? '有' : '缓存'}"></span></div>
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:18px;font-weight:700">${dy != null ? dy.toFixed(1) + '%' : '—'}</span>${badge}<span style="font-size:10px;color:var(--muted)">累计分红率</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;color:var(--muted)">
+          <span>投入 <b style="color:var(--fg,#e8efe9)">${(p.amount / 10000).toFixed(1)}万</b></span><span>现值 <b style="color:var(--fg,#e8efe9)">${(p.finalValue / 10000).toFixed(1)}万</b></span>
+          <span>价格贡献 <b style="color:${p.finalValue - p.invested >= 0 ? '#e05a5a' : '#4caf7d'}">${(p.finalValue - p.invested) >= 0 ? '+' : ''}${(p.finalValue - p.invested) / 10000 >= 0 ? '+' : ''}${((p.finalValue - p.invested) / 10000).toFixed(1)}万</b></span><span>分红贡献 <b style="color:#d9a441">+${(p.cumDiv / 10000).toFixed(1)}万</b></span>
+          <span>年化 <b style="color:var(--fg,#e8efe9)">${cagr != null ? (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%' : '—'}</b></span><span>贡献占比</span>
+        </div>
+        ${contribPct}
+        ${svgSpark(p.navSeries)}
+        ${divSpark(p.yearlyDivs)}
+      </div>`;
+    });
+    return `<div style="margin-top:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line);padding:8px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:12px;font-weight:700">🧩 每只股票</span><span style="font-size:10px;color:var(--muted)">按贡献降序 · 迷你图统一净值口径 · 点卡片展开诊断</span></div>
+      <div class="v3-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">${cards.join('')}</div>
+    </div>`;
+  }
+
   /* 三问卡 + 驾驶舱渲染 */
   function renderCockpit(res, combo, pool, meta) {
     const el = $('#pfbtResult');
@@ -3597,6 +3654,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>
       <div id="cockpitDivBar" style="width:100%;height:170px;margin-top:4px"></div>
     </div>`;
+    /* v3.2 S6/S7：个股卡片区（分红柱之下） */
+    html += renderStockCards(res);
     /* 每只贡献 + 权重演化（折叠） */
     html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">📋 每只贡献 + 权重演化（点开）</summary>
       <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">标的</th><th>初始</th><th>月追加</th><th>期末市值</th><th>累计分红</th><th>分红率</th></tr>
