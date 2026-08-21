@@ -3568,6 +3568,88 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     </div>`;
   }
 
+  /* v3.2 S12：组合级 XIRR（现金流：初始投入负流 + 月追加负流 + 期末市值正流） */
+  function comboXirr(res) {
+    try {
+      const t = res.totalAsset || [];
+      if (!t.length) return null;
+      const first = t[0], last = t[t.length - 1];
+      const flows = [{ d: first.d, v: -res.invested }];
+      const mfMap = {};
+      (res.perStock || []).forEach(p => (p.monthlyFlow || []).forEach(m => { mfMap[m.date] = (mfMap[m.date] || 0) + m.amount; }));
+      Object.keys(mfMap).sort().forEach(d => flows.push({ d, v: -mfMap[d] }));
+      flows.push({ d: last.d, v: last.value });
+      if (flows.length < 2 || typeof calcXirr !== 'function') return null;
+      const x = calcXirr(flows);
+      return x != null ? x * 100 : null;
+    } catch (e) { return null; }
+  }
+  /* v3.2 S12：快照对比面板（A/B——数字卡并排 + 曲线叠加 + 年度表并排 + 差异>10%绿箭头>30%加粗） */
+  async function renderSnapCompare(container) {
+    try {
+      const metas = await btListSnapshots();
+      if (!metas.length) { container.innerHTML = '<div class="hint" style="font-size:11px">还没有快照——跑一次组合回测自动生成，点「📌 固定此快照」可保留多个对比</div>'; return; }
+      container.innerHTML = `<div style="font-size:11px;color:var(--sub);margin-bottom:6px">选两个快照对比（同一组合不同配置：复投率/年限/月追加）：</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select id="scA" style="flex:1;min-width:160px;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:11px"></select>
+          <span style="color:var(--sub)">vs</span>
+          <select id="scB" style="flex:1;min-width:160px;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:11px"></select>
+        </div>
+        <div id="scOut" style="margin-top:8px"></div>`;
+      const mkOpt = (m, i) => `<option value="${esc(m.id)}">${esc(m.name || '快照')} · ${m.y || 10}年 · ${m.mode || 'weight'} · ${m.at ? new Date(m.at).toLocaleString().slice(5, 16) : ''}</option>`;
+      const selA = container.querySelector('#scA'), selB = container.querySelector('#scB');
+      selA.innerHTML = metas.map(mkOpt).join('');
+      selB.innerHTML = metas.map(mkOpt).join('');
+      selB.selectedIndex = metas.length > 1 ? 1 : 0;
+      const draw = async () => {
+        const out = container.querySelector('#scOut');
+        const a = await DL.btGet('full:' + selA.value), b = await DL.btGet('full:' + selB.value);
+        if (!a || !b || !a.res || !b.res) { out.innerHTML = '<div class="hint err">快照数据缺失</div>'; return; }
+        const ra = a.res, rb = b.res;
+        const xa = comboXirr(ra), xb = comboXirr(rb);
+        const card = (label, va, vb, fmt) => {
+          const d = (vb != null && va != null) ? vb - va : null;
+          const diff = d != null && va !== 0 ? `<span style="font-size:10px;${Math.abs(d / Math.abs(va)) > 0.3 ? 'font-weight:800;' : ''}color:${d >= 0 ? '#4caf7d' : '#e05a5a'}">${d >= 0 ? '▲' : '▼'}${fmt(d)}</span>` : '';
+          return `<div style="flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center">
+            <div style="font-size:10px;color:var(--muted)">${label}</div>
+            <div style="font-size:15px;font-weight:700;margin-top:2px">${fmt(va)}</div>
+            <div style="font-size:15px;font-weight:700;color:${vb >= va ? '#4caf7d' : '#e05a5a'}">${fmt(vb)}</div>
+            <div style="margin-top:2px">${diff}</div>
+          </div>`;
+        };
+        out.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          ${card('期末资产', ra.last.value, rb.last.value, v => (v / 10000).toFixed(1) + '万')}
+          ${card('累计分红率', ra.divRatio, rb.divRatio, v => v.toFixed(1) + '%')}
+          ${card('年分红', ra.yearDiv, rb.yearDiv, v => (v / 10000).toFixed(2) + '万')}
+          ${card('XIRR', xa, xb, v => (v != null ? v.toFixed(1) + '%' : '—'))}
+        </div>
+        <div id="scChart" style="width:100%;height:180px;background:var(--card);border:1px solid var(--line);border-radius:10px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <div style="flex:1;min-width:260px">${renderYearTable(ra, null, 'desc')}</div>
+          <div style="flex:1;min-width:260px">${renderYearTable(rb, null, 'desc')}</div>
+        </div>`;
+        if (typeof echarts !== 'undefined') {
+          const base = ra.totalAsset[0] && ra.totalAsset[0].value > 0 ? ra.totalAsset[0].value : 1;
+          const ch = echarts.init(out.querySelector('#scChart'));
+          ch.setOption({
+            tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+            legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 } },
+            grid: { left: 56, right: 14, top: 30, bottom: 24 },
+            xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+            yAxis: { type: 'value', scale: true, axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+            series: [
+              { name: 'A', type: 'line', data: ra.totalAsset.map(x => [x.d, x.value / base]), smooth: true, showSymbol: false, lineStyle: { color: '#5aa9e6', width: 2 } },
+              { name: 'B', type: 'line', data: rb.totalAsset.map(x => [x.d, x.value / base]), smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 2 } },
+            ],
+            animationDuration: 600,
+          });
+        }
+      };
+      selA.onchange = draw; selB.onchange = draw;
+      draw();
+    } catch (e) { container.innerHTML = '<div class="hint err">对比加载失败：' + esc(e.message || '') + '</div>'; }
+  }
+
   /* 三问卡 + 驾驶舱渲染 */
   function renderCockpit(res, combo, pool, meta) {
     const el = $('#pfbtResult');
@@ -3662,6 +3744,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       ${res.perStock.map(p => `<tr style="border-top:1px solid var(--line)" data-prow="${esc(p.code)}"><td style="padding:3px"><b>${esc(p.name)}</b></td><td style="text-align:center">${(p.amount / 10000).toFixed(1)}万</td><td style="text-align:center">${p.monthly.toFixed(0)}</td><td style="text-align:center">${(p.finalValue / 10000).toFixed(1)}万</td><td style="text-align:center" class="green">${(p.cumDiv / 10000).toFixed(2)}万</td><td style="text-align:center" class="${p.divRatio >= 15 ? 'green' : p.divRatio >= 8 ? '' : 'red'}">${p.divRatio.toFixed(1)}%</td><td style="text-align:center"><a href="javascript:void(0)" data-adj="${esc(p.code)}" style="color:#5aa9e6;font-size:10px">✏️调</a></td></tr>`).join('')}
       </table>
       <div id="cockpitWeight" style="width:100%;height:160px;margin-top:6px"></div>
+    </details>`;
+    /* v3.2 S12：快照对比（折叠面板，点开才 init） */
+    html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">⚖️ 快照对比 A/B（同组合不同配置）</summary>
+      <div id="cockpitSnapCmp" style="margin-top:6px;font-size:11px">点开加载…</div>
     </details>`;
     /* 分析工具（折叠） */
     html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">🔬 分析工具（再平衡/敏感度/压力/目标倒推）</summary>
@@ -4031,6 +4117,14 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   }
 
   function bindCockpitEvents(res) {
+    /* v3.2 S12：快照对比折叠——点开才加载（懒 init 防平板卡） */
+    try {
+      const sc = document.getElementById('cockpitSnapCmp');
+      if (sc) {
+        const det = sc.closest('details');
+        if (det) det.addEventListener('toggle', () => { if (det.open && !sc.dataset.loaded) { sc.dataset.loaded = '1'; renderSnapCompare(sc); } });
+      }
+    } catch (e) { }
     /* v1 N7/M533：反向改——结果页「✏️调」→ 回组合卡预填该行 */
     document.querySelectorAll('#pfbtResult [data-adj]').forEach(a => a.onclick = () => {
       const code = a.dataset.adj;
