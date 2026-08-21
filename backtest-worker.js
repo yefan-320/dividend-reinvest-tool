@@ -57,9 +57,10 @@ self.onmessage = e => {
     const totalAsset = allDates.map(d => { let value = 0, invested = 0, cumDiv = 0; rows.forEach(r => { if (r._cash) { const yrs = Math.max(0, (new Date(d).getTime() - r._cash.t0) / 86400000 / 365.25); value += r._cash.cash0 * Math.pow(1 + r._cash.rate, yrs); invested += r._cash.cash0; return; } const dd = r.sim.daily.find(x => x.date === d); if (dd) { value += dd.value; invested += dd.invested; cumDiv += dd.cumDiv; } }); return { d, value: +value.toFixed(2), invested: +invested.toFixed(2), cumDiv: +cumDiv.toFixed(2) }; });
     const last = totalAsset[totalAsset.length - 1];
     const divByYear = {};
-    rows.forEach(r => { const byYear = {}; r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; }); const ys = Object.keys(byYear).sort(); let prev = 0; ys.forEach(y => { divByYear[y] = (divByYear[y] || 0) + (byYear[y] - prev); prev = byYear[y]; }); });
+    /* v3.2 S13（9/8 分母修复）：现金行（r.sim=null）不参与分红统计——r.sim.daily 遍历前跳过，防抛错 */
+    rows.forEach(r => { if (!r.sim) return; const byYear = {}; r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; }); const ys = Object.keys(byYear).sort(); let prev = 0; ys.forEach(y => { divByYear[y] = (divByYear[y] || 0) + (byYear[y] - prev); prev = byYear[y]; }); });
     const invested = rows.reduce((s, r) => s + (r.amount || 0), 0);
-    const cumDivTotal = rows.reduce((s, r) => s + r.sim.cumDiv, 0);
+    const cumDivTotal = rows.reduce((s, r) => s + (r.sim ? r.sim.cumDiv : 0), 0);
     const divRatio = invested > 0 ? cumDivTotal / invested * 100 : 0;
     const ys = Object.keys(divByYear).sort();
     const yearDiv = ys.length ? divByYear[ys[ys.length - 1]] : 0;
