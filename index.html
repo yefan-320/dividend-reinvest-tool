@@ -294,20 +294,57 @@ body{padding-bottom:64px}
   <div class="card" id="comboCard">
     <h2 style="cursor:pointer" id="comboTitle">🧮 我的组合 <span class="hint" style="float:right;font-weight:400" id="comboSummary">…</span></h2>
     <div id="comboBody">
-      <div class="hint" style="margin-bottom:6px">自由组合：搜索加股 → 设初始金额/月追加 → 命名保存 → 点「▶ 回测」看驾驶舱结果</div>
+      <!-- 组合选择 + 管理（v1 新增：命名/复制/删除/切换） -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <select id="comboSel" style="flex:1;min-width:160px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px"><option value="">— 选择组合 —</option></select>
+        <button type="button" class="chip" id="comboNew" title="新建组合">🆕 新建</button>
+        <button type="button" class="chip" id="comboRename" title="重命名当前组合" style="color:#5aa9e6">✏️ 重命名</button>
+        <button type="button" class="chip" id="comboDup" title="复制当前组合">📋 复制</button>
+        <button type="button" class="chip" id="comboDel" title="删除当前组合" style="color:#e05a5a">🗑️ 删除</button>
+      </div>
+      <!-- 名字 + 总投资 + 总月追加（v1：自由设钱） -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <input id="comboName" placeholder="组合名字（如：我的分红组合）" style="flex:1;min-width:150px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
+        <span style="font-size:11px;color:var(--sub)">💰总投资</span><input id="comboTotal" type="number" placeholder="元" style="width:110px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
+        <span style="font-size:11px;color:var(--sub)">📅总月追加</span><input id="comboTotalMon" type="number" placeholder="元/月" style="width:90px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
+      </div>
+      <!-- 搜索加股 + 导入 + 操作 -->
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
         <input id="comboSearch" placeholder="股票代码 / 名称 / ETF" style="flex:1;min-width:150px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
         <button type="button" class="chip" id="comboAdd" style="color:var(--gold)">➕ 加股</button>
         <button type="button" class="chip" id="comboFromHold" title="从我的持仓导入">📥 持仓</button>
         <button type="button" class="chip" id="comboFromWl" title="从自选池导入">📋 自选</button>
         <button type="button" class="chip" id="comboFromDemo" title="从示例导入（招行/工行/长电）">🎯 示例</button>
+        <button type="button" class="chip" id="comboEqual" title="等权分配（自动补差恒=100%）">⚖️ 等权</button>
+      </div>
+      <!-- 比例/金额列表（v1：% 与金额双向联动 + 等比缩放 + 防呆） -->
+      <div id="comboListWrap"></div>
+      <!-- 环形图 + 校验（v1：可视化） -->
+      <div id="comboViz" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0">
+        <div style="text-align:center">
+          <div id="comboDonut" style="width:150px;height:150px;flex-shrink:0"></div>
+          <button type="button" class="chip" id="comboDonutMode" style="margin-top:4px;font-size:10px">🔄 金额/分红</button>
+          <div id="comboDonutTip" style="font-size:10px;min-height:14px"></div>
+        </div>
+        <div id="comboVizSide" style="flex:1;min-width:200px">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <span style="font-size:11px;color:var(--sub)">💵 现金仓位</span>
+            <input id="comboCashPct" type="number" min="0" max="100" placeholder="0" style="width:56px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px" title="留子弹：总投入的 X% 不买股，按 1.5%/年滚（可改）">
+            <span style="font-size:10px;color:var(--muted)">%（留子弹，按 1.5%/年滚）</span>
+          </div>
+          <div id="comboCheck" style="font-size:12px;margin-bottom:4px"></div>
+          <div id="comboTotals" style="font-size:12px;color:var(--sub);padding:6px 8px;background:var(--card2);border-radius:8px"></div>
+        </div>
+      </div>
+      <!-- 保存/撤销/回测 -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
         <button type="button" class="chip" id="comboSave" style="color:#5aa9e6">💾 保存</button>
         <button type="button" class="chip" id="comboUndo" title="Ctrl+Z">↩️ 撤销</button>
         <button type="button" class="btn flexbtn" id="comboRun" style="color:#7ec699">▶ 回测</button>
       </div>
-      <div id="comboListWrap"></div>
-      <div id="comboTotals" style="font-size:12px;color:var(--sub);margin:6px 0;padding:6px 8px;background:var(--card2);border-radius:8px"></div>
-      <div id="comboSaved" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+      <div id="comboSaved" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+    </div>
+  </div>
     </div>
   </div>
   <div class="card" id="portfolioCard">
@@ -614,15 +651,23 @@ body{padding-bottom:64px}
       <button type="button" class="btn flexbtn" id="pfbtRun" style="margin-left:8px">▶ 运行体检</button>
     </div>
     <div id="pfbtResult"><div class="hint">点「▶ 运行体检」开始（拉取组合各股 K线+分红，约 1-2 分钟；二次跑命中本地缓存秒出）</div></div>
+    <!-- v1 组合对比（N6/M532）：我的组合 vs 备选组合双曲线 -->
+    <div style="display:flex;gap:6px;align-items:center;margin:10px 0 0;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px">
+      <span style="font-size:12px;color:var(--sub)">⚖️ 组合对比：</span>
+      <select id="pfbtCmpSel" style="padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px;max-width:220px"><option value="">（选另一个组合对比）</option></select>
+      <button type="button" class="chip" id="pfbtCmpRun" style="color:#5aa9e6">📊 对比</button>
+      <span style="font-size:10px;color:var(--muted)">同区间跑两个组合，出双曲线+关键指标并排</span>
+    </div>
+    <div id="pfbtCmpResult" style="margin-top:8px"></div>
   </div>
 </section>
 
-<script src="demo-data.js?v=v3.0"></script>
+<script src="demo-data.js?v=v3.1"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v3.0"></script>
+<script src="data-layer.js?v=v3.1"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v3.0';
+const APP_VERSION = 'v3.1';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1345,7 +1390,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v3.0"></script>
+<script src="views.js?v=v3.1"></script>
   /* v3.0 C6：PWA Service Worker 注册（本地服务/HTTPS 环境）——失败静默不影响使用 */
   try { if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); } } catch (e) {}
 </body>

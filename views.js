@@ -3322,6 +3322,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   let _pfbtRunning = false;
   let _cockpitChart = null, _cockpitTimeline = null;
   let _cockpitRes = null, _cockpitPool = null, _cockpitCombo = null;
+  let _comboEditCode = null;   /* v1 N7：反向改——驾驶舱→组合卡预填 */
 
   /* 三问卡 + 驾驶舱渲染 */
   function renderCockpit(res, combo, pool, meta) {
@@ -3376,6 +3377,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div id="cockpitDivRing" style="width:32%;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
       <div id="cockpitRadar" style="flex:1;min-width:180px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
     </div>`;
+    /* v1 新增可视化：收益贡献 + 组合股息日历 */
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <div id="cockpitContrib" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+      <div id="cockpitDivCal" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line);overflow:auto"></div>
+    </div>`;
+    /* v1 新增可视化：覆盖率演进 + 复投vs提取 + 行业分布 */
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <div id="cockpitCovEvol" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+      <div id="cockpitReinv" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+      <div id="cockpitIndustry" style="flex:1;min-width:170px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+    </div>`;
+    /* 回本进度环（W2：组合环+每只小环） */
+    html += `<div id="cockpitPayback" style="width:100%;margin-top:8px;padding:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>`;
     /* 时间轴回放 */
     html += `<div style="margin-top:8px"><div style="font-size:11px;color:var(--muted);margin-bottom:2px">🎬 时间轴回放：拖动看「我的钱怎么长大」（预计算，拖动只切帧）</div>
       <input type="range" id="cockpitTimeline" min="0" max="${Math.max(0, res.totalAsset.length - 1)}" value="${res.totalAsset.length - 1}" style="width:100%;accent-color:var(--gold)"></div>`;
@@ -3384,7 +3398,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* 每只贡献 + 权重演化（折叠） */
     html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">📋 每只贡献 + 权重演化（点开）</summary>
       <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">标的</th><th>初始</th><th>月追加</th><th>期末市值</th><th>累计分红</th><th>分红率</th></tr>
-      ${res.perStock.map(p => `<tr style="border-top:1px solid var(--line)"><td style="padding:3px"><b>${esc(p.name)}</b></td><td style="text-align:center">${(p.amount / 10000).toFixed(1)}万</td><td style="text-align:center">${p.monthly.toFixed(0)}</td><td style="text-align:center">${(p.finalValue / 10000).toFixed(1)}万</td><td style="text-align:center" class="green">${(p.cumDiv / 10000).toFixed(2)}万</td><td style="text-align:center" class="${p.divRatio >= 15 ? 'green' : p.divRatio >= 8 ? '' : 'red'}">${p.divRatio.toFixed(1)}%</td></tr>`).join('')}
+      ${res.perStock.map(p => `<tr style="border-top:1px solid var(--line)" data-prow="${esc(p.code)}"><td style="padding:3px"><b>${esc(p.name)}</b></td><td style="text-align:center">${(p.amount / 10000).toFixed(1)}万</td><td style="text-align:center">${p.monthly.toFixed(0)}</td><td style="text-align:center">${(p.finalValue / 10000).toFixed(1)}万</td><td style="text-align:center" class="green">${(p.cumDiv / 10000).toFixed(2)}万</td><td style="text-align:center" class="${p.divRatio >= 15 ? 'green' : p.divRatio >= 8 ? '' : 'red'}">${p.divRatio.toFixed(1)}%</td><td style="text-align:center"><a href="javascript:void(0)" data-adj="${esc(p.code)}" style="color:#5aa9e6;font-size:10px">✏️调</a></td></tr>`).join('')}
       </table>
       <div id="cockpitWeight" style="width:100%;height:160px;margin-top:6px"></div>
     </details>`;
@@ -3399,7 +3413,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>
       <div id="anResult" style="font-size:11px;color:var(--sub);margin-top:6px"></div>
     </details>`;
-    html += `<div class="hint" style="margin-top:6px;color:var(--sub)">口径：事件首日买入→持有至今；收益=期末价+期间分红÷买入价；月追加按所选模式分配（weight=按初始金额比例，口径见上）；历史回测不代表未来。</div>`;
+    html += `<div class="hint" style="margin-top:6px;color:var(--sub)">口径：事件首日买入→持有至今；收益=期末价+期间分红÷买入价；月追加按所选模式分配（weight=按初始金额比例，口径见上）；${meta.cashTxt || ''}历史回测不代表未来。</div>`;
     el.innerHTML = html;
     _cockpitRes = res; _cockpitPool = pool; _cockpitCombo = combo;
     /* v3.0 动效：三问卡数字滚动 + 卡片进场 */
@@ -3411,11 +3425,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         if (m) { const target = parseFloat(m[1]); const prefix = txt.slice(0, m.index); const suffix = txt.slice(m.index + m[0].length); const dec = (m[0].split('.')[1] || '').length; v3StepIn(nd.parentElement, i * 80); nd.textContent = prefix + '0'.padEnd(dec ? dec + 2 : 0, '0') + suffix; v3CountUp(nd, target, { dec, dur: 800 }); }
       });
     } catch (e) {}
-    drawCockpitCharts(res, combo);
+    drawCockpitCharts(res, combo, pool);
     bindCockpitEvents(res);
   }
 
-  function drawCockpitCharts(res, combo) {
+  function drawCockpitCharts(res, combo, pool) {
     /* 主图三层 */
     const mainEl = document.getElementById('cockpitMain');
     if (mainEl && typeof echarts !== 'undefined') {
@@ -3480,20 +3494,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         series: [{ type: 'radar', data: [{ value: [Math.min(100, divRatio * 2), cov, Math.max(0, 100 - conc), Math.max(0, 100 - ddMax), growth], name: '健康', areaStyle: { color: 'rgba(76,175,125,.2)' }, lineStyle: { color: '#4caf7d' }, itemStyle: { color: '#4caf7d' } }] }],
       });
     }
-    /* 分红年度柱状 */
-    const barEl = document.getElementById('cockpitDivBar');
-    if (barEl && typeof echarts !== 'undefined') {
-      const ch = echarts.init(barEl);
-      const ys = Object.keys(res.divByYear).sort();
-      ch.setOption({
-        title: { text: '年度分红到账（税前）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
-        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
-        grid: { left: 56, right: 12, top: 30, bottom: 24 },
-        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-        series: [{ type: 'bar', data: ys.map(y => res.divByYear[y]), itemStyle: { color: '#d9a441', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, animationDuration: 600 }],
-      });
-    }
     /* 权重演化 */
     const wEl = document.getElementById('cockpitWeight');
     if (wEl && typeof echarts !== 'undefined') {
@@ -3514,9 +3514,202 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         series,
       });
     }
+    /* v1 V3：收益贡献条形图（分红贡献金 + 价格贡献红涨绿赔） */
+    const cbEl = document.getElementById('cockpitContrib');
+    if (cbEl && typeof echarts !== 'undefined') {
+      const ch = echarts.init(cbEl);
+      const names = res.perStock.map(p => p.name);
+      const divC = res.perStock.map(p => +(p.cumDiv / 10000).toFixed(2));
+      const priceC = res.perStock.map(p => +((p.finalValue - p.invested) / 10000).toFixed(2));
+      ch.setOption({
+        title: { text: '收益贡献（金=分红 · 红涨/绿赔=价格）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p.map(x => x.marker + ' ' + x.seriesName + '：' + x.value + '万').join('<br>') },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 } },
+        grid: { left: 14, right: 90, top: 40, bottom: 24 },
+        xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        yAxis: { type: 'category', data: names, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        series: [
+          { name: '分红贡献', type: 'bar', data: divC, itemStyle: { color: '#d9a441', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 10 },
+          { name: '价格贡献', type: 'bar', data: priceC, itemStyle: { color: (p) => p.value >= 0 ? '#e05a5a' : '#4caf7d', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 10 },
+        ],
+        animationDuration: 600,
+      });
+    }
+    /* v1 V6：组合股息日历（未来 12 个月到账，HTML 表） */
+    const dcEl = document.getElementById('cockpitDivCal');
+    if (dcEl) {
+      const today = DL.todayStr ? DL.todayStr() : new Date().toISOString().slice(0, 10);
+      const end = (() => { const d = new Date(); d.setMonth(d.getMonth() + 12); return d.toISOString().slice(0, 10); })();
+      const months = {};
+      (combo.items || []).forEach(it => {
+        const divs = (pool[it.code] && pool[it.code].divs) || [];
+        divs.filter(d => d.ex && d.ex >= today && d.ex <= end).forEach(d => {
+          const m = d.ex.slice(0, 7);
+          if (!months[m]) months[m] = [];
+          months[m].push({ name: it.name || it.code, cash: d.dps || 0 });
+        });
+      });
+      const ms = Object.keys(months).sort();
+      dcEl.innerHTML = `<div style="font-size:10px;color:#8fa69c;padding:6px 8px 0">📅 组合股息日历（未来12个月 · 估=上年同期推算）</div>` + (ms.length
+        ? `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px">${ms.map(m => `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 8px;color:var(--gold);font-weight:700">${m}</td><td style="padding:3px">${months[m].map(x => `${esc(x.name)} ${x.cash.toFixed(2)}`).join(' · ')}</td><td style="padding:3px;text-align:right;color:var(--sub)">${(months[m].reduce((s, x) => s + x.cash, 0)).toFixed(2)}/股</td></tr>`).join('')}</table>`
+        : `<div style="padding:10px;font-size:11px;color:var(--muted)">未来 12 个月暂无已宣告分红（或数据未含）</div>`);
+    }
+    /* v1 N13：覆盖率演进曲线（年分红÷月支出×12 逐年） */
+    const ceEl = document.getElementById('cockpitCovEvol');
+    if (ceEl && typeof echarts !== 'undefined') {
+      let monthlyExp = 0; try { monthlyExp = parseFloat(localStorage.getItem('divtool_monthly_exp') || '0') || 0; } catch (e) {}
+      const ch = echarts.init(ceEl);
+      const ys = Object.keys(res.divByYear).sort();
+      const cov = monthlyExp > 0 ? ys.map(y => +(res.divByYear[y] / 12 / monthlyExp * 100).toFixed(1)) : [];
+      ch.setOption({
+        title: { text: monthlyExp > 0 ? '覆盖率演进（年分红÷月支出×12）' : '覆盖率演进（填月支出后显示）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p[0].name + '：' + p[0].value + '%' },
+        grid: { left: 40, right: 14, top: 30, bottom: 24 },
+        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [{ name: '覆盖率', type: 'line', data: cov, smooth: true, showSymbol: false, lineStyle: { color: '#5aa9e6', width: 2 }, areaStyle: { color: 'rgba(90,169,230,.12)' }, markLine: { data: [{ yAxis: 100, lineStyle: { color: '#4caf7d', type: 'dashed' }, label: { formatter: '100%', color: '#4caf7d', fontSize: 9 } }] } }],
+        animationDuration: 600,
+      });
+    }
+    /* v1 N12：复投 vs 提取对比（重跑 reinvest=false） */
+    const riEl = document.getElementById('cockpitReinv');
+    if (riEl && typeof echarts !== 'undefined') {
+      const ch = echarts.init(riEl);
+      /* 提取模式：每只 reinvest=false 汇总 */
+      const t = res.totalAsset;
+      let extractSeries = null;
+      try {
+        const exRows = [];
+        (combo.items || []).forEach(it => {
+          const p = pool[it.code];
+          if (!p || !p.kline) return;
+          const sim = DL.simulateOne((it.amount || 0) * ((combo.cashPct || 0) > 0 ? (1 - (combo.cashPct || 0) / 100) : 1), it.monthly || 0, p.kline, p.divs, false, 0);
+          if (sim) exRows.push(sim);
+        });
+        if (exRows.length) {
+          const ds = {};
+          exRows.forEach(sim => sim.daily.forEach(dd => { ds[dd.date] = (ds[dd.date] || 0) + dd.value; }));
+          const dates = Object.keys(ds).sort();
+          extractSeries = dates.map(d => [d, ds[d]]);
+        }
+      } catch (e) {}
+      ch.setOption({
+        title: { text: '分红复投 vs 提取（复利的力量）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+        grid: { left: 44, right: 14, top: 40, bottom: 24 },
+        xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [
+          { name: '复投', type: 'line', data: t.map(x => [x.d, x.value]), smooth: true, showSymbol: false, lineStyle: { color: '#4caf7d', width: 2 } },
+          { name: '提取', type: 'line', data: extractSeries || [], smooth: true, showSymbol: false, lineStyle: { color: '#8fa69c', width: 1.5, type: 'dashed' } },
+        ],
+        animationDuration: 600,
+      });
+    }
+    /* v1 V4：行业分布条形（TIER_LINE 行业） */
+    const indEl = document.getElementById('cockpitIndustry');
+    if (indEl && typeof echarts !== 'undefined') {
+      const ch = echarts.init(indEl);
+      const indMap = {};
+      let other = 0;
+      (combo.items || []).forEach(it => {
+        const tl = DL.TIER_LINE && DL.TIER_LINE[it.code];
+        const ind = tl && tl.ind ? tl.ind : '其他';
+        indMap[ind] = (indMap[ind] || 0) + (it.amount || 0);
+      });
+      const IND_NAME = { bank: '银行', consumer: '消费', utility: '公用', energy: '能源', telecom: '电信', manufacture: '制造' };
+      const rows2 = Object.keys(indMap).map(k => ({ name: IND_NAME[k] || k, value: indMap[k] })).sort((a, b) => b.value - a.value);
+      const maxInd = rows2.length ? rows2[0] : null;
+      ch.setOption({
+        title: { text: '行业分布' + (maxInd && maxInd.value / (combo.items.reduce((s, it) => s + (it.amount || 0), 0) || 1) > 0.5 ? ' · ⚠️集中' : ''), left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p[0].name + '：' + (p[0].value / 10000).toFixed(1) + '万' },
+        grid: { left: 14, right: 50, top: 28, bottom: 20 },
+        xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        yAxis: { type: 'category', data: rows2.map(r => r.name), axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        series: [{ type: 'bar', data: rows2.map(r => r.value), itemStyle: { color: '#9b6df0', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 12 }],
+        animationDuration: 600,
+      });
+    }
+    /* v1 W2：回本进度环（组合环+每只小环，hover 显示回本率%） */
+    const pbEl = document.getElementById('cockpitPayback');
+    if (pbEl) {
+      const ringHtml = (label, ratio, color) => {
+        const r = Math.min(100, Math.max(0, ratio));
+        return `<div style="display:inline-block;text-align:center;margin:4px 10px">
+          <div style="position:relative;width:64px;height:64px">
+            <svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7"/><circle cx="32" cy="32" r="26" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(r / 100 * 163.4).toFixed(1)} 163.4" transform="rotate(-90 32 32)"/></svg>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${color}">${r.toFixed(0)}%</div>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px">${label}</div>
+        </div>`;
+      };
+      let html = `<div style="font-size:10px;color:#8fa69c;padding:0 2px">🔁 回本进度（累计分红÷投入）：</div>`;
+      html += ringHtml('组合', res.divRatio, '#d9a441');
+      res.perStock.forEach(p => { html += ringHtml(p.name.length > 4 ? p.name.slice(0, 4) : p.name, p.divRatio, p.divRatio >= 30 ? '#4caf7d' : p.divRatio >= 15 ? '#d9a441' : '#5aa9e6'); });
+      pbEl.innerHTML = html;
+    }
+    /* v1 W3：来源堆叠——分红柱状叠加个股构成（累计分红口径） + N11 增速标注 + W1 断档警示 */
+    const barEl3 = document.getElementById('cockpitDivBar');
+    if (barEl3 && typeof echarts !== 'undefined') {
+      const ch = echarts.init(barEl3);
+      const ys = Object.keys(res.divByYear).sort();
+      const vals = ys.map(y => res.divByYear[y]);
+      /* 增速标注 */
+      const labels = ys.map((y, i) => {
+        if (i === 0) return '';
+        const prev = vals[i - 1];
+        if (!(prev > 0)) return '';
+        const g = (vals[i] - prev) / prev * 100;
+        return (g >= 0 ? '+' : '') + g.toFixed(1) + '%';
+      });
+      /* 断档警示：连续 2 年下降 */
+      let warn = '';
+      for (let i = ys.length - 1; i >= 2; i--) {
+        if (vals[i] < vals[i - 1] && vals[i - 1] < vals[i - 2]) { warn = `⚠️ 分红连续 ${ys.length - i} 年下降（${ys[i - 2]}→${ys[i]}），关注分红持续性`; break; }
+      }
+      /* 来源堆叠：perStock 累计分红构成 */
+      const cumTotal = res.perStock.reduce((s, p) => s + p.cumDiv, 0);
+      const stackData = ys.map(y => res.perStock.map(p => +(p.cumDiv / Math.max(1, cumTotal) * res.divByYear[y]).toFixed(2)));
+      const stackSeries = res.perStock.map((p, pi) => ({ name: p.name, type: 'bar', stack: 'div', data: stackData.map(d => d[pi]), itemStyle: { color: _comboPalette[pi % _comboPalette.length] }, barMaxWidth: 26 }));
+      ch.setOption({
+        title: { text: '年度分红到账（税前 · 堆叠=个股构成）' + (warn ? ' · ' + warn : ''), left: 'center', top: 2, textStyle: { fontSize: 10, color: warn ? '#e05a5a' : '#8fa69c' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 }, type: 'scroll' },
+        grid: { left: 56, right: 12, top: 40, bottom: 24 },
+        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [...stackSeries, { type: 'bar', data: vals, barMaxWidth: 26, itemStyle: { color: 'transparent' }, label: { show: true, position: 'top', formatter: p => labels[p.dataIndex], color: '#8fa69c', fontSize: 9 }, tooltip: { show: false }, silent: true }],
+        animationDuration: 600,
+      });
+    }
   }
 
   function bindCockpitEvents(res) {
+    /* v1 N7/M533：反向改——结果页「✏️调」→ 回组合卡预填该行 */
+    document.querySelectorAll('#pfbtResult [data-adj]').forEach(a => a.onclick = () => {
+      const code = a.dataset.adj;
+      _comboEditCode = code;
+      switchTab('home');
+      setTimeout(() => {
+        const row = document.querySelector(`#comboListWrap [data-crow]`);
+        _comboItems.forEach((it, i) => { if (it.code === code) { const r2 = document.querySelector(`[data-crow="${i}"]`); if (r2) { r2.scrollIntoView({ block: 'center', behavior: 'smooth' }); r2.style.background = 'rgba(90,169,230,.18)'; setTimeout(() => { r2.style.background = ''; }, 2000); const ai = r2.querySelector('[data-amt]'); if (ai) ai.focus(); toast('调整「' + it.name + '」金额/比例'); } } });
+      }, 400);
+    });
+    /* v1 块8：收益贡献图点击某只 → 高亮 perStock 行（四视图联动之一） */
+    const cbEl = document.getElementById('cockpitContrib');
+    if (cbEl && typeof echarts !== 'undefined') {
+      const inst = echarts.getInstanceByDom(cbEl);
+      if (inst) inst.on('click', p => {
+        if (p && p.dataIndex != null) {
+          const code = res.perStock[p.dataIndex] && res.perStock[p.dataIndex].code;
+          if (code) {
+            const tr = document.querySelector(`[data-prow="${code}"]`);
+            if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); tr.style.background = 'rgba(217,164,65,.18)'; setTimeout(() => { tr.style.background = ''; }, 1800); }
+          }
+        }
+      });
+    }
     /* v3.0 C3/C4/C5/W1：体检报告本地文件/剪贴板/分享 + 一键备份（纯电脑能力） */
     const mkReportTxt = () => {
       const combo = _cockpitCombo || { name: '组合' };
@@ -3630,15 +3823,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         try {
           if (typeof Worker !== 'undefined') {
             workerRes = await new Promise((resolve) => {
-              const w = new Worker('backtest-worker.js');
+              const w = new Worker('backtest-worker.js?v=' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'v3.1'));
               const to = setTimeout(() => { try { w.terminate(); } catch (e) {} resolve(null); }, 15000);
               w.onmessage = ev => { clearTimeout(to); try { w.terminate(); } catch (e) {} resolve(ev.data && ev.data.ok ? ev.data.res : null); };
               w.onerror = () => { clearTimeout(to); try { w.terminate(); } catch (e) {} resolve(null); };
-              w.postMessage({ combo: combo.items, pool, opts: { years: y, monthlyMode: mode } });
+              w.postMessage({ combo: combo.items, pool, opts: { years: y, monthlyMode: mode, cashPct: combo.cashPct || 0, cashRate: 1.5 } });
             });
           }
         } catch (e) { workerRes = null; }
-        res = workerRes || DL.calcComboBacktest(combo.items, pool, { years: y, monthlyMode: mode });
+        res = workerRes || DL.calcComboBacktest(combo.items, pool, { years: y, monthlyMode: mode, cashPct: combo.cashPct || 0, cashRate: 1.5 });
         if (!res) { el.innerHTML = '<div class="hint err">计算失败：数据不足</div>'; return; }
         try { await DL.cacheSet(cacheKey, { res, at: Date.now() }); } catch (e) {}
       }
@@ -3652,7 +3845,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         sel2.value = activeId;
         sel2.onchange = () => { const c3 = DL.loadCombos(); const ac = c3.combos.find(x => x.id === sel2.value); if (ac) { c3.activeId = ac.id; DL.saveCombos(c3); } runPortfolioBacktest(); };
       }
-      const meta = { modeTxt: mode === 'weight' ? '按初始权重分配' : mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote, failed };
+      fillCmpSel();
+      const meta = { modeTxt: mode === 'weight' ? '按初始权重分配' : mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote, failed, cashTxt: (combo.cashPct || 0) > 0 ? `现金仓位 ${combo.cashPct}% 按 1.5%/年滚入（近似货基/短债，可改）；` : '' };
       renderCockpit(res, combo, pool, meta);
     } catch (e) {
       el.innerHTML = `<div style="padding:14px;border:1px solid rgba(224,90,90,.4);border-radius:10px;background:rgba(224,90,90,.08)">
@@ -3668,6 +3862,72 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (btn) { btn.disabled = false; btn.textContent = '▶ 运行体检'; }
     }
   }
+
+  /* v1 N6/M532：组合对比（我的组合 vs 备选，双曲线+关键指标并排） */
+  async function loadComboPool(combo, y) {
+    const pool = {}; const failed = [];
+    const from = (() => { const t = new Date(); t.setDate(t.getDate() - y * 366); return t.toISOString().slice(0, 10); })();
+    for (let i = 0; i < combo.items.length; i += 4) {
+      const batch = combo.items.slice(i, i + 4);
+      await Promise.all(batch.map(async (it) => {
+        try {
+          const [divs, kline] = await Promise.all([DL.fetchDividendsOne(it.code), DL.getKline(it.code, from, DL.todayStr())]);
+          if (!divs || !divs.length || !kline || !Object.keys(kline).length) { failed.push(it.name); return; }
+          const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
+          pool[it.code] = { kline, divs, series };
+        } catch (e) { failed.push(it.name); }
+      }));
+    }
+    return { pool, failed };
+  }
+  async function runComboCompare() {
+    const el = $('#pfbtCmpResult'); if (!el) return;
+    const c = DL.loadCombos();
+    const curSel = $('#pfbtComboSel'); const curId = curSel ? curSel.value : c.activeId;
+    const cmpSel = $('#pfbtCmpSel'); const cmpId = cmpSel ? cmpSel.value : '';
+    const cur = c.combos.find(x => x.id === curId);
+    const cmp = c.combos.find(x => x.id === cmpId);
+    if (!cur) { el.innerHTML = '<div class="hint err">先运行主组合体检</div>'; return; }
+    if (!cmp) { el.innerHTML = '<div class="hint err">选一个对比组合</div>'; return; }
+    const y = parseInt((document.querySelector('.pfbt-y.on') || {}).dataset && document.querySelector('.pfbt-y.on').dataset.y || '10', 10);
+    const mode = ($('#pfbtMode') && $('#pfbtMode').value) || 'weight';
+    el.innerHTML = '<div class="hint">⏳ 对比计算中（缓存命中秒出）…</div>';
+    try {
+      const [{ pool: p1 }, { pool: p2 }] = await Promise.all([loadComboPool(cur, y), loadComboPool(cmp, y)]);
+      const r1 = DL.calcComboBacktest(cur.items, p1, { years: y, monthlyMode: mode, cashPct: cur.cashPct || 0, cashRate: 1.5 });
+      const r2 = DL.calcComboBacktest(cmp.items, p2, { years: y, monthlyMode: mode, cashPct: cmp.cashPct || 0, cashRate: 1.5 });
+      if (!r1 || !r2) { el.innerHTML = '<div class="hint err">对比失败：数据不足</div>'; return; }
+      const card2 = (name, r, c2) => `<div style="flex:1;min-width:150px;padding:8px 10px;border-radius:8px;background:var(--card2);border:1px solid var(--line);text-align:center">
+        <div style="font-size:12px;font-weight:700;color:${c2}">${esc(name)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">回本 ${r.divRatio.toFixed(1)}% · 年分红 ${(r.yearDiv / 10000).toFixed(2)}万 · 期末 ${(r.last.value / 10000).toFixed(1)}万</div>
+      </div>`;
+      el.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${card2(cur.name, r1, '#d9a441')}${card2(cmp.name, r2, '#5aa9e6')}</div><div id="cmpChart" style="width:100%;height:240px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>`;
+      if (typeof echarts !== 'undefined') {
+        const ch = echarts.init(document.getElementById('cmpChart'));
+        ch.setOption({
+          title: { text: '组合对比（总资产）', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
+          legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 } },
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+          grid: { left: 56, right: 14, top: 44, bottom: 26 },
+          xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 } },
+          yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+          series: [
+            { name: cur.name, type: 'line', data: r1.totalAsset.map(x => [x.d, x.value]), smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 2.5 } },
+            { name: cmp.name, type: 'line', data: r2.totalAsset.map(x => [x.d, x.value]), smooth: true, showSymbol: false, lineStyle: { color: '#5aa9e6', width: 2 } },
+          ],
+        });
+      }
+    } catch (e) { el.innerHTML = '<div class="hint err">对比失败：' + esc(e.message) + '</div>'; }
+  }
+  function fillCmpSel() {
+    const sel = $('#pfbtCmpSel'); if (!sel) return;
+    const c = DL.loadCombos();
+    const cur = $('#pfbtComboSel') ? $('#pfbtComboSel').value : '';
+    sel.innerHTML = '<option value="">（选另一个组合对比）</option>' + (c.combos || []).filter(x => x.id !== cur).map(cm => `<option value="${cm.id}">${esc(cm.name)}（${cm.items.length}只）</option>`).join('');
+  }
+  try { fillCmpSel(); } catch (e) {}
+  const pfbtCmpBtn = $('#pfbtCmpRun');
+  if (pfbtCmpBtn && !pfbtCmpBtn.dataset.bound) { pfbtCmpBtn.dataset.bound = '1'; pfbtCmpBtn.onclick = runComboCompare; }
 
   /* O5b：持仓可选录入（M41 Q2/M43 Q4）——localStorage 存储（敏感数据不进 git）
    * 字段：代码/股数/成本价/买入日期/trades（M260：内嵌买入流水 [{date,shares,price}]，只增不删）
@@ -3714,15 +3974,20 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       localStorage.removeItem('divtool_holdings');
     } catch (e) {}
   }
-/* ===== v3.0 组合工作台 UI（决策台「🧮 我的组合」卡）===== */
+/* ===== v1 组合工作台 UI（决策台「🧮 我的组合」卡）===== */
 let _comboUndoStack = [];
 let _comboItems = [];   // [{code,name,amount,monthly}]
 let _comboName = '';
-function comboPushUndo() { _comboUndoStack.push(JSON.stringify({ items: _comboItems, name: _comboName })); if (_comboUndoStack.length > 30) _comboUndoStack.shift(); }
+let _comboId = null;    // 当前编辑组合 id（null=未保存新组合）
+let _comboTotal = 0;    // 总投资基准（用户可设，%→金额投影）
+let _comboCashPct = 0;  // 现金仓位 %（组合级配置，按 1.5%/年滚）
+let _comboDonutMode = 'amt';  // 'amt' 金额视图 | 'div' 分红贡献视图
+
+function comboPushUndo() { _comboUndoStack.push(JSON.stringify({ items: _comboItems, name: _comboName, total: _comboTotal })); if (_comboUndoStack.length > 30) _comboUndoStack.shift(); }
 function comboUndo() {
   if (!_comboUndoStack.length) { toast('没有可撤销的'); return; }
   const s = JSON.parse(_comboUndoStack.pop());
-  _comboItems = s.items; _comboName = s.name;
+  _comboItems = s.items; _comboName = s.name; if (s.total != null) _comboTotal = s.total;
   renderComboList();
 }
 async function comboResolve(v) {
@@ -3737,88 +4002,371 @@ async function comboResolve(v) {
   } catch (e) {}
   return null;
 }
+/* ---- 金额/比例派生 ---- */
+function comboSumAmt() { return _comboItems.reduce((s, x) => s + (x.amount || 0), 0); }
+function comboSumMon() { return _comboItems.reduce((s, x) => s + (x.monthly || 0), 0); }
+function comboPct(i) { const t = comboSumAmt(); return t > 0 ? (_comboItems[i].amount || 0) / t * 100 : 0; }
+/* 等比缩放：改第 idx 只的目标 %=pct，其余按原比例缩，金额=comboTotal×%/100（保持 Σ=comboTotal） */
+function comboScaleTo(idx, pct) {
+  const n = _comboItems.length; if (!n) return;
+  pct = Math.max(0, Math.min(100, pct));
+  const total = _comboTotal > 0 ? _comboTotal : comboSumAmt();
+  if (total <= 0) { _comboItems.forEach((it, i) => { it.amount = i === idx ? pct * 1000 : 0; }); _comboTotal = pct * 1000; return; }
+  const oSum = _comboItems.reduce((s, x, i) => s + (i !== idx ? (x.amount || 0) : 0), 0);
+  const newOthers = Math.max(0, 100 - pct);
+  _comboItems.forEach((it, i) => {
+    if (i === idx) it.amount = Math.round(total * pct / 100);
+    else {
+      const base = oSum > 0 ? (it.amount || 0) / oSum : 1 / Math.max(1, n - 1);
+      it.amount = Math.round(total * newOthers / 100 * base);
+    }
+  });
+  _comboTotal = total;
+  comboFixRounding();
+}
+/* 整数补差：Σ金额≠comboTotal 时差额补到最大那只（恒=100%） */
+function comboFixRounding() {
+  if (_comboTotal > 0 && _comboItems.length) {
+    let sum = comboSumAmt();
+    if (Math.abs(sum - _comboTotal) > 1) {
+      let maxI = 0; _comboItems.forEach((x, i) => { if ((x.amount || 0) > (_comboItems[maxI].amount || 0)) maxI = i; });
+      _comboItems[maxI].amount = Math.max(0, (_comboItems[maxI].amount || 0) + (_comboTotal - sum));
+    }
+  }
+}
+/* 等权：每只=total/n，余数补第一只 */
+function comboEqualize() {
+  const n = _comboItems.length; if (!n) return;
+  const total = _comboTotal > 0 ? _comboTotal : 1000000;
+  const base = Math.floor(total / n);
+  _comboItems.forEach((it, i) => { it.amount = base; });
+  _comboItems[0].amount += total - base * n;
+  _comboTotal = total;
+  comboFixRounding();
+}
+/* 总月追加按比例拆（低配优先简化：按目标占比=金额占比拆） */
+function comboDistributeMonthly(totalMon) {
+  const n = _comboItems.length; if (!n) return;
+  const t = comboSumAmt();
+  _comboItems.forEach((it, i) => { it.monthly = t > 0 ? Math.round(totalMon * (it.amount || 0) / t) : Math.round(totalMon / n); });
+}
+/* ---- 校验（软校验：<100%=现金仓位提示，>100% 硬拦） ---- */
+function comboCheckPct() {
+  const el = $('#comboCheck'); if (!el) return '';
+  const t = comboSumAmt();
+  if (!_comboItems.length) { el.innerHTML = '<span style="color:var(--muted)">空组合：搜索加股 → 设比例/金额 → 命名保存</span>'; return ''; }
+  if (t <= 0) { el.innerHTML = '<span style="color:#e05a5a">⚠️ 总投入为 0，先填金额或比例</span>'; return 'over'; }
+  const cashPct = _comboCashPct || 0;
+  const cashAmt = t * cashPct / 100;
+  let html = '';
+  if (cashPct > 0) {
+    html = `<span style="color:var(--gold)">💵 现金仓位 ${cashPct.toFixed(0)}%（≈${(cashAmt / 10000).toFixed(1)} 万，按 1.5%/年滚入）</span>`;
+  } else {
+    html = `<span style="color:#4caf7d">✅ 满仓（可设现金仓位留子弹）</span>`;
+  }
+  el.innerHTML = html;
+  return '';
+}
+/* ---- 环形图 SVG（金额/分红双视图 + hover + 点击联动） ---- */
+const _comboPalette = ['#d9a441', '#5aa9e6', '#4caf7d', '#e05a5a', '#9b6df0', '#f0a45a', '#5ad0d0', '#d05a9b', '#8a8a5a', '#6d9b5a', '#5a7ad0', '#d0a05a'];
+let _comboDonutDiv = null;  // {i: 分红贡献占比} 估算
+function renderComboDonut() {
+  const el = $('#comboDonut'); if (!el) return;
+  const items = _comboItems;
+  const total = comboSumAmt();
+  if (!items.length || total <= 0) { el.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">加股后显示仓位图</div>'; return; }
+  const vals = items.map((it, i) => {
+    if (_comboDonutMode === 'div' && _comboDonutDiv && _comboDonutDiv[i] != null) return _comboDonutDiv[i];
+    return (it.amount || 0);
+  });
+  const vSum = vals.reduce((s, x) => s + x, 0) || 1;
+  const R = 62, r = 42, cx = 75, cy = 75;
+  let acc = 0;
+  const paths = vals.map((v, i) => {
+    const pct = v / vSum * 100;
+    const a0 = acc / 100 * 2 * Math.PI - Math.PI / 2;
+    const a1 = (acc + pct) / 100 * 2 * Math.PI - Math.PI / 2;
+    acc += pct;
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    const x0 = +(cx + R * Math.cos(a0)).toFixed(2), y0 = +(cy + R * Math.sin(a0)).toFixed(2);
+    const x1 = +(cx + R * Math.cos(a1)).toFixed(2), y1 = +(cy + R * Math.sin(a1)).toFixed(2);
+    const x0r = +(cx + r * Math.cos(a1)).toFixed(2), y0r = +(cy + r * Math.sin(a1)).toFixed(2);
+    const x1r = +(cx + r * Math.cos(a0)).toFixed(2), y1r = +(cy + r * Math.sin(a0)).toFixed(2);
+    const d = `M${x0},${y0} A${R},${R} 0 ${large} 1 ${x1},${y1} L${x0r},${y0r} A${r},${r} 0 ${large} 0 ${x1r},${y1r} Z`;
+    return `<path d="${d}" fill="${_comboPalette[i % _comboPalette.length]}" stroke="#0f1a14" stroke-width="1" data-di="${i}" style="cursor:pointer;transition:opacity .2s" opacity="0.92"><title>${esc(items[i].name || items[i].code)} ${pct.toFixed(1)}%</title></path>`;
+  }).join('');
+  el.innerHTML = `<svg viewBox="0 0 150 150" width="100%" height="100%">${paths}<text x="75" y="70" text-anchor="middle" fill="#e8efe9" font-size="12" font-weight="700">${_comboDonutMode === 'div' ? '分红' : '金额'}</text><text x="75" y="84" text-anchor="middle" fill="#8fa69c" font-size="8">${_comboDonutMode === 'div' ? '贡献占比（估算）' : (total / 10000).toFixed(1) + '万'}</text></svg>`;
+  el.querySelectorAll('path[data-di]').forEach(p => {
+    p.onmouseenter = () => { const i = +p.dataset.di; comboDonutTip(i, true); p.style.opacity = 1; };
+    p.onmouseleave = () => { comboDonutTip(-1, false); p.style.opacity = 0.92; };
+    p.onclick = () => { const i = +p.dataset.di; comboHighlightRow(i); };
+  });
+}
+function comboDonutTip(i, on) {
+  const tip = $('#comboDonutTip'); if (!tip) return;
+  if (!on || i < 0) { tip.innerHTML = ''; return; }
+  const it = _comboItems[i]; if (!it) return;
+  const pct = comboPct(i);
+  const dy = _comboDonutDiv && _comboDonutDiv[i] != null ? _comboDonutDiv[i] : null;
+  tip.innerHTML = `<div style="font-size:11px;color:var(--sub);margin-top:2px"><b>${esc(it.name || it.code)}</b> 占 ${pct.toFixed(1)}%${dy != null ? ` · 分红贡献 ${dy.toFixed(1)}%` : ''}</div>`;
+}
+function comboHighlightRow(i) {
+  const row = document.querySelector(`[data-crow="${i}"]`);
+  if (row) { row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); row.style.background = 'rgba(217,164,65,.15)'; setTimeout(() => { row.style.background = ''; }, 1200); }
+}
+/* ---- 汇总 ---- */
 function renderComboTotals() {
-  const el = $('#comboTotals');
-  if (!el) return;
-  const totalAmt = _comboItems.reduce((s, x) => s + (x.amount || 0), 0);
-  const totalMon = _comboItems.reduce((s, x) => s + (x.monthly || 0), 0);
+  const el = $('#comboTotals'); if (!el) return;
+  const totalAmt = comboSumAmt();
+  const totalMon = comboSumMon();
   const prevAmt = el.dataset.amt ? parseFloat(el.dataset.amt) : null;
   el.dataset.amt = totalAmt;
   el.innerHTML = _comboItems.length
-    ? `💰 总初始 <b style="color:var(--gold)">${(totalAmt / 10000).toFixed(1)} 万</b> · 📅 总月追加 <b>${(totalMon).toFixed(0)} 元/月</b> · 🧮 ${_comboItems.length} 只` + (totalMon > 0 ? ` · 年追加 ${(totalMon * 12 / 10000).toFixed(1)} 万` : '')
-    : '组合为空：搜索加股，或点上方 📥持仓/📋自选/🎯示例 导入';
-  /* v3.0 U12：数字变化高亮（非首次渲染） */
+    ? `💰 总投入 <b style="color:var(--gold)">${(totalAmt / 10000).toFixed(1)} 万</b> · 📅 总月追加 <b>${totalMon.toFixed(0)} 元/月</b> · 🧮 ${_comboItems.length} 只` + (totalMon > 0 ? ` · 年追加 ${(totalMon * 12 / 10000).toFixed(1)} 万` : '')
+    : '组合为空：搜索加股，或点 📥持仓 / 📋自选 / 🎯示例 导入';
   if (prevAmt != null && totalAmt !== prevAmt && _comboItems.length) { const b = el.querySelector('b'); if (b) v3Flash(b, totalAmt > prevAmt); }
+  const totalInp = $('#comboTotal');
+  if (totalInp && document.activeElement !== totalInp) totalInp.value = totalAmt > 0 ? Math.round(totalAmt) : '';
+  const monInp = $('#comboTotalMon');
+  if (monInp && document.activeElement !== monInp) monInp.value = totalMon > 0 ? Math.round(totalMon) : '';
+  comboCheckPct();
 }
+/* ---- 列表（每行：名称/代码 + %输入 + 金额输入 + 月追加 + 现价/涨跌 + 迷你走势 + 股息率徽章 + 操作） ---- */
+let _comboExpanded = true;
 function renderComboList() {
   const wrap = $('#comboListWrap');
   if (!wrap) return;
-  if (!_comboItems.length) { wrap.innerHTML = ''; renderComboTotals(); return; }
-  const rows = _comboItems.map((it, i) => `
-    <div style="display:flex;gap:6px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--line);flex-wrap:wrap" data-crow="${i}">
-      <span style="min-width:110px"><b>${esc(it.name || it.code)}</b> <span style="color:var(--muted);font-size:11px">${it.code}</span></span>
-      <span style="font-size:11px;color:var(--sub)">初始</span><input type="number" data-amt="${i}" value="${it.amount || 0}" style="width:90px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
-      <span style="font-size:11px;color:var(--sub)">月追加</span><input type="number" data-mon="${i}" value="${it.monthly || 0}" style="width:80px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
+  if (!_comboItems.length) { wrap.innerHTML = '<div class="hint" style="margin-bottom:4px">① 搜索加股 → ② 设比例或金额 → ③ 命名保存</div>'; renderComboTotals(); renderComboDonut(); return; }
+  const t = comboSumAmt();
+  /* >10 只自适应折叠（验收 11 条）：折叠=只显名称+占比+徽章，点开全卡 */
+  const compact = _comboItems.length > 10 && !_comboExpanded;
+  const rows = _comboItems.map((it, i) => {
+    const pct = t > 0 ? (it.amount || 0) / t * 100 : 0;
+    if (compact) {
+      return `<div style="display:flex;gap:6px;align-items:center;padding:4px 6px;border-bottom:1px solid var(--line);cursor:pointer" data-crow="${i}" title="点开展开">
+        <span style="flex:1"><b>${esc(it.name || it.code)}</b> <span style="color:var(--muted);font-size:10px">${it.code}</span></span>
+        <span style="font-size:11px;color:var(--gold)">${pct.toFixed(1)}%</span>
+        <span class="combo-dy" data-dy="${i}" style="font-size:10px;color:var(--muted);min-width:44px"></span>
+      </div>`;
+    }
+    return `<div style="display:flex;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid var(--line);flex-wrap:wrap" data-crow="${i}">
+      <span style="min-width:104px"><b>${esc(it.name || it.code)}</b> <span style="color:var(--muted);font-size:10px">${it.code}</span></span>
+      <span style="font-size:11px;color:var(--sub)">%</span><input type="number" data-pct="${i}" value="${pct.toFixed(pct % 1 === 0 ? 0 : 1)}" min="0" max="100" style="width:52px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px" title="目标占比（改这个=其余等比缩放）">
+      <span style="font-size:11px;color:var(--sub)">金额</span><input type="number" data-amt="${i}" value="${it.amount || 0}" style="width:86px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
+      <span style="font-size:11px;color:var(--sub)">月追加</span><input type="number" data-mon="${i}" value="${it.monthly || 0}" style="width:72px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
+      <span class="combo-card-meta" data-meta="${i}" style="font-size:10px;color:var(--muted);min-width:70px">…</span>
+      <span class="combo-spark" data-spark="${i}" style="width:56px;height:20px;display:inline-block"></span>
+      <span class="combo-dy" data-dy="${i}" style="font-size:10px;color:var(--muted);min-width:44px"></span>
       <button type="button" class="chip" data-up="${i}" title="上移">↑</button>
       <button type="button" class="chip" data-dn="${i}" title="下移">↓</button>
       <button type="button" class="chip" data-rm="${i}" style="color:#e05a5a">✕</button>
-    </div>`).join('');
-  wrap.innerHTML = rows;
-  wrap.querySelectorAll('[data-amt]').forEach(inp => inp.onchange = () => { comboPushUndo(); _comboItems[+inp.dataset.amt].amount = parseFloat(inp.value) || 0; renderComboTotals(); });
-  wrap.querySelectorAll('[data-mon]').forEach(inp => inp.onchange = () => { comboPushUndo(); _comboItems[+inp.dataset.mon].monthly = parseFloat(inp.value) || 0; renderComboTotals(); });
-  wrap.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { comboPushUndo(); const i = +b.dataset.up; if (i > 0) { const t = _comboItems[i]; _comboItems[i] = _comboItems[i - 1]; _comboItems[i - 1] = t; renderComboList(); } });
-  wrap.querySelectorAll('[data-dn]').forEach(b => b.onclick = () => { comboPushUndo(); const i = +b.dataset.dn; if (i < _comboItems.length - 1) { const t = _comboItems[i]; _comboItems[i] = _comboItems[i + 1]; _comboItems[i + 1] = t; renderComboList(); } });
-  wrap.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { comboPushUndo(); _comboItems.splice(+b.dataset.rm, 1); renderComboList(); });
+    </div>`;
+  }).join('');
+  wrap.innerHTML = (_comboItems.length > 10
+    ? `<div style="margin-bottom:4px"><button type="button" class="chip" id="comboExpandToggle" style="font-size:10px">${_comboExpanded ? '📕 折叠（只显占比）' : '📖 展开全部'}</button> <span style="font-size:10px;color:var(--muted)">${_comboItems.length} 只（>10 自动折叠）</span></div>`
+    : '') + rows;
+  const et = $('#comboExpandToggle');
+  if (et) et.onclick = () => { _comboExpanded = !_comboExpanded; renderComboList(); };
+  if (compact) {
+    wrap.querySelectorAll('[data-crow]').forEach(div => div.onclick = () => { _comboExpanded = true; renderComboList(); });
+    renderComboTotals(); renderComboDonut(); comboLoadCardData(); return;
+  }
+  /* % 输入 → 等比缩放（其余同缩），金额=total×%/100 */
+  wrap.querySelectorAll('[data-pct]').forEach(inp => inp.onchange = () => {
+    comboPushUndo(); const i = +inp.dataset.pct; let v = parseFloat(inp.value);
+    if (isNaN(v) || v < 0) v = 0;
+    if (v > 100) { toast('单只不能超 100%'); v = 100; }
+    comboScaleTo(i, v); renderComboList();
+  });
+  /* 金额输入 → 直接改金额，% 派生 */
+  wrap.querySelectorAll('[data-amt]').forEach(inp => inp.onchange = () => {
+    comboPushUndo(); const i = +inp.dataset.amt; let v = parseFloat(inp.value);
+    if (isNaN(v) || v < 0) v = 0;
+    _comboItems[i].amount = v; _comboTotal = comboSumAmt(); renderComboList();
+  });
+  /* 月追加输入 */
+  wrap.querySelectorAll('[data-mon]').forEach(inp => inp.onchange = () => {
+    comboPushUndo(); const i = +inp.dataset.mon; let v = parseFloat(inp.value);
+    if (isNaN(v) || v < 0) v = 0;
+    _comboItems[i].monthly = v; renderComboTotals();
+  });
+  wrap.querySelectorAll('[data-up]').forEach(b => b.onclick = () => { comboPushUndo(); const i = +b.dataset.up; if (i > 0) { const t2 = _comboItems[i]; _comboItems[i] = _comboItems[i - 1]; _comboItems[i - 1] = t2; renderComboList(); } });
+  wrap.querySelectorAll('[data-dn]').forEach(b => b.onclick = () => { comboPushUndo(); const i = +b.dataset.dn; if (i < _comboItems.length - 1) { const t2 = _comboItems[i]; _comboItems[i] = _comboItems[i + 1]; _comboItems[i + 1] = t2; renderComboList(); } });
+  wrap.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { comboPushUndo(); _comboItems.splice(+b.dataset.rm, 1); _comboTotal = comboSumAmt(); renderComboList(); });
   renderComboTotals();
+  renderComboDonut();
+  comboLoadCardData();
+}
+/* 个股卡片数据：现价/涨跌（getStockQuotes）+ 迷你走势（getKline 60日）+ 股息率档（fetchDividendsOne） */
+let _comboCardLoading = false;
+async function comboLoadCardData() {
+  if (_comboCardLoading || !_comboItems.length) return;
+  _comboCardLoading = true;
+  const codes = _comboItems.map(x => x.code);
+  let snap = {};
+  try { snap = await DL.getStockQuotes(codes); } catch (e) {}
+  _comboItems.forEach((it, i) => {
+    const p = snap[it.code] && snap[it.code].price;
+    const meta = document.querySelector(`[data-meta="${i}"]`);
+    if (meta) meta.textContent = p != null ? `现价 ${p.toFixed(2)}` : '行情—';
+  });
+  /* 迷你走势（60日收盘 sparkline）+ 涨跌色 */
+  const start = (() => { const d = new Date(); d.setDate(d.getDate() - 120); return d.toISOString().slice(0, 10); })();
+  const today = DL.todayStr ? DL.todayStr() : new Date().toISOString().slice(0, 10);
+  _comboItems.forEach(async (it, i) => {
+    try {
+      const kl = await DL.getKline(it.code, start, today);
+      const dates = Object.keys(kl).sort();
+      if (dates.length >= 5) {
+        const closes = dates.map(d => kl[d]);
+        const last = closes[closes.length - 1], prev = closes[closes.length - 2];
+        const chg = prev > 0 ? (last - prev) / prev * 100 : 0;
+        const sp = document.querySelector(`[data-spark="${i}"]`);
+        if (sp) {
+          const min = Math.min(...closes), max = Math.max(...closes);
+          const range = (max - min) || 1, n = closes.length;
+          const pts = closes.map((c, k) => `${(k / (n - 1) * 50).toFixed(1)},${(18 - (c - min) / range * 16).toFixed(1)}`).join(' ');
+          const color = chg >= 0 ? '#e05a5a' : '#4caf7d';  // A股红涨绿跌
+          sp.innerHTML = `<svg width="56" height="20" viewBox="0 0 50 20" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.2"/></svg>`;
+          const meta = document.querySelector(`[data-meta="${i}"]`);
+          if (meta) meta.innerHTML += ` <span style="color:${color}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span>`;
+        }
+      } else {
+        const sp = document.querySelector(`[data-spark="${i}"]`);
+        if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:9px">—</span>';
+      }
+    } catch (e) {
+      const sp = document.querySelector(`[data-spark="${i}"]`);
+      if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:9px">—</span>';
+    }
+    /* 股息率档徽章 + 分红贡献占比（环形图分红视图数据） */
+    try {
+      const divs = await DL.fetchDividendsOne(it.code);
+      const p = snap[it.code] && snap[it.code].price;
+      if (divs && divs.length && p > 0) {
+        const y = parseInt(today.slice(0, 4), 10);
+        const lastYear = divs.filter(d => d.ex && parseInt(d.ex.slice(0, 4), 10) === y - 1);
+        const sum = lastYear.reduce((s, d) => s + (d.cash || 0), 0);
+        if (sum > 0) {
+          const dy = sum / p * 100;
+          if (!_comboDonutDiv) _comboDonutDiv = {};
+          _comboDonutDiv[i] = (it.amount || 0) * dy;  // 分红贡献=金额×股息率（估算）
+          const tag = dy >= 5 ? '高息' : dy >= 3 ? '中息' : '低息';
+          const col = dy >= 5 ? '#d9a441' : dy >= 3 ? '#5aa9e6' : 'var(--muted)';
+          const el2 = document.querySelector(`[data-dy="${i}"]`);
+          if (el2) el2.innerHTML = `<span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:9px">${tag} ${dy.toFixed(1)}%</span>`;
+        }
+      }
+    } catch (e) {}
+  });
+  _comboCardLoading = false;
+  if (_comboDonutMode === 'div') renderComboDonut();
 }
 function renderComboSaved() {
   const el = $('#comboSaved');
   if (!el) return;
   const c = DL.loadCombos();
   el.innerHTML = (c.combos && c.combos.length)
-    ? '已保存：' + c.combos.map((cm, i) => `<span style="margin-right:8px">${esc(cm.name)}（${cm.items.length}只）<a href="javascript:void(0)" data-load="${i}" style="color:#5aa9e6">载入</a> <a href="javascript:void(0)" data-del="${i}" style="color:#e05a5a">删</a></span>`).join('')
+    ? '已保存 ' + c.combos.length + ' 个：' + c.combos.map((cm, i) => `<span style="margin-right:8px">${esc(cm.name)}（${cm.items.length}只）${cm.id === c.activeId ? ' <b style="color:var(--gold)">●当前</b>' : ''} <span style="color:var(--muted);font-size:10px">${cm.savedAt ? new Date(cm.savedAt).toLocaleString().slice(5, 16) : ''}</span></span>`).join('')
     : '尚无已保存组合';
-  el.querySelectorAll('[data-load]').forEach(a => a.onclick = () => { const c2 = DL.loadCombos(); const cm = c2.combos[+a.dataset.load]; if (cm) { _comboItems = JSON.parse(JSON.stringify(cm.items)); _comboName = cm.name; renderComboList(); toast('已载入「' + cm.name + '」'); } });
-  el.querySelectorAll('[data-del]').forEach(a => a.onclick = () => { const c2 = DL.loadCombos(); c2.combos.splice(+a.dataset.del, 1); DL.saveCombos(c2); renderComboSaved(); });
+}
+function renderComboSel() {
+  const sel = $('#comboSel');
+  if (!sel) return;
+  const c = DL.loadCombos();
+  sel.innerHTML = '<option value="">— 选择组合 —</option>' + (c.combos || []).map(cm => `<option value="${cm.id}" ${cm.id === c.activeId ? 'selected' : ''}>${esc(cm.name)}（${cm.items.length}只）</option>`).join('');
+}
+function comboLoad(id) {
+  const c = DL.loadCombos();
+  const cm = c.combos.find(x => x.id === id);
+  if (!cm) return;
+  _comboItems = JSON.parse(JSON.stringify(cm.items));
+  _comboName = cm.name; _comboId = cm.id;
+  _comboTotal = comboSumAmt();
+  _comboCashPct = cm.cashPct || 0;
+  c.activeId = id; DL.saveCombos(c);
+  const ni = $('#comboName'); if (ni) ni.value = _comboName;
+  const ci = $('#comboCashPct'); if (ci) ci.value = _comboCashPct || '';
+  renderComboList(); renderComboSaved(); renderComboSel();
+}
+function comboPersist() {
+  const c = DL.loadCombos();
+  const name = (_comboName || '').trim() || '我的组合';
+  const cashPct = _comboCashPct || 0;
+  if (_comboId) {
+    const cm = c.combos.find(x => x.id === _comboId);
+    if (cm) { cm.name = name; cm.items = JSON.parse(JSON.stringify(_comboItems)); cm.savedAt = Date.now(); cm.cashPct = cashPct; }
+    else { const id = 'c' + Date.now(); c.combos.push({ id, name, items: JSON.parse(JSON.stringify(_comboItems)), savedAt: Date.now(), cashPct }); _comboId = id; }
+  } else {
+    const id = 'c' + Date.now();
+    c.combos.push({ id, name, items: JSON.parse(JSON.stringify(_comboItems)), savedAt: Date.now(), cashPct });
+    _comboId = id;
+  }
+  if (c.combos.length > 8) c.combos.shift();
+  c.activeId = _comboId;
+  DL.saveCombos(c);
+  renderComboSaved(); renderComboSel();
+  return name;
 }
 async function renderComboCard() {
   const body = $('#comboBody');
   if (!body) return;
   const c = DL.loadCombos();
-  if (c.activeId) { const ac = c.combos.find(x => x.id === c.activeId); if (ac) { _comboItems = JSON.parse(JSON.stringify(ac.items)); _comboName = ac.name; } }
-  renderComboList();
-  renderComboSaved();
-  const addBtn = $('#comboAdd');
-  if (addBtn && !addBtn.dataset.bound) {
-    addBtn.dataset.bound = '1';
-    addBtn.onclick = async () => {
-      const v = ($('#comboSearch').value || '').trim();
-      if (!v) { toast('先输入代码或名称'); return; }
-      const r = await comboResolve(v);
-      if (!r) { toast('未找到：' + v); return; }
-      if (_comboItems.some(x => x.code === r.code)) { toast('已在组合中：' + r.name); return; }
-      comboPushUndo();
-      _comboItems.push({ code: r.code, name: r.name, amount: 100000, monthly: 0 });
-      $('#comboSearch').value = '';
-      renderComboList();
-    };
-  }
+  if (c.activeId) { const ac = c.combos.find(x => x.id === c.activeId); if (ac) { _comboItems = JSON.parse(JSON.stringify(ac.items)); _comboName = ac.name; _comboId = ac.id; _comboTotal = comboSumAmt(); _comboCashPct = ac.cashPct || 0; } }
+  const ni = $('#comboName'); if (ni) ni.value = _comboName;
+  const ci2 = $('#comboCashPct'); if (ci2) ci2.value = _comboCashPct || '';
+  renderComboSel(); renderComboList(); renderComboSaved();
+  const $b = (id, fn) => { const b = $(id); if (b && !b.dataset.bound) { b.dataset.bound = '1'; b.onclick = fn; } return b; };
+  $b('comboAdd', async () => {
+    const v = ($('#comboSearch').value || '').trim();
+    if (!v) { toast('先输入代码或名称'); return; }
+    const r = await comboResolve(v);
+    if (!r) { toast('未找到：' + v); return; }
+    if (_comboItems.some(x => x.code === r.code)) { toast('已在组合中：' + r.name); return; }
+    comboPushUndo();
+    const t = _comboTotal > 0 ? _comboTotal : 1000000;
+    const n2 = _comboItems.length + 1;
+    const amt = Math.round(t / n2);
+    _comboItems.forEach(x => x.amount = amt);
+    _comboItems.push({ code: r.code, name: r.name, amount: t - amt * (_comboItems.length - 1), monthly: 0 });
+    _comboTotal = t;
+    $('#comboSearch').value = '';
+    renderComboList();
+  });
   const sr = $('#comboSearch');
-  if (sr && !sr.dataset.bound) { sr.dataset.bound = '1'; sr.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addBtn && addBtn.click(); } }); }
-  const fromHold = $('#comboFromHold');
-  if (fromHold && !fromHold.dataset.bound) { fromHold.dataset.bound = '1'; fromHold.onclick = () => { const holds = loadHoldings(); if (!holds.length) { toast('无持仓可导入'); return; } comboPushUndo(); holds.forEach(h => { if (!_comboItems.some(x => x.code === h.code)) _comboItems.push({ code: h.code, name: h.name || h.code, amount: (h.cost || 10) * (h.shares || 100), monthly: 0 }); }); renderComboList(); toast('已从持仓导入 ' + holds.length + ' 只'); }; }
-  const fromWl = $('#comboFromWl');
-  if (fromWl && !fromWl.dataset.bound) { fromWl.dataset.bound = '1'; fromWl.onclick = async () => { const wl = homeState.watchlist && homeState.watchlist.length ? homeState.watchlist : await DL.Watchlist.list(); if (!wl.length) { toast('自选为空'); return; } comboPushUndo(); wl.forEach(w => { if (!_comboItems.some(x => x.code === w.code)) _comboItems.push({ code: w.code, name: w.name || w.code, amount: 100000, monthly: 0 }); }); renderComboList(); toast('已从自选导入 ' + wl.length + ' 只'); }; }
-  const fromDemo = $('#comboFromDemo');
-  if (fromDemo && !fromDemo.dataset.bound) { fromDemo.dataset.bound = '1'; fromDemo.onclick = () => { comboPushUndo(); [['600036', '招商银行', 500000, 3000], ['601398', '工商银行', 300000, 2000], ['600900', '长江电力', 200000, 1000]].forEach(([code, name, amount, monthly]) => { if (!_comboItems.some(x => x.code === code)) _comboItems.push({ code, name, amount, monthly }); }); renderComboList(); toast('已载入示例组合（招行/工行/长电）'); }; }
+  if (sr && !sr.dataset.bound) { sr.dataset.bound = '1'; sr.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const b = $('#comboAdd'); if (b) b.click(); } }); }
+  $b('comboFromHold', () => { const holds = loadHoldings(); if (!holds.length) { toast('无持仓可导入'); return; } comboPushUndo(); holds.forEach(h => { if (!_comboItems.some(x => x.code === h.code)) _comboItems.push({ code: h.code, name: h.name || h.code, amount: (h.cost || 10) * (h.shares || 100), monthly: 0 }); }); _comboTotal = comboSumAmt(); renderComboList(); toast('已从持仓导入 ' + holds.length + ' 只'); });
+  $b('comboFromWl', async () => { const wl = homeState.watchlist && homeState.watchlist.length ? homeState.watchlist : await DL.Watchlist.list(); if (!wl.length) { toast('自选为空'); return; } comboPushUndo(); wl.forEach(w => { if (!_comboItems.some(x => x.code === w.code)) _comboItems.push({ code: w.code, name: w.name || w.code, amount: 100000, monthly: 0 }); }); _comboTotal = comboSumAmt(); renderComboList(); toast('已从自选导入 ' + wl.length + ' 只'); });
+  $b('comboFromDemo', () => { comboPushUndo(); [['600036', '招商银行', 400000, 3000], ['601398', '工商银行', 300000, 2000], ['600900', '长江电力', 300000, 1000]].forEach(([code, name, amount, monthly]) => { if (!_comboItems.some(x => x.code === code)) _comboItems.push({ code, name, amount, monthly }); }); _comboTotal = comboSumAmt(); renderComboList(); toast('已载入示例组合（招行/工行/长电 4:3:3）'); });
+  $b('comboEqual', () => { comboPushUndo(); comboEqualize(); renderComboList(); toast('已等权分配（余数补第一只）'); });
+  /* 总投资输入 → 等比缩放全部 */
+  const totInp = $('#comboTotal');
+  if (totInp && !totInp.dataset.bound) { totInp.dataset.bound = '1'; totInp.onchange = () => { const v = parseFloat(totInp.value); if (isNaN(v) || v < 0) { totInp.value = ''; return; } if (!_comboItems.length) { _comboTotal = v; return; } comboPushUndo(); const old = comboSumAmt(); if (old > 0) { _comboItems.forEach(x => x.amount = Math.round(v * (x.amount || 0) / old)); } else { _comboItems.forEach((x, i) => x.amount = Math.round(v / _comboItems.length)); _comboItems[0].amount += v - Math.round(v / _comboItems.length) * _comboItems.length; } _comboTotal = v; comboFixRounding(); renderComboList(); }; }
+  /* 总月追加 → 按比例拆 */
+  const monInp = $('#comboTotalMon');
+  if (monInp && !monInp.dataset.bound) { monInp.dataset.bound = '1'; monInp.onchange = () => { const v = parseFloat(monInp.value); if (isNaN(v) || v < 0) { monInp.value = ''; return; } if (!_comboItems.length) return; comboPushUndo(); comboDistributeMonthly(v); renderComboList(); toast('已按金额占比拆月追加（低配优先为近似）'); }; }
+  /* 组合名输入 */
+  const nmInp = $('#comboName');
+  if (nmInp && !nmInp.dataset.bound) { nmInp.dataset.bound = '1'; nmInp.onchange = () => { _comboName = nmInp.value.trim(); }; }
+  /* 现金仓位输入（组合级配置，随组合保存） */
+  const cashInp = $('#comboCashPct');
+  if (cashInp && !cashInp.dataset.bound) { cashInp.dataset.bound = '1'; cashInp.onchange = () => { let v = parseFloat(cashInp.value); if (isNaN(v) || v < 0) v = 0; if (v > 100) { toast('现金仓位不能超 100%'); v = 100; } _comboCashPct = v; comboCheckPct(); toast('现金仓位 ' + v + '%（按 1.5%/年滚入）'); }; }
+  /* 组合管理 */
+  $b('comboNew', () => { comboPushUndo(); _comboItems = []; _comboName = ''; _comboId = null; _comboTotal = 0; const n2 = $('#comboName'); if (n2) n2.value = ''; const s2 = $('#comboSel'); if (s2) s2.value = ''; renderComboList(); renderComboSaved(); renderComboSel(); toast('新建组合（未保存）'); });
+  $b('comboRename', () => { if (!_comboId) { toast('先保存组合再重命名'); return; } const nm = prompt('新名字：', _comboName); if (nm && nm.trim()) { _comboName = nm.trim(); comboPersist(); toast('已重命名「' + _comboName + '」'); } });
+  $b('comboDup', () => { if (!_comboItems.length) { toast('组合为空'); return; } comboPushUndo(); const c2 = DL.loadCombos(); const id = 'c' + Date.now(); const name = (_comboName || '组合') + ' 副本'; c2.combos.push({ id, name, items: JSON.parse(JSON.stringify(_comboItems)), savedAt: Date.now() }); if (c2.combos.length > 8) c2.combos.shift(); c2.activeId = id; DL.saveCombos(c2); _comboId = id; _comboName = name; const n2 = $('#comboName'); if (n2) n2.value = name; renderComboSaved(); renderComboSel(); toast('已复制为「' + name + '」'); });
+  $b('comboDel', () => { if (!_comboId) { toast('当前组合未保存，无需删除'); return; } const c2 = DL.loadCombos(); const cm = c2.combos.find(x => x.id === _comboId); if (!cm) return; if (!confirm('删除组合「' + cm.name + '」？此操作不可恢复')) return; c2.combos = c2.combos.filter(x => x.id !== _comboId); if (c2.activeId === _comboId) c2.activeId = c2.combos.length ? c2.combos[c2.combos.length - 1].id : null; DL.saveCombos(c2); _comboId = null; _comboItems = []; _comboName = ''; _comboTotal = 0; const n2 = $('#comboName'); if (n2) n2.value = ''; renderComboSel(); renderComboList(); renderComboSaved(); toast('已删除'); });
+  const sel = $('#comboSel');
+  if (sel && !sel.dataset.bound) { sel.dataset.bound = '1'; sel.onchange = () => { if (sel.value) comboLoad(sel.value); }; }
   const saveBtn = $('#comboSave');
-  if (saveBtn && !saveBtn.dataset.bound) { saveBtn.dataset.bound = '1'; saveBtn.onclick = () => { if (!_comboItems.length) { toast('组合为空'); return; } const c2 = DL.loadCombos(); const id = 'c' + Date.now(); const name = '组合' + (c2.combos.length + 1); c2.combos.push({ id, name, items: JSON.parse(JSON.stringify(_comboItems)), savedAt: Date.now() }); if (c2.combos.length > 8) c2.combos.shift(); c2.activeId = id; DL.saveCombos(c2); renderComboSaved(); toast('已保存「' + name + '」'); }; }
+  if (saveBtn && !saveBtn.dataset.bound) { saveBtn.dataset.bound = '1'; saveBtn.onclick = () => { if (!_comboItems.length) { toast('组合为空'); return; } const name = comboPersist(); toast('已保存「' + name + '」'); }; }
   const undoBtn = $('#comboUndo');
   if (undoBtn && !undoBtn.dataset.bound) { undoBtn.dataset.bound = '1'; undoBtn.onclick = comboUndo; }
   const runBtn = $('#comboRun');
-  if (runBtn && !runBtn.dataset.bound) { runBtn.dataset.bound = '1'; runBtn.onclick = () => { if (!_comboItems.length) { toast('组合为空，先加股'); return; } const c2 = DL.loadCombos(); if (c2.activeId) { const ac = c2.combos.find(x => x.id === c2.activeId); if (ac) { ac.items = JSON.parse(JSON.stringify(_comboItems)); DL.saveCombos(c2); } } switchTab('pfbt'); setTimeout(() => { const sel = $('#pfbtComboSel'); if (sel) { sel.value = c2.activeId || ''; } const run = $('#pfbtRun'); if (run) run.click(); }, 300); }; }
-  /* Ctrl+Z 撤销 */
-  /* v3.0 U14：快捷键（Ctrl+Z 撤销 / Ctrl+S 保存组合 / Ctrl+Enter 运行体检） */
+  if (runBtn && !runBtn.dataset.bound) { runBtn.dataset.bound = '1'; runBtn.onclick = () => { if (!_comboItems.length) { toast('组合为空，先加股'); return; } const name = comboPersist(); switchTab('pfbt'); setTimeout(() => { const sel2 = $('#pfbtComboSel'); if (sel2) { sel2.innerHTML = ''; const c3 = DL.loadCombos(); (c3.combos || []).forEach(cm => { const o = document.createElement('option'); o.value = cm.id; o.textContent = cm.name + '（' + cm.items.length + '只）'; sel2.appendChild(o); }); sel2.value = _comboId || ''; } const run = $('#pfbtRun'); if (run) run.click(); }, 300); }; }
+  /* 环形图视图切换（金额/分红） */
+  $b('comboDonutMode', () => { _comboDonutMode = _comboDonutMode === 'amt' ? 'div' : 'amt'; renderComboDonut(); });
+  /* 快捷键（Ctrl+Z 撤销 / Ctrl+S 保存 / Ctrl+Enter 回测） */
   document.addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { if (typeof comboUndo === 'function') { e.preventDefault(); comboUndo(); } }

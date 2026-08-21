@@ -2581,10 +2581,14 @@ function calcComboBacktest(combo, pool, opts) {
   const monthlyMode = opts.monthlyMode || 'weight';
   const reinvest = opts.reinvest !== false;
   const taxRate = opts.taxRate || 0;
+  /* v1（2026-08-22）：现金仓位——初始投入留 cashPct% 现金，按 cashRate 年化滚入（默认 1.5%，货基/短债近似）；月追加全额买入；口径标注见驾驶舱 */
+  const cashPct = opts.cashPct || 0;
+  const cashRate = opts.cashRate != null ? opts.cashRate : 1.5;
   const from = (() => { const t = new Date(); t.setDate(t.getDate() - years * 366); return t.toISOString().slice(0, 10); })();
   const totalMonthly = (combo || []).reduce((s, x) => s + (x.monthly || 0), 0);
   const totalAmount = (combo || []).reduce((s, x) => s + (x.amount || 0), 0);
   const rows = [];
+  const scale = cashPct > 0 ? (1 - cashPct / 100) : 1;
   for (const it of combo) {
     const p = pool[it.code];
     if (!p || !p.kline || !Object.keys(p.kline).length) continue;
@@ -2599,27 +2603,46 @@ function calcComboBacktest(combo, pool, opts) {
       const pct = last && last.pct != null ? last.pct : 50;
       monthly = (it.monthly || 0) * (pct < 30 ? 2 : pct > 70 ? 0.5 : 1);
     }
-    const sim = simulateOne(it.amount || 0, monthly, kline, p.divs, reinvest, taxRate);
+    const sim = simulateOne((it.amount || 0) * scale, monthly, kline, p.divs, reinvest, taxRate);
     if (!sim) continue;
-    rows.push({ code: it.code, name: it.name || it.code, amount: it.amount || 0, monthly, sim });
+    rows.push({ code: it.code, name: it.name || it.code, amount: (it.amount || 0) * scale, monthly, sim });
+  }
+  /* 现金仓位行：cash0=初始现金，按 cashRate 年化复利滚入（月追加现金部分不另计，口径=初始留现金） */
+  if (cashPct > 0 && totalAmount > 0 && rows.length) {
+    const cash0 = totalAmount * cashPct / 100;
+    const rate = cashRate / 100;
+    const t0 = new Date(from).getTime();
+    rows.push({
+      code: '__CASH__', name: '现金仓位(' + cashPct + '%,年化' + cashRate + '%)', amount: cash0, monthly: 0,
+      sim: { daily: null, cumDiv: 0, _cashRow: { cash0, rate, t0 } }
+    });
   }
   if (!rows.length) return null;
   /* 组合汇总：按日期对齐 */
   const allDates = [];
   const dateSet = {};
-  rows.forEach(r => r.sim.daily.forEach(dd => { if (!dateSet[dd.date]) { dateSet[dd.date] = true; allDates.push(dd.date); } }));
+  rows.forEach(r => r.sim.daily ? r.sim.daily.forEach(dd => { if (!dateSet[dd.date]) { dateSet[dd.date] = true; allDates.push(dd.date); } }) : null);
   allDates.sort();
   const totalAsset = allDates.map(d => {
     let value = 0, invested = 0, cumDiv = 0;
-    rows.forEach(r => { const dd = r.sim.daily.find(x => x.date === d); if (dd) { value += dd.value; invested += dd.invested; cumDiv += dd.cumDiv; } });
+    rows.forEach(r => {
+      if (r.sim._cashRow) {
+        const yrs = Math.max(0, (new Date(d).getTime() - r.sim._cashRow.t0) / 86400000 / 365.25);
+        value += r.sim._cashRow.cash0 * Math.pow(1 + r.sim._cashRow.rate, yrs);
+        invested += r.sim._cashRow.cash0;
+        return;
+      }
+      const dd = r.sim.daily.find(x => x.date === d); if (dd) { value += dd.value; invested += dd.invested; cumDiv += dd.cumDiv; }
+    });
     return { d, value: +value.toFixed(2), invested: +invested.toFixed(2), cumDiv: +cumDiv.toFixed(2) };
   });
   const last = totalAsset[totalAsset.length - 1];
   /* 三问卡 */
   const divByYear = {};
-  rows.forEach(r => r.sim.daily.forEach(dd => { const y = dd.date.slice(0, 4); if (dd.cumDiv > 0 && r.sim.daily.find(x => x.date === dd.date).cumDiv > 0) {} }));
+  rows.forEach(r => { if (r.sim._cashRow) return; r.sim.daily.forEach(dd => { const y = dd.date.slice(0, 4); if (dd.cumDiv > 0 && r.sim.daily.find(x => x.date === dd.date).cumDiv > 0) {} }); });
   /* 年度分红：各股按年末 cumDiv 增量（跨年差=该年分红） */
   rows.forEach(r => {
+    if (r.sim._cashRow) return;
     const byYear = {};
     r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; });
     const ys = Object.keys(byYear).sort();
@@ -2636,8 +2659,8 @@ function calcComboBacktest(combo, pool, opts) {
   /* 年分红：最近完整年的分红（divByYearOut 最大值年） */
   const ys = Object.keys(divByYearOut).sort();
   const yearDiv = ys.length ? divByYearOut[ys[ys.length - 1]] : 0;
-  /* 每只贡献 */
-  const perStock = rows.map(r => ({
+  /* 每只贡献（排除现金行） */
+  const perStock = rows.filter(r => !r.sim._cashRow).map(r => ({
     code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
     finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested,
     cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
@@ -2652,7 +2675,7 @@ function calcComboBacktest(combo, pool, opts) {
     if (!yearEnd) return;
     const wt = {};
     let sum = 0;
-    rows.forEach(r => { const dd = r.sim.daily.find(x => x.date === yearEnd.d); const v = dd ? dd.value : 0; wt[r.code] = v; sum += v; });
+    rows.forEach(r => { const dd = r.sim._cashRow ? null : (r.sim.daily.find(x => x.date === yearEnd.d)); const v = dd ? dd.value : 0; wt[r.code] = v; sum += v; });
     Object.keys(wt).forEach(c => { wt[c] = sum > 0 ? wt[c] / sum * 100 : 0; });
     weightEvol.push({ y, weights: wt });
   });
