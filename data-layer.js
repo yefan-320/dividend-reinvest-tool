@@ -2516,10 +2516,153 @@ window.DL = {
   /* v1.9.6 新增：结论行规则树 */
   divTrendBadAt, coverageAt, ruleVerdict, RULE_STATS, RULE_TIER_LABEL,
   /* v1.9.2 新增：组合级回测 */
-  calcPortfolioBacktest,
+  calcPortfolioBacktest, simulateOne, calcComboBacktest, loadCombos, saveCombos,
   /* v1.9.18 新增：国债正式源刷新（中国货币网）；getter 实时读取（防导出快照陈旧） */
   refreshTreasury,
   get TREASURY_NOW() { return TREASURY_NOW; },
   get TREASURY_ASOF() { return TREASURY_ASOF; },
 }
 })();
+
+/* ========== v3.0 组合构建器引擎（主人 00:12/00:36 拍板） ========== */
+/* 单股模拟（精简版 simulate，供组合工作台/驾驶舱复用）
+ * principal 初始金额, monthly 月追加, closes {d:price}, dividends [{ex,dps}], reinvest 复投, taxRate 税 */
+function simulateOne(principal, monthly, closes, dividends, reinvest = true, taxRate = 0) {
+  const dates = Object.keys(closes).sort();
+  if (!dates.length) return null;
+  const buyIdx = 0, buyDateReal = dates[0], buyPrice = closes[buyDateReal];
+  if (!(buyPrice > 0)) return null;
+  let shares = Math.floor(principal / buyPrice / 100) * 100;
+  let cashPool = principal - shares * buyPrice;
+  let reinvested = 0, monthlyTotal = 0, lastMonth = null;
+  const divByDate = {};
+  (dividends || []).filter(x => x.ex && x.ex >= buyDateReal && x.dps > 0).forEach(x => { (divByDate[x.ex] = divByDate[x.ex] || []).push(x); });
+  const daily = [];
+  let cumDiv = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const d = dates[i], c = closes[d];
+    const ev = divByDate[d];
+    if (ev && ev.length) {
+      let cash = 0;
+      ev.forEach(x => { cash += shares * x.dps * (1 - taxRate); });
+      cumDiv += cash;
+      cashPool += cash;
+      if (reinvest && cash > 0) {
+        const buyShares = Math.floor(cashPool / c / 100) * 100;
+        if (buyShares >= 100) { const spent = buyShares * c; cashPool -= spent; reinvested += spent; shares += buyShares; }
+      }
+    }
+    if (monthly > 0) {
+      const ym = d.slice(0, 7);
+      if (ym !== lastMonth) {
+        lastMonth = ym;
+        if (ym !== buyDateReal.slice(0, 7)) {
+          cashPool += monthly; monthlyTotal += monthly;
+          const buyShares = Math.floor(cashPool / c / 100) * 100;
+          if (buyShares >= 100) { cashPool -= buyShares * c; shares += buyShares; }
+        }
+      }
+    }
+    daily.push({ date: d, value: +(shares * c + cashPool).toFixed(2), invested: +(principal + monthlyTotal + reinvested).toFixed(2), shares, cashPool: +cashPool.toFixed(2), cumDiv: +cumDiv.toFixed(2) });
+  }
+  const last = daily[daily.length - 1];
+  return { daily, buyDateReal, buyPrice, final: { finalValue: last.value, finalInvested: last.invested, cumDiv: last.cumDiv, shares: last.shares, totalDiv: cumDiv }, cumDiv };
+}
+
+/* 组合构建器回测（v3.0 核心）：
+ * combo = [{code, name, amount(初始金额), monthly(月追加)}]
+ * pool  = { code: { kline, divs, series } }（series 供智慧分位）
+ * opts  = { years, monthlyMode: 'weight'|'fixed'|'smart', reinvest, taxRate }
+ * 月追加口径：weight=按初始金额比例分配总月追加（Σmonthly）；fixed=每只独立值；smart=每只×分位系数(<30→2倍,>70→0.5倍)
+ * 返回：{ totalAsset:[{d,value,invested,cumDiv}], threeQ:{retDivRatio, yearDiv, ...}, perStock:[...], weightEvol, divByYear, span } */
+function calcComboBacktest(combo, pool, opts) {
+  opts = opts || {};
+  const years = opts.years || 10;
+  const monthlyMode = opts.monthlyMode || 'weight';
+  const reinvest = opts.reinvest !== false;
+  const taxRate = opts.taxRate || 0;
+  const from = (() => { const t = new Date(); t.setDate(t.getDate() - years * 366); return t.toISOString().slice(0, 10); })();
+  const totalMonthly = (combo || []).reduce((s, x) => s + (x.monthly || 0), 0);
+  const totalAmount = (combo || []).reduce((s, x) => s + (x.amount || 0), 0);
+  const rows = [];
+  for (const it of combo) {
+    const p = pool[it.code];
+    if (!p || !p.kline || !Object.keys(p.kline).length) continue;
+    const dates = Object.keys(p.kline).sort();
+    const kline = {};
+    dates.forEach(d => { if (d >= from) kline[d] = p.kline[d]; });
+    if (Object.keys(kline).length < 120) continue;
+    let monthly = it.monthly || 0;
+    if (monthlyMode === 'weight' && totalMonthly > 0 && totalAmount > 0) monthly = totalMonthly * (it.amount || 0) / totalAmount;
+    if (monthlyMode === 'smart' && p.series) {
+      const last = p.series[p.series.length - 1];
+      const pct = last && last.pct != null ? last.pct : 50;
+      monthly = (it.monthly || 0) * (pct < 30 ? 2 : pct > 70 ? 0.5 : 1);
+    }
+    const sim = simulateOne(it.amount || 0, monthly, kline, p.divs, reinvest, taxRate);
+    if (!sim) continue;
+    rows.push({ code: it.code, name: it.name || it.code, amount: it.amount || 0, monthly, sim });
+  }
+  if (!rows.length) return null;
+  /* 组合汇总：按日期对齐 */
+  const allDates = [];
+  const dateSet = {};
+  rows.forEach(r => r.sim.daily.forEach(dd => { if (!dateSet[dd.date]) { dateSet[dd.date] = true; allDates.push(dd.date); } }));
+  allDates.sort();
+  const totalAsset = allDates.map(d => {
+    let value = 0, invested = 0, cumDiv = 0;
+    rows.forEach(r => { const dd = r.sim.daily.find(x => x.date === d); if (dd) { value += dd.value; invested += dd.invested; cumDiv += dd.cumDiv; } });
+    return { d, value: +value.toFixed(2), invested: +invested.toFixed(2), cumDiv: +cumDiv.toFixed(2) };
+  });
+  const last = totalAsset[totalAsset.length - 1];
+  /* 三问卡 */
+  const divByYear = {};
+  rows.forEach(r => r.sim.daily.forEach(dd => { const y = dd.date.slice(0, 4); if (dd.cumDiv > 0 && r.sim.daily.find(x => x.date === dd.date).cumDiv > 0) {} }));
+  /* 年度分红：各股按年末 cumDiv 增量（跨年差=该年分红） */
+  rows.forEach(r => {
+    const byYear = {};
+    r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; });
+    const ys = Object.keys(byYear).sort();
+    let prev = 0;
+    ys.forEach(y => { divByYear[y] = (divByYear[y] || 0) + (byYear[y] - prev); prev = byYear[y]; });
+  });
+  /* 逐年分红（对账用） */
+  const divByYearOut = {};
+  Object.keys(divByYear).sort().forEach(y => { divByYearOut[y] = +divByYear[y].toFixed(2); });
+  /* 回本速度：累计分红÷投入成本 */
+  const invested = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  const cumDivTotal = rows.reduce((s, r) => s + r.sim.cumDiv, 0);
+  const divRatio = invested > 0 ? cumDivTotal / invested * 100 : 0;
+  /* 年分红：最近完整年的分红（divByYearOut 最大值年） */
+  const ys = Object.keys(divByYearOut).sort();
+  const yearDiv = ys.length ? divByYearOut[ys[ys.length - 1]] : 0;
+  /* 每只贡献 */
+  const perStock = rows.map(r => ({
+    code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
+    finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested,
+    cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
+    divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
+  }));
+  /* 权重演化（每年末） */
+  const weightEvol = [];
+  const yearsList = {};
+  totalAsset.forEach(t => { yearsList[t.d.slice(0, 4)] = true; });
+  Object.keys(yearsList).sort().forEach(y => {
+    const yearEnd = totalAsset.filter(t => t.d.slice(0, 4) === y).pop();
+    if (!yearEnd) return;
+    const wt = {};
+    let sum = 0;
+    rows.forEach(r => { const dd = r.sim.daily.find(x => x.date === yearEnd.d); const v = dd ? dd.value : 0; wt[r.code] = v; sum += v; });
+    Object.keys(wt).forEach(c => { wt[c] = sum > 0 ? wt[c] / sum * 100 : 0; });
+    weightEvol.push({ y, weights: wt });
+  });
+  return {
+    totalAsset, last, divRatio, cumDivTotal, yearDiv, perStock, weightEvol, divByYear: divByYearOut,
+    span: years, invested, monthlyMode, rows: rows.length,
+  };
+}
+
+/* 组合配置存取（localStorage，存配置不存结果） */
+const COMBO_KEY = 'divtool_combos_v1';
+function loadCombos() { try { return JSON.parse(localStorage.getItem(COMBO_KEY)) || { combos: [], activeId: null }; } catch (e) { return { combos: [], activeId: null }; } }
+function saveCombos(c) { localStorage.setItem(COMBO_KEY, JSON.stringify(c)); }

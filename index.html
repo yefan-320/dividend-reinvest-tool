@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>红利复投工具</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#121a17">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
 <script src="vendor/echarts.min.js"></script>
 <script>
@@ -180,6 +182,28 @@ body{padding-bottom:64px}
 .risk-badge{background:rgba(224,94,90,.15);color:var(--red);border:1px solid rgba(224,94,90,.4);border-radius:4px;padding:0 5px;font-size:11px;margin-left:4px}
 
 </style>
+<style>
+/* ===== v3.0 全工具动效层（CSS 变量+keyframes 一处定义全工具生效） ===== */
+/* 卡片进场 */
+@keyframes v3fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.v3-card { animation: v3fadeUp .35s ease-out both; }
+/* 数字变化高亮（涨绿跌红） */
+@keyframes v3flashGreen { 0% { color: #4caf7d; } 100% { color: inherit; } }
+@keyframes v3flashRed { 0% { color: #e05a5a; } 100% { color: inherit; } }
+.v3-flash-up { animation: v3flashGreen .8s ease-out; }
+.v3-flash-down { animation: v3flashRed .8s ease-out; }
+/* 数据可信度闪烁（⚠️ 徽章） */
+@keyframes v3blink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.v3-blink { animation: v3blink 2.2s ease-in-out infinite; }
+/* 骨架屏微光 */
+@keyframes v3shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.v3-skeleton { background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.10) 50%, rgba(255,255,255,.04) 75%); background-size: 200% 100%; animation: v3shimmer 1.4s infinite; border-radius: 6px; }
+/* 决策渐入（结论卡依次出现） */
+@keyframes v3stepIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+.v3-step { animation: v3stepIn .3s ease-out both; }
+/* reduced-motion：系统“减少动态”时全部关闭 */
+@media (prefers-reduced-motion: reduce) { .v3-card, .v3-flash-up, .v3-flash-down, .v3-blink, .v3-skeleton, .v3-step { animation: none !important; } }
+</style>
 </head>
 <body>
 <!-- 🔒 访问密码锁（2026-08-18：GitHub Pages 公开部署用；SHA-256 校验 + 30 天记住） -->
@@ -267,6 +291,25 @@ body{padding-bottom:64px}
     <div id="homeDivCalendar"></div>
   </div>
   <div class="card" id="pfSample"></div>
+  <div class="card" id="comboCard">
+    <h2 style="cursor:pointer" id="comboTitle">🧮 我的组合 <span class="hint" style="float:right;font-weight:400" id="comboSummary">…</span></h2>
+    <div id="comboBody">
+      <div class="hint" style="margin-bottom:6px">自由组合：搜索加股 → 设初始金额/月追加 → 命名保存 → 点「▶ 回测」看驾驶舱结果</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <input id="comboSearch" placeholder="股票代码 / 名称 / ETF" style="flex:1;min-width:150px;padding:5px 8px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
+        <button type="button" class="chip" id="comboAdd" style="color:var(--gold)">➕ 加股</button>
+        <button type="button" class="chip" id="comboFromHold" title="从我的持仓导入">📥 持仓</button>
+        <button type="button" class="chip" id="comboFromWl" title="从自选池导入">📋 自选</button>
+        <button type="button" class="chip" id="comboFromDemo" title="从示例导入（招行/工行/长电）">🎯 示例</button>
+        <button type="button" class="chip" id="comboSave" style="color:#5aa9e6">💾 保存</button>
+        <button type="button" class="chip" id="comboUndo" title="Ctrl+Z">↩️ 撤销</button>
+        <button type="button" class="btn flexbtn" id="comboRun" style="color:#7ec699">▶ 回测</button>
+      </div>
+      <div id="comboListWrap"></div>
+      <div id="comboTotals" style="font-size:12px;color:var(--sub);margin:6px 0;padding:6px 8px;background:var(--card2);border-radius:8px"></div>
+      <div id="comboSaved" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+    </div>
+  </div>
   <div class="card" id="portfolioCard">
     <!-- P69（2026-08-21）：组合总览紧凑常显行——总仓位·覆盖·触发·今日到账一行+展开箭头，懒加载保留 -->
     <h2 style="cursor:pointer">🧺 组合建仓总览 <span id="pfArrow" style="font-size:12px;color:var(--muted)">▸</span> <span class="hint" style="float:right;font-weight:400" id="pfSummary">…</span></h2>
@@ -434,6 +477,8 @@ body{padding-bottom:64px}
   <div class="card" id="cmpResult" style="display:none">
     <div class="hint err" id="cmpWarn" style="display:none;margin-bottom:8px"></div>
     <h2>总资产走势（同起点买入）</h2>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 2px">🎬 时间轴回放（拖动看各标的走势）：</div>
+    <input type="range" id="cmpTimeline" min="0" max="0" value="0" style="width:100%;accent-color:var(--gold);margin-bottom:4px" disabled>
     <div class="chart" id="cmpChartAsset"></div>
     <h2>收益曲线对比（期初=100 归一化）</h2>
     <div class="chart" id="cmpChartNorm" style="height:240px"></div>
@@ -548,35 +593,36 @@ body{padding-bottom:64px}
 </div>
 </section></div>
 
-<!-- ===== v1.9.2 组合回测 tab ===== -->
+<!-- ===== v3.0 组合驾驶舱 tab ===== -->
 <section id="tab-pfbt" class="tab-panel" style="display:none">
   <div class="card">
-    <h2>🧪 组合级回测（策略体检：验证规则历史上赚不赚钱）</h2>
-    <div class="hint">标的池 = 自选列表（决策台搜索代码 → 点➕，或诊断页点⭐ 添加）· 区间可选 · 对比 4 种策略的历史收益/回撤/胜率。低频操作：策略规则没变就不用重跑。</div>
+    <h2>🧪 我的组合体检（驾驶舱）</h2>
+    <div class="hint">组合来源 = 决策台「🧮 我的组合」（自由输入/组合/金额/月追加）· 有配置自动带入选中的组合</div>
     <div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap">
+      <span style="font-size:12px">组合：</span>
+      <select id="pfbtComboSel" style="padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px;max-width:220px"><option value="">（无组合，去决策台建）</option></select>
       <span style="font-size:12px">区间：</span>
-      <button type="button" class="chip pfbt-y on" data-y="3">3年</button>
+      <button type="button" class="chip pfbt-y" data-y="3">3年</button>
       <button type="button" class="chip pfbt-y" data-y="5">5年</button>
-      <button type="button" class="chip pfbt-y" data-y="10">10年</button>
-      <button type="button" class="btn flexbtn" id="pfbtRun" style="margin-left:8px">▶ 运行组合回测</button>
+      <button type="button" class="chip pfbt-y on" data-y="10">10年</button>
+      <span style="font-size:12px">月追加：</span>
+      <select id="pfbtMode" style="padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px">
+        <option value="weight">按初始权重分配</option>
+        <option value="fixed">每只固定</option>
+        <option value="smart">智慧定投（按分位）</option>
+      </select>
+      <button type="button" class="btn flexbtn" id="pfbtRun" style="margin-left:8px">▶ 运行体检</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap;background:var(--card2);padding:8px 10px;border-radius:8px">
-      <span style="font-size:12px">🧪 金字塔模拟器（自定义档位方案加入对比）：</span>
-      <input id="pfbtCustom" type="text" placeholder="如 80:33,85:33,90:34（档位:权重%）" value="" style="flex:1;min-width:180px;padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px">
-      <button type="button" class="chip" id="pfbtCustomAdd">➕ 加入对比</button>
-      <span style="font-size:11px;color:var(--muted)">预设：<button type="button" class="chip pfbt-preset" data-p="85:33,90:33,95:34">85金字塔</button> <button type="button" class="chip pfbt-preset" data-p="90:100">90单档</button> <button type="button" class="chip pfbt-preset" data-p="80:100">80单档</button> <button type="button" class="chip pfbt-preset" data-p="80:50,90:50">80+90半仓</button></span>
-    </div>
-    <div id="pfbtCustomList" style="font-size:11px;color:var(--muted);margin-bottom:6px"></div>
-    <div id="pfbtResult"><div class="hint">点“运行”开始（拉取自选池 K线+分红，N 只 × 2 请求，约 1-3 分钟）</div></div>
+    <div id="pfbtResult"><div class="hint">点「▶ 运行体检」开始（拉取组合各股 K线+分红，约 1-2 分钟；二次跑命中本地缓存秒出）</div></div>
   </div>
 </section>
 
-<script src="demo-data.js?v=v2.0"></script>
+<script src="demo-data.js?v=v3.0"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v2.0"></script>
+<script src="data-layer.js?v=v3.0"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v2.0';
+const APP_VERSION = 'v3.0';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1280,7 +1326,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   };
   // 版本号
   const ver = $('appVer');
-  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-21 · 若页面异常请强制刷新（下拉或清除缓存）';
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-22 · 若页面异常请强制刷新（下拉或清除缓存）';
 
   // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
   // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
@@ -1299,6 +1345,8 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">🧪 组合回测</button>
 </nav>
-<script src="views.js?v=v2.0"></script>
+<script src="views.js?v=v3.0"></script>
+  /* v3.0 C6：PWA Service Worker 注册（本地服务/HTTPS 环境）——失败静默不影响使用 */
+  try { if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); } } catch (e) {}
 </body>
 </html>
