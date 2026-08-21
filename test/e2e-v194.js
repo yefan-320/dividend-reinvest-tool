@@ -117,24 +117,21 @@ async function main() {
   const bLen1 = await evalJS(`JSON.parse(localStorage.getItem('divtool_watchlist_v1')||'[]').length`);
   check('B: 再次点击加回 ✓ 已自选', bBack && bLen1 === 1, 'len=' + bLen1);
 
-  /* ===== C 路径：组合回测空态 → 内联快捷添加 + 去决策台按钮 ===== */
+  /* ===== C 路径：组合回测无组合空态 → 引导去决策台/示例 ===== */
   await evalJS(`document.querySelector('.wl-card[data-code="600036"] .wl-del').click(); 1`);   // UI 删除（同步刷新 homeState）
   await sleep(800);
   await evalJS(`document.querySelector('[data-tab="pfbt"]').click(); 1`);
   await sleep(600);
   await evalJS(`document.getElementById('pfbtRun').click(); 1`);
-  const cEmpty = await waitFor(`!!document.getElementById('pfbtQuickCode')`);
+  const cEmpty = await waitFor(`!!document.getElementById('pfbtGoHome')`);
   const cTxt = await evalJS(`(document.getElementById('pfbtResult')||{}).innerHTML || ''`);
-  check('C: 空态文案+内联输入+按钮渲染', cEmpty && cTxt.includes('自选为空：搜索代码'), cTxt.replace(/<[^>]+>/g,' ').slice(0,60));
-  await evalJS(`(() => { const i=document.getElementById('pfbtQuickCode'); i.value='601398'; document.getElementById('pfbtQuickAdd').click(); return 1; })()`);
-  const cAdded = await waitFor(`(document.getElementById('pfbtResult')||{}).innerHTML.includes('已加入自选：601398')`);
-  const cLen = await evalJS(`JSON.parse(localStorage.getItem('divtool_watchlist_v1')||'[]').length`);
-  check('C: 内联加自选 601398 成功', cAdded && cLen === 1, 'len=' + cLen);
+  check('C: 无组合空态引导渲染', cEmpty && cTxt.includes('还没有组合'), cTxt.replace(/<[^>]+>/g,' ').slice(0,60));
+  const cDemo = await evalJS(`!!document.getElementById('pfbtDemo')`);
+  check('C: 示例组合按钮渲染', cDemo, 'demoBtn=' + cDemo);
   await evalJS(`document.getElementById('pfbtGoHome').click(); 1`);
   await sleep(500);
   const cHome = await evalJS(`document.getElementById('tab-home').style.display === 'block'`);
-  const cFocus = await evalJS(`document.activeElement && document.activeElement.id === 'homeSearch'`);
-  check('C: 去决策台按钮切 tab+聚焦搜索框', cHome && cFocus, 'home=' + cHome + ' focus=' + cFocus);
+  check('C: 去决策台按钮切 tab', cHome, 'home=' + cHome);
 
   console.log('\n结果:', pass + '/' + (pass + fail), '通过');
   console.log('console 错误:', errs.length, errs.slice(0, 3).join(' | '));

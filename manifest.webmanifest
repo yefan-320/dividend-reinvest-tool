@@ -1,0 +1,9 @@
+{
+  "name": "红利工具",
+  "short_name": "红利工具",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#121a17",
+  "theme_color": "#121a17",
+  "icons": []
+}

@@ -75,16 +75,27 @@ async function main() {
   await sleep(300);
   const ySel = await evalJS(`document.querySelector('.pfbt-y.on').dataset.y`);
   console.log('区间选择:', ySel);
-  // 运行
+  // 运行（无组合→空态引导）
   await evalJS(`document.getElementById('pfbtRun').click(); 1`);
-  await sleep(20000);
+  await sleep(3000);
+  const emptyHtml = await evalJS(`(document.getElementById('pfbtResult')||{}).innerHTML||''`);
+  const hasGuide = emptyHtml.includes('去决策台') && emptyHtml.includes('示例组合');
+  console.log('空态引导:', hasGuide ? '✅' : '❌');
+  // 建组合（直接注入 localStorage）→ 重跑
+  await evalJS(`localStorage.setItem('divtool_combos_v1', JSON.stringify({combos:[{id:'c1',name:'测试组合',items:[{code:'600036',name:'招商银行',amount:500000,monthly:3000},{code:'601398',name:'工商银行',amount:300000,monthly:2000}]}],activeId:'c1'})); location.reload(); 1`);
+  await sleep(3500);
+  await evalJS(`document.querySelector('[data-tab="pfbt"]').click(); 1`);
+  await sleep(600);
+  await evalJS(`document.getElementById('pfbtRun').click(); 1`);
+  await sleep(25000);
   const resHtml = await evalJS(`(document.getElementById('pfbtResult')||{}).innerHTML||''`);
   const txt = resHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200);
-  console.log('回测结果:', txt);
-  const hasTable = resHtml.includes('闭眼全仓') && resHtml.includes('柔性金字塔') && resHtml.includes('风险效率最优');
-  console.log(hasTable ? '  ✅ 策略表 + 结论行渲染' : '  ❌ 结果缺策略/结论');
+  console.log('驾驶舱结果:', txt);
+  const hasCockpit = resHtml.includes('累计分红÷投入成本') && resHtml.includes('期末总资产') && resHtml.includes('cockpitMain');
+  const hasCharts = await evalJS(`!!document.getElementById('cockpitMain') && !!document.getElementById('cockpitMain').querySelector('canvas')`);
+  console.log(hasCockpit && hasCharts ? '  ✅ 驾驶舱三问卡 + 主图渲染' : '  ❌ 驾驶舱缺三问/主图');
   console.log('\nconsole 错误:', errs.length, errs.slice(0, 3).join(' | '));
   server.close(); chrome.kill();
-  process.exit(panel === 'block' && btn && hasTable && errs.length === 0 ? 0 : 1);
+  process.exit(panel === 'block' && btn && hasGuide && hasCockpit && hasCharts && errs.length === 0 ? 0 : 1);
 }
 main().catch(e => { console.error('FATAL:', e); server.close(); if (chrome) chrome.kill(); process.exit(2); });
