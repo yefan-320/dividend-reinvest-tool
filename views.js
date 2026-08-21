@@ -4358,18 +4358,11 @@ function comboScaleTo(idx, pct) {
   const n = _comboItems.length; if (!n) return;
   pct = Math.max(0, Math.min(100, pct));
   const total = _comboTotal > 0 ? _comboTotal : comboSumAmt();
-  if (total <= 0) { _comboItems.forEach((it, i) => { it.amount = i === idx ? pct * 1000 : 0; }); _comboTotal = pct * 1000; return; }
-  const oSum = _comboItems.reduce((s, x, i) => s + (i !== idx ? (x.amount || 0) : 0), 0);
-  const newOthers = Math.max(0, 100 - pct);
-  _comboItems.forEach((it, i) => {
-    if (i === idx) it.amount = Math.round(total * pct / 100);
-    else {
-      const base = oSum > 0 ? (it.amount || 0) / oSum : 1 / Math.max(1, n - 1);
-      it.amount = Math.round(total * newOthers / 100 * base);
-    }
-  });
+  if (total <= 0) { _comboItems[idx].amount = pct * 1000; _comboTotal = pct * 1000; return; }
+  /* v3.2 S8（主人铁律：输入不被改）：改%只改这只，其他股不动；差额由调用方提示 */
+  _comboItems[idx].amount = Math.round(total * pct / 100);
   _comboTotal = total;
-  comboFixRounding();
+  /* 不再调用 comboFixRounding（补差=动别人，违反铁律） */
 }
 /* 整数补差：Σ金额≠comboTotal 时差额补到最大那只（恒=100%） */
 function comboFixRounding() {
@@ -4518,12 +4511,15 @@ function renderComboList() {
     wrap.querySelectorAll('[data-crow]').forEach(div => div.onclick = () => { _comboExpanded = true; renderComboList(); });
     renderComboTotals(); renderComboDonut(); comboLoadCardData(); return;
   }
-  /* % 输入 → 等比缩放（其余同缩），金额=total×%/100 */
+  /* % 输入 → 只改这只（v3.2 S8：其他股不动，总和≠100% 提示差额） */
   wrap.querySelectorAll('[data-pct]').forEach(inp => inp.onchange = () => {
     comboPushUndo(); const i = +inp.dataset.pct; let v = parseFloat(inp.value);
     if (isNaN(v) || v < 0) v = 0;
     if (v > 100) { toast('单只不能超 100%'); v = 100; }
+    const before = comboSumAmt();
     comboScaleTo(i, v); renderComboList();
+    const sumPct = _comboTotal > 0 ? comboSumAmt() / _comboTotal * 100 : 0;
+    if (Math.abs(sumPct - 100) > 0.5) toast(`⚠️ 已只改「${_comboItems[i].name}」为 ${v}%，其他未动——当前合计 ${sumPct.toFixed(1)}%，差额 ${(100 - sumPct).toFixed(1)}%（可改金额或再加股）`);
   });
   /* 金额输入 → 直接改金额，% 派生 */
   wrap.querySelectorAll('[data-amt]').forEach(inp => inp.onchange = () => {
@@ -4688,10 +4684,10 @@ async function renderComboCard() {
     comboPushUndo();
     const t = _comboTotal > 0 ? _comboTotal : 1000000;
     const n2 = _comboItems.length + 1;
+    /* v3.2 S8（主人铁律：输入不被改）：加股只加新股，旧股金额不动；新股默认=总额均分份额 */
     const amt = Math.round(t / n2);
-    _comboItems.forEach(x => x.amount = amt);
-    _comboItems.push({ code: r.code, name: r.name, amount: t - amt * (_comboItems.length - 1), monthly: 0 });
-    _comboTotal = t;
+    _comboItems.push({ code: r.code, name: r.name, amount: amt, monthly: 0 });
+    _comboTotal = comboSumAmt();
     $('#comboSearch').value = '';
     renderComboList();
   });

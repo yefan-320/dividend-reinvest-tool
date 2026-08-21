@@ -2600,7 +2600,8 @@ function calcComboBacktest(combo, pool, opts) {
     if (Object.keys(kline).length < 120) continue;
     let monthly = it.monthly || 0;
     if (monthlyMode === 'weight' && totalMonthly > 0 && totalAmount > 0) monthly = totalMonthly * (it.amount || 0) / totalAmount;
-    if (monthlyMode === 'smart' && p.series) {
+    /* v3.2 S8（主人铁律）：smart 自动乘月追加默认关（smartBoost 显式开启才乘） */
+    if (monthlyMode === 'smart' && opts.smartBoost === true && p.series) {
       const last = p.series[p.series.length - 1];
       const pct = last && last.pct != null ? last.pct : 50;
       monthly = (it.monthly || 0) * (pct < 30 ? 2 : pct > 70 ? 0.5 : 1);

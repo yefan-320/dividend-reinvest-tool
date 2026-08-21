@@ -36,7 +36,8 @@ self.onmessage = e => {
       if (!p || !p.kline) continue;
       let monthly = it.monthly || 0;
       if (opts.monthlyMode === 'weight' && totalMonthly > 0 && totalAmount > 0) monthly = totalMonthly * (it.amount || 0) / totalAmount;
-      if (opts.monthlyMode === 'smart' && p.series) { const last = p.series[p.series.length - 1]; const pct = last && last.pct != null ? last.pct : 50; monthly = (it.monthly || 0) * (pct < 30 ? 2 : pct > 70 ? 0.5 : 1); }
+      /* v3.2 S8（主人铁律：输入不被改）：smart 自动乘月追加默认关（smartBoost 显式开启才乘），设多少用多少 */
+      if (opts.monthlyMode === 'smart' && opts.smartBoost === true && p.series) { const last = p.series[p.series.length - 1]; const pct = last && last.pct != null ? last.pct : 50; monthly = (it.monthly || 0) * (pct < 30 ? 2 : pct > 70 ? 0.5 : 1); }
       const sim = simOne((it.amount || 0) * scale, monthly, p.kline, p.divs, opts.reinvest !== false, opts.taxRate || 0);
       if (sim) rows.push({ code: it.code, name: it.name || it.code, amount: (it.amount || 0) * scale, monthly, sim });
     }
