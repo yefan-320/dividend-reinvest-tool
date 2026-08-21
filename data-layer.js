@@ -822,6 +822,31 @@ function ttmDivsAtMode(divs, dateStr) {
   if (sum > 0) return { v: sum, mode: 'A' };
   return { v: leftBefore >= 0 ? sorted[leftBefore].dps : 0, mode: 'A' };
 }
+/* M304（2026-08-21 大师裁定）：最近已公告完整财年——供空窗期 UI 提示（"最新年报未出，基于 XX 财年"）
+ * 返回数字年份（如 2024）；无任何已公告完整财年时返回 null */
+function latestAnnouncedYear(divs, dateStr) {
+  divs = alignSendZhuan(divs);
+  divs = splitSpecialDivs(divs);
+  const byRepYear = {};
+  divs.forEach(d => {
+    if (!d.report || d.pending || !(d.dps > 0)) return;
+    const y = d.report.slice(0, 4);
+    if (!byRepYear[y]) byRepYear[y] = { sum: 0, hasAnnual: false };
+    byRepYear[y].sum += (d.regular != null ? d.regular : d.dps);
+    if (/-12-31$/.test(d.report)) byRepYear[y].hasAnnual = true;
+  });
+  const yearNow = parseInt(dateStr.slice(0, 4), 10);
+  const completeYears = Object.keys(byRepYear).map(Number)
+    .filter(y => byRepYear[y].hasAnnual && y < yearNow)
+    .sort((a, b) => b - a);
+  for (const y of completeYears) {
+    const yrDivs = divs.filter(d => d.report && d.report.startsWith(String(y)) && d.dps > 0);
+    const announced = yrDivs.length > 0 && yrDivs.every(d =>
+      (d.planNotice && d.planNotice <= dateStr) || (!d.planNotice && d.ex && d.ex <= dateStr));
+    if (announced) return y;
+  }
+  return null;
+}
 function reportYearDivAt(divs, dateStr) {
   /* 2026-08-21 主人抓"宇通股息率上蹿下跳"：带状图原用 ttmDivsAt（含 A 兜底 366 天滚动窗口）
    * A 窗口在一年多派时滑入滑出混 1.5 个财年 → 分子翻倍跳变 → 曲线锯齿
@@ -902,20 +927,17 @@ function calcRollingPercentile(kline, divs, windowDays) {
   const win = windowDays || DEFAULT_WINDOW_DAYS;
   const dates = Object.keys(kline).sort();
   if (!dates.length) return [];
-  // 除息锁定表
-  const locked = calcLockedTTM(divs);
-  // TTM 序列
+  // 2026-08-21 主人拍板（宇通一年多派暴露）：决策信号去 A 兜底，改纯报告期口径
+  // 原 ttmDivsAt = B主（财年归组）+ A兜底（366天滚动窗口）——A 触发时分子混 1.5 财年
+  // → 分位序列里一部分点用"财年尺"、一部分用"12个月到账尺"，尺子不统一，分位失真
+  // 改 reportYearDivAt（纯报告期）：每点=最近已公告完整财年分红÷当日价，全序列同一把尺子
+  // 除息锁定 calcLockedTTM 一并去掉：报告期口径分子不在除息日跳变（只在公告日切），锁定已无必要
   const series = [];
   dates.forEach(d => {
     const price = kline[d];
     if (!(price > 0)) return;
-    let ttm = 0;
-    if (locked[d]) {
-      ttm = locked[d].lockedDps;   // 除息日/次日锁定：用除息前 TTM
-    } else {
-      ttm = ttmDivsAt(divs, d);
-    }
-    if (ttm > 0) series.push({ d, dy: ttm / price * 100 });
+    const t = reportYearDivAt(divs, d);
+    if (t > 0) series.push({ d, dy: t / price * 100 });
   });
   // v1.9.5：去掉 5 日均线平滑（大师 A- 裁决）——居中 MA 用未来数据（i±2）违反"无未来函数"声明；
   // 平滑值≠真实值会误导（主人点名"为什么是平滑的"）；除息锁定已覆盖跳空，平滑多余。分位直接用真实值。
@@ -2309,7 +2331,7 @@ function sellSignalQuick(divs) {
 window.DL = {
   CALIB, fmt, fmtPct, $, todayStr, fmtDate, fmtMonth, daysAgo, RateLimitedQueue, jsonp, fetchJson, loadSinaKline, loadQtQuotes,
   guessSec, emSecidOf, txCodeOf, toPush2, toPlain, parseSecInput,
-  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield, reportYearDivAt,
+  fetchName, fetchDividendsAll, fetchDividendsOne, parseDivs, dedupDividends, sanitizeDividends, calcAnnualDivYield, reportYearDivAt, latestAnnouncedYear,
   tierSpot, sellSignalQuick, sellFuse, TIER_LINE,
   parseEtfAnnList, parseEtfAnnouncement, fetchEtfDividends,
   getKline, getMarketSnapshot, getStockQuotes, getIndexKline, ETF_PRESETS,
