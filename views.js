@@ -3584,8 +3584,19 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* 时间轴回放 */
     html += `<div style="margin-top:8px"><div style="font-size:11px;color:var(--muted);margin-bottom:2px">🎬 时间轴回放：拖动看「我的钱怎么长大」（预计算，拖动只切帧）</div>
       <input type="range" id="cockpitTimeline" min="0" max="${Math.max(0, res.totalAsset.length - 1)}" value="${res.totalAsset.length - 1}" style="width:100%;accent-color:var(--gold)"></div>`;
-    /* 分红年度柱状 */
-    html += `<div id="cockpitDivBar" style="width:100%;height:150px;margin-top:8px"></div>`;
+    /* v3.2 S4：逐年分红柱 + 增长率双轴（年/季切换 + CAGR 徽章 + 三态色 + 断档断开） */
+    html += `<div id="cockpitDivBarWrap" style="margin-top:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line);padding:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:700">📊 分红节奏</span>
+        <span id="divCagrBadge" style="font-size:10px;color:var(--muted)"></span>
+        <span id="divStabWarn" style="font-size:10px;color:var(--muted)"></span>
+        <span style="margin-left:auto;display:flex;gap:4px" id="divGranSwitch">
+          <button type="button" class="chip" data-g="year" style="font-size:10px;padding:2px 8px">年</button>
+          <button type="button" class="chip" data-g="quarter" style="font-size:10px;padding:2px 8px">季</button>
+        </span>
+      </div>
+      <div id="cockpitDivBar" style="width:100%;height:170px;margin-top:4px"></div>
+    </div>`;
     /* 每只贡献 + 权重演化（折叠） */
     html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">📋 每只贡献 + 权重演化（点开）</summary>
       <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">标的</th><th>初始</th><th>月追加</th><th>期末市值</th><th>累计分红</th><th>分红率</th></tr>
@@ -3852,38 +3863,79 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       res.perStock.forEach(p => { html += ringHtml(p.name.length > 4 ? p.name.slice(0, 4) : p.name, p.divRatio, p.divRatio >= 30 ? '#4caf7d' : p.divRatio >= 15 ? '#d9a441' : '#5aa9e6'); });
       pbEl.innerHTML = html;
     }
-    /* v1 W3：来源堆叠——分红柱状叠加个股构成（累计分红口径） + N11 增速标注 + W1 断档警示 */
+    /* v3.2 S4：逐年分红柱（三态色：增长绿/下滑红/断档灰）+ 增长率双轴（右轴域锁死防误导）
+     * 增长率线只连有分红年（断档断开防假负增长）；CAGR 3/5 年徽章；年/季切换 */
     const barEl3 = document.getElementById('cockpitDivBar');
     if (barEl3 && typeof echarts !== 'undefined') {
-      const ch = echarts.init(barEl3);
-      const ys = Object.keys(res.divByYear).sort();
-      const vals = ys.map(y => res.divByYear[y]);
-      /* 增速标注 */
-      const labels = ys.map((y, i) => {
-        if (i === 0) return '';
-        const prev = vals[i - 1];
-        if (!(prev > 0)) return '';
-        const g = (vals[i] - prev) / prev * 100;
-        return (g >= 0 ? '+' : '') + g.toFixed(1) + '%';
-      });
-      /* 断档警示：连续 2 年下降 */
-      let warn = '';
-      for (let i = ys.length - 1; i >= 2; i--) {
-        if (vals[i] < vals[i - 1] && vals[i - 1] < vals[i - 2]) { warn = `⚠️ 分红连续 ${ys.length - i} 年下降（${ys[i - 2]}→${ys[i]}），关注分红持续性`; break; }
-      }
-      /* 来源堆叠：perStock 累计分红构成 */
-      const cumTotal = res.perStock.reduce((s, p) => s + p.cumDiv, 0);
-      const stackData = ys.map(y => res.perStock.map(p => +(p.cumDiv / Math.max(1, cumTotal) * res.divByYear[y]).toFixed(2)));
-      const stackSeries = res.perStock.map((p, pi) => ({ name: p.name, type: 'bar', stack: 'div', data: stackData.map(d => d[pi]), itemStyle: { color: _comboPalette[pi % _comboPalette.length] }, barMaxWidth: 26 }));
-      ch.setOption({
-        title: { text: '年度分红到账（税前 · 堆叠=个股构成）' + (warn ? ' · ' + warn : ''), left: 'center', top: 2, textStyle: { fontSize: 10, color: warn ? '#e05a5a' : '#8fa69c' } },
-        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
-        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 }, type: 'scroll' },
-        grid: { left: 56, right: 12, top: 40, bottom: 24 },
-        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
-        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-        series: [...stackSeries, { type: 'bar', data: vals, barMaxWidth: 26, itemStyle: { color: 'transparent' }, label: { show: true, position: 'top', formatter: p => labels[p.dataIndex], color: '#8fa69c', fontSize: 9 }, tooltip: { show: false }, silent: true }],
-        animationDuration: 600,
+      const _comboPalette = window._comboPalette || ['#4caf7d', '#d9a441', '#5aa9e6', '#c46ae0', '#e05a5a', '#5b8db8', '#8fa69c', '#e68a5a'];
+      const buildDivSeq = (g) => {
+        if (g === 'year') {
+          const ys = Object.keys(res.divByYear).sort();
+          return ys.map((y, i) => ({ key: y, div: res.divByYear[y], yoy: i > 0 && res.divByYear[ys[i - 1]] > 0 ? (res.divByYear[y] - res.divByYear[ys[i - 1]]) / res.divByYear[ys[i - 1]] * 100 : null }));
+        }
+        const map = {};
+        res.totalAsset.forEach(x => { const q = x.d.slice(0, 4) + 'Q' + Math.ceil(+x.d.slice(5, 7) / 3); map[q] = x.cumDiv; });
+        const qs = Object.keys(map).sort();
+        return qs.map((k, i) => ({ key: k, div: +(map[k] - (i > 0 ? map[qs[i - 1]] : 0)).toFixed(2), yoy: i > 0 && map[qs[i - 1]] > 0 ? (map[k] - map[qs[i - 1]]) / map[qs[i - 1]] * 100 : null }));
+      };
+      const drawDivBar = (g) => {
+        const seq = buildDivSeq(g);
+        const vals = seq.map(s => s.div);
+        const colors = seq.map((s, i) => {
+          if (s.div <= 0) return '#2a3d36'; /* 断档灰 */
+          if (i === 0 || seq[i - 1].div <= 0) return '#5b8db8'; /* 首段/断档后首段：中性蓝 */
+          return s.div >= seq[i - 1].div ? '#4caf7d' : '#e05a5a';
+        });
+        /* 增长率线：只连有分红年（div>0），断档断开 */
+        const yoyData = seq.map(s => (s.div > 0 && s.yoy != null) ? +s.yoy.toFixed(1) : null);
+        /* CAGR 徽章 */
+        const badgeEl = document.getElementById('divCagrBadge');
+        if (badgeEl) {
+          const pos = seq.filter(s => s.div > 0);
+          const cagr = (n) => {
+            if (pos.length < n + 1) return null;
+            const last = pos[pos.length - 1].div, base = pos[pos.length - n].div;
+            if (!(base > 0)) return null;
+            const yearsSpan = pos[pos.length - 1].key.slice(0, 4) - pos[pos.length - n].key.slice(0, 4);
+            if (yearsSpan <= 0) return null;
+            return (Math.pow(last / base, 1 / yearsSpan) - 1) * 100;
+          };
+          const c3 = cagr(3), c5 = cagr(5);
+          badgeEl.innerHTML = (c3 != null ? `3Y CAGR <b>${c3 >= 0 ? '+' : ''}${c3.toFixed(1)}%</b>` : '3Y CAGR —') + ' · ' + (c5 != null ? `5Y CAGR <b>${c5 >= 0 ? '+' : ''}${c5.toFixed(1)}%</b>` : '5Y CAGR —');
+        }
+        /* 稳定度警示：断档或连降≥2年 */
+        const warnEl = document.getElementById('divStabWarn');
+        if (warnEl) {
+          let warn = '';
+          const pos = seq.filter(s => s.div > 0);
+          for (let i = pos.length - 1; i >= 2; i--) { if (pos[i].div < pos[i - 1].div && pos[i - 1].div < pos[i - 2].div) { warn = `⚠️ 分红连降 ${pos[i - 2].key}→${pos[i].key}，关注持续性`; break; } }
+          if (!warn && pos.length && pos[pos.length - 1].div <= 0) warn = '⚠️ 最近一期无分红';
+          warnEl.innerHTML = warn ? `<span style="color:#e05a5a">${warn}</span>` : '';
+        }
+        const inst = echarts.getInstanceByDom(barEl3) || echarts.init(barEl3);
+        /* 右轴域锁死 [-100, 300] 防双轴误导；超限标 * */
+        const yoyShow = yoyData.map(v => v == null ? null : (v > 300 || v < -100 ? '*' : v));
+        inst.setOption({
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 },
+            formatter: ps => { let h = ''; ps.forEach(p => { const s = seq[p.dataIndex]; const nm = p.seriesName === '分红' ? '分红' : 'YoY'; const vv = p.seriesName === '分红' ? (s.div / 10000).toFixed(2) + ' 万' : (s.yoy != null ? (s.yoy >= 0 ? '+' : '') + s.yoy.toFixed(1) + '%' : '—'); h += `${p.marker}${s.key} · ${nm}: <b>${vv}</b><br/>`; }); return h; } },
+          grid: { left: 56, right: 46, top: 28, bottom: 24 },
+          xAxis: { type: 'category', data: seq.map(s => s.key), axisLabel: { color: '#8fa69c', fontSize: 10, interval: g === 'quarter' ? 'auto' : 0 } },
+          yAxis: [
+            { type: 'value', name: '分红', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+            { type: 'value', name: 'YoY%', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, min: -100, max: 300, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { show: false } },
+          ],
+          series: [
+            { name: '分红', type: 'bar', data: vals, barMaxWidth: g === 'quarter' ? 14 : 30, itemStyle: { color: p => colors[p.dataIndex], borderRadius: [3, 3, 0, 0] },
+              label: { show: true, position: 'top', fontSize: 9, color: '#8fa69c', formatter: p => { const s = seq[p.dataIndex]; if (s.div <= 0) return '—'; const n = seq.length; const mark = p.dataIndex === 0 || p.dataIndex === n - 1 || vals[p.dataIndex] === Math.max.apply(null, vals) ? (s.div / 10000).toFixed(1) + '万' : ''; return mark; } } },
+            { name: 'YoY', type: 'line', yAxisIndex: 1, data: yoyShow, connectNulls: false, symbolSize: 5, lineStyle: { color: '#d9a441', width: 1.5 }, itemStyle: { color: '#d9a441' }, label: { show: true, position: 'top', fontSize: 9, color: '#d9a441', formatter: p => yoyData[p.dataIndex] != null ? (p.value === '*' ? (yoyData[p.dataIndex] > 0 ? '+' : '') + yoyData[p.dataIndex].toFixed(0) + '%*' : p.value + '%') : '' } },
+          ],
+          animationDuration: 600,
+        });
+      };
+      drawDivBar('year');
+      const sw = document.getElementById('divGranSwitch');
+      if (sw) sw.querySelectorAll('button[data-g]').forEach(b => {
+        b.onclick = () => { sw.querySelectorAll('button').forEach(x => x.style.background = ''); b.style.background = 'rgba(217,164,65,.25)'; drawDivBar(b.dataset.g); };
       });
     }
   }
