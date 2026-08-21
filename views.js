@@ -123,6 +123,29 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
       } catch (e) { }
     }
+    /* v3.2 S2：切到驾驶舱，若结果区为空且有自动快照 → 秒出加载（刷新不丢结果） */
+    if (name === 'pfbt') {
+      (async () => {
+        try {
+          const el = $('#pfbtResult');
+          if (el && !el.dataset.loaded && !_pfbtRunning) {
+            const c = DL.loadCombos();
+            const sel = $('#pfbtComboSel');
+            const activeId = sel && sel.value ? sel.value : c.activeId;
+            if (activeId) {
+              const snap = await btLoadAuto(activeId);
+              if (snap && snap.full.res) {
+                el.dataset.loaded = '1';
+                const combo = snap.full.combo;
+                const meta = { modeTxt: snap.meta.mode === 'weight' ? '按初始权重分配' : snap.meta.mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote: '', failed: [], cashTxt: '' };
+                renderCockpit(snap.full.res, combo, {}, meta);
+                btSnapNotice(snap.meta);
+              }
+            }
+          }
+        } catch (e) { }
+      })();
+    }
   }
   function bindTabs() {
     document.querySelectorAll('.tabbar button').forEach(b => {
@@ -3324,6 +3347,91 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   let _cockpitRes = null, _cockpitPool = null, _cockpitCombo = null;
   let _comboEditCode = null;   /* v1 N7：反向改——驾驶舱→组合卡预填 */
 
+  /* v3.2 S2：回测快照自动存（独立库 divtool-bt）。
+   * 自动：meta:auto:<comboId> + full:auto:<comboId>（一组合一条，覆盖最新）；
+   * 固定：meta:pin:<ts> + full:pin:<ts>（用户命名保存，最多 10 条滚动）。 */
+  async function btAutoSave(combo, y, mode, res) {
+    try {
+      const id = 'auto:' + combo.id;
+      const now = Date.now();
+      const ver = window.APP_VERSION || 'v3.2';
+      const meta = {
+        id, kind: 'auto', name: combo.name, comboId: combo.id, y, mode,
+        at: now, ver, dataDate: DL.todayStr(),
+        items: (combo.items || []).map(x => ({ code: x.code, name: x.name, amount: x.amount, monthly: x.monthly })),
+      };
+      await DL.btSet('full:' + id, { res, combo, at: now, ver, y, mode });
+      await DL.btSet('meta:' + id, meta);
+      await btEnforceLimit('auto', 10);
+    } catch (e) { /* 快照失败不影响主流程 */ }
+  }
+  async function btPinSave(combo, y, mode, res, label) {
+    try {
+      const id = 'pin:' + Date.now();
+      const now = Date.now();
+      const ver = window.APP_VERSION || 'v3.2';
+      const meta = { id, kind: 'pin', name: label || (combo.name + ' ' + new Date(now).toLocaleString().slice(5, 16)), comboId: combo.id, y, mode, at: now, ver, dataDate: DL.todayStr(), items: (combo.items || []).map(x => ({ code: x.code, name: x.name, amount: x.amount, monthly: x.monthly })) };
+      await DL.btSet('full:' + id, { res, combo, at: now, ver, y, mode });
+      await DL.btSet('meta:' + id, meta);
+      await btEnforceLimit('pin', 10);
+      return id;
+    } catch (e) { return null; }
+  }
+  /* 上限：每种最多 n 条，超出删最旧（按 meta.at） */
+  async function btEnforceLimit(kind, n) {
+    try {
+      const metas = (await DL.btList('meta:' + kind + ':')).map(x => x.val).sort((a, b) => (a.at || 0) - (b.at || 0));
+      while (metas.length > n) {
+        const old = metas.shift();
+        await DL.btDel('meta:' + old.id); await DL.btDel('full:' + old.id);
+      }
+    } catch (e) {}
+  }
+  async function btLoadAuto(comboId) {
+    try {
+      const meta = await DL.btGet('meta:auto:' + comboId);
+      if (!meta) return null;
+      const full = await DL.btGet('full:auto:' + comboId);
+      if (!full || !full.res) return null;
+      return { meta, full };
+    } catch (e) { return null; }
+  }
+  async function btListSnapshots() {
+    const metas = (await DL.btList('meta:')).map(x => x.val).sort((a, b) => (b.at || 0) - (a.at || 0));
+    return metas;
+  }
+  async function btDelSnapshot(id) {
+    await DL.btDel('meta:' + id); await DL.btDel('full:' + id);
+  }
+  /* 快照提示条：版本戳 + 数据截止日 + 内存文案 + 重跑/固定 */
+  function btSnapNotice(meta) {
+    try {
+      const el = $('#pfbtResult');
+      if (!el) return;
+      const old = document.getElementById('btSnapBar');
+      if (old) old.remove();
+      const bar = document.createElement('div');
+      bar.id = 'btSnapBar';
+      bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:11px;color:var(--sub);background:rgba(217,164,65,.08);border:1px solid rgba(217,164,65,.3);border-radius:8px;padding:6px 10px;margin-bottom:8px';
+      const curVer = window.APP_VERSION || 'v3.2';
+      const verTxt = meta.ver === curVer ? `v${meta.ver}` : `<b style="color:#e05a5a">旧口径 v${meta.ver}（当前 v${curVer}，建议重跑）</b>`;
+      bar.innerHTML = `📸 <b>快照</b> ${esc(meta.name || '')} · 数据截止 ${meta.dataDate || '—'} · ${verTxt} · 跑于 ${meta.at ? new Date(meta.at).toLocaleString().slice(5, 16) : '—'}
+        <button type="button" class="chip" id="btSnapRerun">🔄 重跑更新</button>
+        <button type="button" class="chip" id="btSnapPin">📌 固定此快照</button>`;
+      const rerun = bar.querySelector('#btSnapRerun');
+      if (rerun) rerun.onclick = () => { const btn = $('#pfbtRun'); if (btn) btn.click(); };
+      const pin = bar.querySelector('#btSnapPin');
+      if (pin) pin.onclick = async () => {
+        const full = await DL.btGet('full:' + meta.id);
+        if (!full || !full.res) { toast('快照数据缺失'); return; }
+        const label = prompt('固定快照名称（留空用默认）：', '');
+        const id = await btPinSave(full.combo || { name: meta.name }, meta.y || 10, meta.mode || 'weight', full.res, label);
+        toast(id ? '✅ 已固定快照' : '固定失败');
+      };
+      el.insertBefore(bar, el.firstChild);
+    } catch (e) { }
+  }
+
   /* 三问卡 + 驾驶舱渲染 */
   function renderCockpit(res, combo, pool, meta) {
     const el = $('#pfbtResult');
@@ -3848,6 +3956,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       fillCmpSel();
       const meta = { modeTxt: mode === 'weight' ? '按初始权重分配' : mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote, failed, cashTxt: (combo.cashPct || 0) > 0 ? `现金仓位 ${combo.cashPct}% 按 1.5%/年滚入（近似货基/短债，可改）；` : '' };
       renderCockpit(res, combo, pool, meta);
+      /* v3.2 S2：跑完自动存快照（独立库 divtool-bt，不被缓存卫生误删）——不阻塞渲染 */
+      btAutoSave(combo, y, mode, res);
     } catch (e) {
       el.innerHTML = `<div style="padding:14px;border:1px solid rgba(224,90,90,.4);border-radius:10px;background:rgba(224,90,90,.08)">
         <div style="font-size:13px;color:#e05a5a;font-weight:700">⚠️ 体检失败</div>

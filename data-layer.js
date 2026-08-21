@@ -2507,6 +2507,8 @@ window.DL = {
   calcEcoType, findZoneEvents,
   /* P39（2026-08-21）：缓存卫生 */
   cachePrune,
+  /* v3.2 S2：回测快照独立库（divtool-bt，不被 cachePrune 误删） */
+  btGet, btSet, btDel, btList,
   /* W10（2026-08-21）：数据源状态 */
   srcMark, srcOf, srcLogAll, dataHealthLevel, caliberAudit,
   /* v1.9.3 新增：分红趋势/档位五态分类/窗口预设 */
@@ -2689,3 +2691,47 @@ function calcComboBacktest(combo, pool, opts) {
 const COMBO_KEY = 'divtool_combos_v1';
 function loadCombos() { try { return JSON.parse(localStorage.getItem(COMBO_KEY)) || { combos: [], activeId: null }; } catch (e) { return { combos: [], activeId: null }; } }
 function saveCombos(c) { localStorage.setItem(COMBO_KEY, JSON.stringify(c)); }
+
+/* ---------- v3.2 S2：回测快照独立库（divtool-bt，不被 cachePrune 误删） ----------
+ * 动机（M586）：回测结果之前走 divtool-cache，会被缓存卫生（>50MB 删 7 天前 key）误删。
+ * 策略：独立 IndexedDB 库 divtool-bt / store snapshots；分存 meta（列表秒开）+ full（完整结果）。
+ * 上限：固定快照 10 + 自动快照 10（滚动删最旧），由调用方 enforce。 */
+const BT_DB = 'divtool-bt', BT_VER = 1, BT_STORE = 'snapshots';
+let _btDb = null;
+function openBtDB() {
+  return new Promise((resolve, reject) => {
+    if (_btDb) return resolve(_btDb);
+    if (typeof indexedDB === 'undefined') return reject(new Error('no indexedDB'));
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; reject(new Error('IndexedDB 超时')); } }, 5000);
+    const req = indexedDB.open(BT_DB, BT_VER);
+    req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(BT_STORE)) req.result.createObjectStore(BT_STORE); };
+    req.onsuccess = () => { if (done) return; done = true; clearTimeout(timer); _btDb = req.result; resolve(_btDb); };
+    req.onerror = () => { if (done) return; done = true; clearTimeout(timer); reject(req.error); };
+  });
+}
+async function btGet(key) {
+  try { const db = await openBtDB(); return await new Promise((res, rej) => { const r = db.transaction(BT_STORE).objectStore(BT_STORE).get(key); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error); }); }
+  catch (e) { return null; }
+}
+async function btSet(key, val) {
+  try { const db = await openBtDB(); await new Promise((res, rej) => { const r = db.transaction(BT_STORE, 'readwrite').objectStore(BT_STORE).put(val, key); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); return true; }
+  catch (e) { return false; }
+}
+async function btDel(key) {
+  try { const db = await openBtDB(); await new Promise((res, rej) => { const r = db.transaction(BT_STORE, 'readwrite').objectStore(BT_STORE).delete(key); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); return true; }
+  catch (e) { return false; }
+}
+/* 列出全部快照条目（key 前缀过滤 + 大小估算） */
+async function btList(prefix) {
+  try {
+    const db = await openBtDB();
+    const out = [];
+    await new Promise((res, rej) => {
+      const cur = db.transaction(BT_STORE).objectStore(BT_STORE).openCursor();
+      cur.onsuccess = () => { const c = cur.result; if (c) { const k = String(c.key); if (!prefix || k.startsWith(prefix)) out.push({ key: k, val: c.value, size: JSON.stringify(c.value).length }); c.continue(); } else res(); };
+      cur.onerror = () => rej(cur.error);
+    });
+    return out;
+  } catch (e) { return []; }
+}
