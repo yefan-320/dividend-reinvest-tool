@@ -30,6 +30,8 @@ window.REPORT_CARD_EXTRA = {
   --bg:#0e1412; --card:#16211d; --card2:#1b2a25; --line:#2a3d36;
   --gold:#d9a441; --green:#4caf7d; --red:#e05a5a; --blue:#5aa9e6;
   --txt:#e8efe9; --sub:#8fa69c;
+  --muted:#8fa69c; /* v3.4 P0 修复：全站 102 处 var(--muted) 此前悬空未定义 */
+  --fs-xs:10px; --fs-sm:11px; --fs-md:12px; --fs-lg:13px; --fs-xl:18px; --fs-2xl:22px; --fs-hero:44px; /* v3.4 字号令牌（9px 清零） */
   /* v3.2 S9 语义色板（双通道分离）：行情红涨绿跌 / 分红好绿坏红，互不混用 */
   --up:#e05a5a; --down:#4caf7d;       /* 行情语义（A股） */
   --div-up:#4caf7d; --div-down:#e05a5a; /* 分红语义 */
@@ -213,15 +215,51 @@ body{padding-bottom:64px}
 .v3-stock-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 @media (min-width:1280px){ .v3-stock-grid{grid-template-columns:repeat(4,1fr)} }
 @media (min-width:900px) and (max-width:1279px){ .v3-stock-grid{grid-template-columns:repeat(2,1fr)} }
-/* 年度表：竖屏隐藏次要列（保留年份/分红/收益率/XIRR） */
-.v3-year-table th:nth-child(6),.v3-year-table td:nth-child(6){display:table-cell}
-@media (max-width:900px){ .v3-year-table th:nth-child(2),.v3-year-table td:nth-child(2){display:none} } /* YoY 隐藏 */
-@media (max-width:480px){ .v3-year-table th:nth-child(6),.v3-year-table td:nth-child(6){display:none} } /* 年末资产隐藏 */
+/* 年度表：断点重排（v3.4 P4 修复——此前 900px 藏的是第2列当年分红=藏错列；真 YoY 是第3列）
+ * 新列序：1年份 | 2当年分红 | 3分红比去年(色块) | 4当年赚了(色块) | 5累计收益率 | 6算上追加每年赚 | 7年末资产
+ * 900px 藏真 YoY(3) · 480px 藏当年赚了(4) · 累计收益率(5)+年末资产(7) 永不隐藏 */
+.v3-year-table th:nth-child(7),.v3-year-table td:nth-child(7){display:table-cell}
+@media (max-width:900px){ .v3-year-table th:nth-child(3),.v3-year-table td:nth-child(3){display:none} } /* 分红比去年(真YoY)隐藏 */
+@media (max-width:480px){ .v3-year-table th:nth-child(4),.v3-year-table td:nth-child(4){display:none} } /* 当年赚了隐藏，保双列 */
 /* KPI 行平板 2×2 */
 @media (max-width:900px){ #pfbtResult .v3-card{min-width:calc(50% - 8px)} }
 /* 卡片 hover（桌面） */
 .v3-stock-card{transition:border-color .2s}
 @media (hover:hover){ .v3-stock-card:hover{border-color:rgba(217,164,65,.5)} }
+/* 表格色块热力（v3.4 TB1/TB2）：↑绿/↓红/—灰 + 数字，不嵌迷你图 */
+.v3-heat{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:6px;font-weight:700;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.v3-heat.up{background:rgba(76,175,125,.16);color:#4caf7d}
+.v3-heat.down{background:rgba(224,90,90,.14);color:#e05a5a}
+.v3-heat.flat{background:rgba(143,166,156,.12);color:var(--muted)}
+/* 滑轨基础类（v3.4 九/十轮：6px 圆角3px 纯色填充，无渐变/发光——光效=性能税+对比度杀手） */
+.v3-track{position:relative;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.v3-track > .v3-fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--gold)}
+.v3-track > .v3-fill.grow{background:var(--green)}
+.v3-track > .v3-thumb{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid var(--gold);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+/* 锚点导航（v3.4 N3：吸顶） */
+.v3-anchor{position:sticky;top:0;z-index:90;display:flex;gap:4px;overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 8px;margin:8px 0;scrollbar-width:none}
+.v3-anchor::-webkit-scrollbar{display:none}
+.v3-anchor a{font-size:12px;color:var(--sub);text-decoration:none;padding:3px 10px;border-radius:14px;white-space:nowrap;font-weight:600}
+.v3-anchor a:active{color:var(--gold);background:rgba(217,164,65,.12)}
+/* 总卡（v3.4 八轮 P26-P30）：大数字+徽章+流水线+迷你曲线+回本环 */
+.v3-summary{display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;background:linear-gradient(135deg,rgba(217,164,65,.08),transparent 55%),var(--card2);border:1px solid rgba(217,164,65,.25);border-radius:16px;padding:16px;margin-bottom:10px;cursor:pointer}
+.v3-summary-main{flex:1;min-width:240px;display:flex;flex-direction:column;gap:6px;justify-content:center}
+.v3-summary .hero{font-size:var(--fs-hero);font-weight:800;line-height:1.1;letter-spacing:.3px}
+.v3-summary .pipe{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--txt)}
+.v3-summary .pipe b{font-size:15px}
+.v3-summary .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted)}
+.v3-summary-side{display:flex;flex-direction:column;gap:8px;min-width:200px;flex:0 0 240px}
+.v3-summary .mini-chart{width:100%;height:72px}
+.v3-summary .hint-open{font-size:11px;color:var(--gold);margin-top:auto;text-align:right}
+/* 分红日标记点（总卡净值曲线叠加，金色小圆点） */
+.v3-divdot{fill:#d9a441;stroke:#16211d;stroke-width:1.5}
+.v3-divdot:hover{fill:#fff}
+/* KPI 行 */
+.v3-kpi-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+/* 折叠区统一间距 */
+details.v3-fold{margin-top:8px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+details.v3-fold summary{font-size:12px;cursor:pointer;color:var(--sub);font-weight:600}
+details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
 </style>
 </head>
 <body>
@@ -652,11 +690,14 @@ body{padding-bottom:64px}
 <!-- ===== v3.0 组合驾驶舱 tab ===== -->
 <section id="tab-pfbt" class="tab-panel" style="display:none">
   <div class="card">
-    <h2>🧪 我的组合体检（驾驶舱）</h2>
-    <div class="hint">组合来源 = 决策台「🧮 我的组合」（自由输入/组合/金额/月追加）· 有配置自动带入选中的组合</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0">📊 我的组合情况</h2>
+      <span class="hint" style="font-size:11px">组合来源 = 决策台「🧮 我的组合」· 独立页完整展示组合全部数据 · 精确到每一天</span>
+    </div>
     <div style="display:flex;gap:6px;align-items:center;margin:8px 0;flex-wrap:wrap">
       <span style="font-size:12px">组合：</span>
       <select id="pfbtComboSel" style="padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px;max-width:220px"><option value="">（无组合，去决策台建）</option></select>
+      <button type="button" class="chip" id="pfbtEditCombo" style="font-size:11px">✏️ 编辑组合</button>
       <span style="font-size:12px">区间：</span>
       <button type="button" class="chip pfbt-y" data-y="3">3年</button>
       <button type="button" class="chip pfbt-y" data-y="5">5年</button>
@@ -669,9 +710,17 @@ body{padding-bottom:64px}
       </select>
       <button type="button" class="btn flexbtn" id="pfbtRun" style="margin-left:8px">▶ 运行体检</button>
     </div>
+    <!-- v3.4 锚点导航：长页不迷路 -->
+    <nav id="pfbtAnchor" class="v3-anchor" style="display:none">
+      <a href="#pfbtSummary">📊 总览</a>
+      <a href="#pfbtYearTable">📅 年度</a>
+      <a href="#pfbtStocks">🧩 个股</a>
+      <a href="#pfbtCompare">⚖️ 对比</a>
+      <a href="#pfbtAnalysis">🔬 分析</a>
+    </nav>
     <div id="pfbtResult"><div class="hint">点「▶ 运行体检」开始（拉取组合各股 K线+分红，约 1-2 分钟；二次跑命中本地缓存秒出）</div></div>
-    <!-- v1 组合对比（N6/M532）：我的组合 vs 备选组合双曲线 -->
-    <div style="display:flex;gap:6px;align-items:center;margin:10px 0 0;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px">
+    <!-- 快照对比/组合对比：并入页内对比区（v3.4 N4） -->
+    <div id="pfbtCompare" style="display:flex;gap:6px;align-items:center;margin:10px 0 0;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px">
       <span style="font-size:12px;color:var(--sub)">⚖️ 组合对比：</span>
       <select id="pfbtCmpSel" style="padding:4px 6px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:12px;max-width:220px"><option value="">（选另一个组合对比）</option></select>
       <button type="button" class="chip" id="pfbtCmpRun" style="color:#5aa9e6">📊 对比</button>
@@ -681,12 +730,13 @@ body{padding-bottom:64px}
   </div>
 </section>
 
-<script src="demo-data.js?v=v3.2"></script>
+<script src="demo-data.js?v=v3.4"></script>
+<script src="i18n.js?v=v3.2"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="data-layer.js?v=v3.2"></script>
+<script src="data-layer.js?v=v3.4"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v3.2';
+const APP_VERSION = 'v3.4';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -1407,9 +1457,9 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="diagnose">🔬 诊断</button>
   <button data-tab="compare">📈 对比</button>
   <button data-tab="backtest">📊 回测</button>
-  <button data-tab="pfbt">🧪 组合回测</button>
+  <button data-tab="pfbt">📊 组合情况</button>
 </nav>
-<script src="views.js?v=v3.2"></script>
+<script src="views.js?v=v3.4"></script>
 <script src="pwa.js?v=v3.2"></script>
 </body>
 </html>
