@@ -50,8 +50,9 @@ async function waitFor(expr, timeout = 8000) {
 async function main() {
   chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
     '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--user-data-dir=' + PROFILE,
-    '--no-first-run', '--disable-gpu', '--window-size=420,1000', 'about:blank'
-  ]);
+    '--no-first-run', '--disable-gpu', '--window-size=420,1000', '--remote-allow-origins=*', '--no-sandbox', 'about:blank'
+  ], { detached: true, stdio: 'ignore' });
+  chrome.unref();
   let ready = false;
   for (let i = 0; i < 40; i++) { try { const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`); if (r.ok) { ready = true; break; } } catch (e) {} await sleep(500); }
   if (!ready) { console.error('CDP 未就绪'); process.exit(2); }
