@@ -209,7 +209,7 @@ async function main() {
     assert(st.tblRows >= 5, 'BUG-3 复发：年度表空');
     assert(!status.includes('页面错误') && !status.includes('回测出错'), '首屏有错误: ' + status.slice(0, 60));
     const ver = await evalIn(cdp, `APP_VERSION`);
-    assert(/^v(1\.[89]\.\d+|2\.0|3\.\d+)$/.test(ver), '版本号异常: ' + ver);
+    assert(/^v(1\.[89]\.\d+(?:\.\d+)?|2\.0|3\.\d+(?:\.\d+)?)$/.test(ver), '版本号异常: ' + ver);
     ok('首屏全渲染（12格+4图+仪表盘+年度表' + st.tblRows + '行），' + ver);
   });
 

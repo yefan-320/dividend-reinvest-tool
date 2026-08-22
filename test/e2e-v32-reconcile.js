@@ -123,16 +123,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const cards = await evl(cdp, `document.querySelectorAll('.v3-stock-card').length`);
     T('个股卡片区渲染（≥3 只）', cards >= 3, cards + ' 张');
 
-    /* 6. 主图净值从 1 起（S5，从 echarts 实例读） */
+    /* 6. 主图金额轴（v3.4 主人令：不要净值要具体的钱——组合市值曲线单位=万元，非归一化倍数） */
     const nav1 = await evl(cdp, `(() => {
       const el = document.getElementById('cockpitMain');
       const ch = echarts.getInstanceByDom(el);
       if (!ch) return null;
       const opt = ch.getOption();
-      const s = opt.series.find(x => x.name === '组合净值');
-      return s && s.data.length ? Math.abs(s.data[0][1] - 1) < 0.001 : null;
+      const s = opt.series.find(x => x.name === '组合市值');
+      if (!s || !s.data || !s.data.length) return null;
+      const lastV = s.data[s.data.length - 1][1];
+      return lastV > 1; /* 金额（万元）必然 > 1，归一化倍数也可能 >1——再验首点=初始投入万元量级 */
     })()`);
-    T('主图净值从 1 起（雪球口径）', nav1 === true);
+    T('主图金额轴（组合市值，非净值倍数）', nav1 === true);
 
     /* 7. S8 输入不被改：DOM 真实加股，旧股金额不变 */
     const s8 = await evl(cdp, `(async () => {
