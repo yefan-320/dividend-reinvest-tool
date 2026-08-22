@@ -6,6 +6,11 @@
 <title>红利复投工具</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#121a17">
+<!-- v3.9.0 T7 PWA 完善（接手 AI）：三端"添加到主屏幕"当 App 用 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="红利工具">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230e1412'/><text x='50' y='68' font-size='58' text-anchor='middle'>💰</text></svg>">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>💰</text></svg>">
 <script src="vendor/echarts.min.js"></script>
 <script>
@@ -260,6 +265,27 @@ body{padding-bottom:64px}
 details.v3-fold{margin-top:8px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
 details.v3-fold summary{font-size:12px;cursor:pointer;color:var(--sub);font-weight:600}
 details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
+/* ===== v3.9.0 三端适配（接手 AI T1-T7）：手机 / iPad Pro 12.9 / 电脑 ===== */
+/* T3 触控目标：所有 chip 已 ≥44px（Apple HIG），tab 栏按钮补齐 */
+.tabbar button{min-height:44px}
+/* T6 导航：iPad/桌面 ≥900px 顶部胶囊导航（省底部空间，更自然）；手机保留底部 tab */
+@media (min-width:900px){
+  .tabbar{top:0;bottom:auto;border-top:none;border-bottom:1px solid var(--line);padding:4px 8px;justify-content:center;gap:8px}
+  .tabbar button{flex:0 1 auto;padding:8px 18px;border-radius:20px;min-width:88px;font-size:13px}
+  .tabbar button.active{background:rgba(217,164,65,.14);color:var(--gold)}
+  body{padding-bottom:16px;padding-top:52px}
+}
+/* T4 图表高度：手机 260 / iPad 320 / 桌面 300+ */
+@media (min-width:900px) and (max-width:1279px){ .chart{height:320px} .chart.tall{height:340px} }
+/* T1 iPad 竖屏内容加宽（消灭"手机放大版"两侧空白）：诊断 stats 4 列、首页卡片全宽呼吸 */
+@media (min-width:900px){
+  #tab-diagnose .stats{grid-template-columns:repeat(4,1fr)}
+  #tab-home .card{padding:16px 18px}
+  #diagConclusion{font-size:14px}
+}
+/* 触屏术语气泡（T2 hover→tap）：点击 .tt 弹出解释 */
+#ttBubble{position:fixed;z-index:99998;max-width:280px;padding:8px 10px;border-radius:8px;background:#0d1a14;border:1px solid var(--gold);color:var(--txt);font-size:12px;line-height:1.6;box-shadow:0 4px 16px rgba(0,0,0,.5);pointer-events:none;opacity:0;transition:opacity .15s}
+#ttBubble.show{opacity:1}
 </style>
 </head>
 <body>
@@ -281,6 +307,8 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
     try { console.warn('⚠️ 当前环境无 crypto.subtle（非 Chrome/非安全上下文），密码锁已跳过放行'); } catch (e) {}
     return;
   }
+  /* v3.9.0 B9（接手 AI）：localhost/127.0.0.1 本地部署自动跳过锁屏（数据本来就在本机，锁只防线上路人） */
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
   var HASH = 'a2cb61c82c80eff0e70a3bab07b8885d76127bf587907add325e4033f8f001e3';
   var KEY = 'divtool_unlock_ts', DAYS = 30;
   function store() { try { return window.localStorage; } catch (e) { return null; } }
@@ -314,6 +342,7 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
   }
 })();
 </script>
+<div id="ttBubble"></div>
 <div class="wrap">
 <header>
   <h1>💰 红利复投<span class="g">工具</span></h1>
@@ -787,6 +816,27 @@ window.onerror = (msg, src, line, col, err)=>{
 const fmt = (n, d=2) => (n==null?'—':Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}));
 const fmtPct = (n, d=2) => (n==null?'—':(n*100).toFixed(d)+'%');
 const $ = id => document.getElementById(String(id).replace(/^#/, ''));   // 兼容 # 前缀
+/* v3.9.0 T2 hover→tap（接手 AI）：触屏点击 .tt 术语弹气泡（桌面 hover 保留） */
+(function(){
+  const bub = document.createElement('div');
+  bub.id = 'ttBubble';
+  document.body.appendChild(bub);
+  let hideTimer = null;
+  const showBubble = (txt, x, y) => {
+    bub.textContent = txt;
+    bub.style.left = Math.min(x + 8, window.innerWidth - 290) + 'px';
+    bub.style.top = (y + 14) + 'px';
+    bub.classList.add('show');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => bub.classList.remove('show'), 3500);
+  };
+  document.addEventListener('click', e => {
+    const t = e.target && e.target.closest ? e.target.closest('.tt') : null;
+    if (!t) { if (!e.target.closest || !e.target.closest('#ttBubble')) bub.classList.remove('show'); return; }
+    const r = t.getBoundingClientRect();
+    showBubble(t.title || t.getAttribute('title') || '', r.left, r.bottom);
+  }, true);
+})();
 
 /* JSONP 加载器：paramName 区分接口（东财 callback= / 腾讯 jsonp=） */
 

@@ -2843,6 +2843,54 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   const yieldSeriesStr = r => (r.yieldSeries || []).filter(p => p.v != null).slice(-4).map(p => p.y + ' ' + p.v.toFixed(1) + '%').join(' · ') || '—';
   // v1.8.13 功能B：逐年分红明细行（同比上一年 -20% 标红预警）
   const yearsLine = r => { const ys = (r.res.years || []).slice().sort((a, b) => a.year < b.year ? -1 : 1); return ys.slice().reverse().map((y, i) => { const prev = (i + 1 < ys.length) ? ys[ys.length - 2 - i] : null; const yoy = (prev && prev.divTotal > 0 && y.divTotal != null) ? (y.divTotal - prev.divTotal) / prev.divTotal : null; return y.year + '年：' + fmt(y.divTotal, 0) + ' 元' + (yoy != null && yoy <= -0.2 ? ' <span style="color:var(--red)">⚠️' + (yoy * 100).toFixed(0) + '%</span>' : '') + (y.rate != null ? '（' + (y.rate * 100).toFixed(1) + '%）' : ''); }).join('<br>') || '—'; };
+  /* v3.9.0 对比裁判：🏆结论条 + 风险-收益散点图（右上=高收益低回撤=最优） */
+  function renderCmpVerdict(results) {
+    const vd = $('#cmpVerdict'), sc = $('#cmpScatterCard');
+    if (!vd || !results || !results.length) return;
+    const valid = results.filter(r => !r.divMissing && r.res && r.res.final);
+    if (!valid.length) { vd.style.display = 'none'; sc.style.display = 'none'; return; }
+    /* 分项冠军 */
+    const byXirr = valid.slice().sort((a, b) => (b.res.final.xirr || -9) - (a.res.final.xirr || -9))[0];
+    const byDD = valid.slice().sort((a, b) => (a.maxDD || 0) - (b.maxDD || 0))[0];
+    const byDiv = valid.slice().sort((a, b) => (b.res.final.totalDiv || 0) - (a.res.final.totalDiv || 0))[0];
+    /* 综合最优：XIRR 归一 + 回撤反向归一，各 50% */
+    const xirrs = valid.map(r => r.res.final.xirr || 0);
+    const dds = valid.map(r => r.maxDD || 0);
+    const xMax = Math.max.apply(null, xirrs) || 1, dMax = Math.max.apply(null, dds) || 1;
+    let best = null, bestScore = -Infinity;
+    valid.forEach(r => {
+      const s1 = xMax > 0 ? ((r.res.final.xirr || 0) / xMax) : 0;
+      const s2 = dMax > 0 ? (1 - (r.maxDD || 0) / dMax) : 0.5;
+      const score = s1 * 0.6 + s2 * 0.4;
+      if (score > bestScore) { bestScore = score; best = r; }
+    });
+    const chip = (label, r) => `<span style="font-size:12px;margin-right:10px">${label}=<b style="color:var(--gold)">${r.it.name}</b></span>`;
+    vd.innerHTML = `<span style="font-weight:700;color:var(--gold);margin-right:6px">⚖️ 裁判结论</span>${chip('🏆 收益最高', byXirr)}${chip('🛡 回撤最小', byDD)}${chip('💰 分红最多', byDiv)}${best ? chip('⭐ 综合最优', best) : ''}<span style="font-size:10px;color:var(--muted)">综合=年化60%+回撤40%加权（非投资建议）</span>`;
+    vd.style.display = 'block';
+    /* 散点图 */
+    if (typeof echarts !== 'undefined' && valid.length >= 2) {
+      const ch = echarts.init($('#cmpScatter'));
+      ch.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'item', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => `<b>${p.data[4]}</b><br/>年化 ${p.data[0].toFixed(1)}% · 最大回撤 ${p.data[1].toFixed(0)}%` },
+        grid: { left: 50, right: 24, top: 20, bottom: 34 },
+        xAxis: { type: 'value', name: '年化收益% →', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 9 }, splitLine: { lineStyle: { color: '#22322c' } } },
+        yAxis: { type: 'value', name: '最大回撤%（负）', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v.toFixed(0) + '%' }, splitLine: { lineStyle: { color: '#22322c' } } },
+        series: [{
+          type: 'scatter', symbolSize: 34,
+          data: valid.map(r => ({
+            value: [+((r.res.final.xirr || 0) * 100).toFixed(1), +(-(r.maxDD || 0) * 100).toFixed(0), r.it.name],
+            itemStyle: { color: r === best ? '#d9a441' : '#5aa9e6' },
+          })),
+          label: { show: true, formatter: p => p.data[2], position: 'top', color: '#e8efe9', fontSize: 10 },
+          markLine: { silent: true, symbol: 'none', lineStyle: { color: 'rgba(217,164,65,.4)', type: 'dashed' }, data: [{ xAxis: (xMax * 100).toFixed(1) * 0.8 }] },
+        }],
+      });
+      ch.on('click', p => { if (p.data && p.data[2]) { try { openDiagnose(p.data[2]); } catch (e) {} } });
+      sc.style.display = 'block';
+    } else { sc.style.display = 'none'; }
+  }
+
   function renderCmpTable() {
     const getVal = r => ({ final: r.res.final.finalValue, invested: r.res.final.finalInvested, div: r.res.final.totalDiv, recover: (r.res.final.totalDiv != null && r.res.final.finalInvested > 0) ? r.res.final.totalDiv / r.res.final.finalInvested * 100 : null, lastRepDiv: r.lastRepDiv ? r.lastRepDiv.cash : null, xirr: r.res.final.xirr, dd: -r.maxDD, yield12: r.yield12 })[cmpSort.key];
     const list = cmpSort.key ? [...cmpResults].sort((a, b) => {
@@ -3078,6 +3126,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (status) status.textContent = '';
     if (!results.length) { el.style.display = 'block'; $('#cmpTbl').innerHTML = '<div class="hint err">全部失败</div>'; $('#cmpNote').textContent = errors.join('；'); return; }
     el.style.display = 'block';   // v1.8.4c：先显示容器再绘三图+fitLegendTop（曾致 clientWidth=0 守卫拦截测量）
+    /* v3.9.0 对比裁判（接手 AI）：结论条 + 风险-收益散点图——一眼选出综合最优 */
+    try { renderCmpVerdict(results); } catch (e) {}
     if (errors.length || skipped.length) {
       const note = $('#cmpNote'); if (note) note.textContent = '⚠️ ' + [...skipped, ...errors].join('；');
     }
@@ -5177,6 +5227,30 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* 驾驶舱主流程：拉组合数据 → calcComboBacktest → renderCockpit */
   async function runPortfolioBacktest() {
+    /* v3.9.0 空态即示例（接手 AI E1）：无组合时自动创建示例组合（招行/工行/长电），复用正常流程渲染完整驾驶舱 */
+    const _demoSel = document.getElementById('pfbtComboSel');
+    if (_demoSel && !_demoSel.value && (!window.__demoComboRan || window.__demoComboRan === false)) {
+      try {
+        window.__demoComboRan = true;
+        const c2 = DL.loadCombos();
+        const did = 'c' + Date.now();
+        c2.combos.push({ id: did, name: '示例组合（招行/工行/长电）', items: [
+          { code: '600036', name: '招商银行', amount: 500000, monthly: 3000 },
+          { code: '601398', name: '工商银行', amount: 300000, monthly: 2000 },
+          { code: '600900', name: '长江电力', amount: 200000, monthly: 1000 },
+        ], savedAt: Date.now() });
+        c2.activeId = did;
+        DL.saveCombos(c2);
+        const sel2 = $('#pfbtComboSel');
+        if (sel2) {
+          sel2.innerHTML = '';
+          c2.combos.forEach(cm => { const o = document.createElement('option'); o.value = cm.id; o.textContent = cm.name + '（' + cm.items.length + '只）'; sel2.appendChild(o); });
+          sel2.value = did;
+        }
+        const rEl = document.getElementById('pfbtResult');
+        if (rEl) rEl.innerHTML = '<div class="hint">🎯 无已存组合，已自动用<b>示例组合</b>（招行/工行/长电）演示——想用自己的？去决策台「🧮 我的组合」建</div>';
+      } catch (e) { try { console.warn('示例组合创建失败', e); } catch (e2) {} }
+    }
     const el = $('#pfbtResult');
     if (!el || _pfbtRunning) return;
     const c = DL.loadCombos();
@@ -5287,12 +5361,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   async function loadComboPool(combo, y) {
     const pool = {}; const failed = [];
     const from = (() => { const t = new Date(); t.setDate(t.getDate() - y * 366); return t.toISOString().slice(0, 10); })();
+    /* v3.9.0 分步进度（接手 AI E4）：显示"K线 3/8 · 分红 5/8"，不再是黑盒等待 */
+    const total = combo.items.length;
+    let doneN = 0;
+    const prog = (tag) => {
+      try {
+        const el = document.getElementById('pfbtResult');
+        if (el) el.innerHTML = `<div class="hint">⏳ 正在拉取数据 ${++doneN}/${total}（${tag}）…<span style="color:var(--muted)">首次较慢，二次跑命中本地缓存秒出</span></div>`;
+      } catch (e) {}
+    };
     for (let i = 0; i < combo.items.length; i += 4) {
       const batch = combo.items.slice(i, i + 4);
       await Promise.all(batch.map(async (it) => {
         try {
+          prog(it.name + ' K线');
           const [divs, kline] = await Promise.all([DL.fetchDividendsOne(it.code), DL.getKline(it.code, from, DL.todayStr())]);
           if (!divs || !divs.length || !kline || !Object.keys(kline).length) { failed.push(it.name); return; }
+          prog(it.name + ' 分红');
           const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
           pool[it.code] = { kline, divs, series };
         } catch (e) { failed.push(it.name); }
