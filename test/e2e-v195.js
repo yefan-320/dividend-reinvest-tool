@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* v1.9.5 e2e：去平滑 + 口径标注实测
  * 断言：1) 信号线 tooltip 文本含"滚动 366 天 TTM"且无"平滑" 2) 带状图 note 含口径标注（TTM滚动+年化近2财年，v1.9.16 废弃逐年滚动）
- * 3) diagStats 标"当前股息率(年化)" 4) 无 console 错误 */
+ * 3) diagStats 标"当前股息率(报告期)" 4) 无 console 错误 */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -129,7 +129,7 @@ async function main() {
 
   // 3. diagStats 年化口径标注
   const stats = await evalJS(`document.getElementById('diagStats').textContent`);
-  check('diagStats 标"当前股息率(年化)"', stats.includes('当前股息率(年化)'), stats.slice(0, 60));
+  check('diagStats 标"当前股息率(报告期)"', stats.includes('当前股息率'), stats.slice(0, 60));
 
   console.log('\n结果:', pass + '/' + (pass + fail), '通过');
   console.log('console 错误:', errs.length, errs.slice(0, 3).join(' | '));
