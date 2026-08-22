@@ -1,0 +1,711 @@
+{
+  "generatedAt": "2026-08-23",
+  "source": "data-layer.js v3.8.0",
+  "tierLine": {
+    "600016": {
+      "name": "民生银行",
+      "ind": "bank",
+      "p75": 3.66,
+      "p90": 3.89,
+      "p95": 4.21,
+      "p90_1y": 3.88,
+      "cagr": -4.1,
+      "payout": 30,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600027": {
+      "name": "华电国际",
+      "ind": "utility",
+      "p75": 2.41,
+      "p90": 3.07,
+      "p95": 3.38,
+      "p90_1y": 3.41,
+      "cagr": 4.8,
+      "payout": 46,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600028": {
+      "name": "中国石化",
+      "ind": "energy",
+      "p75": 3.61,
+      "p90": 4.22,
+      "p95": 4.5,
+      "p90_1y": 3.48,
+      "cagr": -17.4,
+      "payout": 72,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600036": {
+      "name": "招商银行",
+      "ind": "bank",
+      "p75": 3.78,
+      "p90": 4.09,
+      "p95": 4.24,
+      "p90_1y": 3.82,
+      "cagr": 5.1,
+      "payout": 35,
+      "quality": "稳定增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600066": {
+      "name": "宇通客车",
+      "ind": "manufacture",
+      "p75": 6.06,
+      "p90": 6.66,
+      "p95": 7.41,
+      "p90_1y": 6.66,
+      "cagr": 15.2,
+      "payout": 45,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false,
+      "note": "周期股·2年持有窗口·双信号立即硬红灯(2017-37%)"
+    },
+    "600188": {
+      "name": "兖矿能源",
+      "ind": "energy",
+      "p75": 7.83,
+      "p90": 12.92,
+      "p95": 13.65,
+      "p90_1y": 4.47,
+      "cagr": -45.4,
+      "payout": 55,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600519": {
+      "name": "贵州茅台",
+      "ind": "consumer",
+      "p75": 1.98,
+      "p90": 2.2,
+      "p95": 2.51,
+      "p90_1y": 2.54,
+      "cagr": 26.1,
+      "payout": 77,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600690": {
+      "name": "海尔智家",
+      "ind": "consumer",
+      "p75": 2.19,
+      "p90": 3.79,
+      "p95": 4.07,
+      "p90_1y": 4.08,
+      "cagr": 27,
+      "payout": 51,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600795": {
+      "name": "国电电力",
+      "ind": "utility",
+      "p75": 2.79,
+      "p90": 3.38,
+      "p95": 3.51,
+      "p90_1y": 3.54,
+      "cagr": null,
+      "payout": 46,
+      "quality": "—",
+      "redLine": false,
+      "pending": false
+    },
+    "600886": {
+      "name": "国投电力",
+      "ind": "utility",
+      "p75": 1.62,
+      "p90": 2.22,
+      "p95": 2.31,
+      "p90_1y": 2.31,
+      "cagr": 22.7,
+      "payout": 54,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600887": {
+      "name": "伊利股份",
+      "ind": "consumer",
+      "p75": 2.86,
+      "p90": 3.7,
+      "p95": 3.85,
+      "p90_1y": 3.87,
+      "cagr": 9.9,
+      "payout": 82,
+      "quality": "稳定增长",
+      "redLine": false,
+      "pending": false,
+      "eventRisk": "澳优2026H1预亏6.85-7.85亿·中报8月底披露"
+    },
+    "600900": {
+      "name": "长江电力",
+      "ind": "utility",
+      "p75": 1.78,
+      "p90": 2.16,
+      "p95": 2.23,
+      "p90_1y": 2.24,
+      "cagr": 5.4,
+      "payout": 71,
+      "quality": "稳定增长",
+      "redLine": false,
+      "pending": false
+    },
+    "600941": {
+      "name": "中国移动",
+      "ind": "telecom",
+      "p75": 2.76,
+      "p90": 3.4,
+      "p95": 3.51,
+      "p90_1y": 3.51,
+      "cagr": 6.7,
+      "payout": 73,
+      "quality": "稳定增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601088": {
+      "name": "中国神华",
+      "ind": "energy",
+      "p75": 5.85,
+      "p90": 6.49,
+      "p95": 6.64,
+      "p90_1y": 4.38,
+      "cagr": -7.6,
+      "payout": 76,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601166": {
+      "name": "兴业银行",
+      "ind": "bank",
+      "p75": 4.56,
+      "p90": 5.08,
+      "p95": 5.36,
+      "p90_1y": 4.46,
+      "cagr": -3.5,
+      "payout": 31,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601225": {
+      "name": "陕西煤业",
+      "ind": "energy",
+      "p75": 8.37,
+      "p90": 9.6,
+      "p95": 10.11,
+      "p90_1y": 5.24,
+      "cagr": -24.2,
+      "payout": 57,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601288": {
+      "name": "农业银行",
+      "ind": "bank",
+      "p75": 3.82,
+      "p90": 4.11,
+      "p95": 4.86,
+      "p90_1y": 3.04,
+      "cagr": 3.9,
+      "payout": 32,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601318": {
+      "name": "中国平安",
+      "ind": "insurer",
+      "p75": 3.56,
+      "p90": 3.89,
+      "p95": 4,
+      "p90_1y": 3.58,
+      "cagr": 3.7,
+      "payout": 35,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601328": {
+      "name": "交通银行",
+      "ind": "bank",
+      "p75": 4.08,
+      "p90": 4.38,
+      "p95": 4.84,
+      "p90_1y": 3.65,
+      "cagr": -4.5,
+      "payout": 31,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601398": {
+      "name": "工商银行",
+      "ind": "bank",
+      "p75": 3.89,
+      "p90": 4.21,
+      "p95": 4.37,
+      "p90_1y": 2.87,
+      "cagr": 0.7,
+      "payout": 31,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601601": {
+      "name": "中国太保",
+      "ind": "insurer",
+      "p75": 1.78,
+      "p90": 2.16,
+      "p95": 2.31,
+      "p90_1y": 2.14,
+      "cagr": 4.1,
+      "payout": 22,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601628": {
+      "name": "中国人寿",
+      "ind": "insurer",
+      "p75": 0.04,
+      "p90": 0.71,
+      "p95": 0.84,
+      "p90_1y": 0.84,
+      "cagr": 20.4,
+      "payout": 16,
+      "quality": "高增长",
+      "redLine": true,
+      "pending": false
+    },
+    "601857": {
+      "name": "中国石油",
+      "ind": "energy",
+      "p75": 3.83,
+      "p90": 4.27,
+      "p95": 5.07,
+      "p90_1y": 4.21,
+      "cagr": 3.6,
+      "payout": 53,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601985": {
+      "name": "中国核电",
+      "ind": "utility",
+      "p75": 0.27,
+      "p90": 0.51,
+      "p95": 0.56,
+      "p90_1y": 0.56,
+      "cagr": 1.9,
+      "payout": 37,
+      "quality": "低增长",
+      "redLine": false,
+      "pending": false
+    },
+    "601988": {
+      "name": "中国银行",
+      "ind": "bank",
+      "p75": 3.52,
+      "p90": 3.9,
+      "p95": 4.44,
+      "p90_1y": 2.84,
+      "cagr": -0.8,
+      "payout": 31,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "000001": {
+      "name": "平安银行",
+      "ind": "bank",
+      "p75": 4.35,
+      "p90": 5.07,
+      "p95": 5.28,
+      "p90_1y": 3.99,
+      "cagr": 27.9,
+      "payout": 29,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false
+    },
+    "000333": {
+      "name": "美的集团",
+      "ind": "consumer",
+      "p75": 3.22,
+      "p90": 3.88,
+      "p95": 4.03,
+      "p90_1y": 4.04,
+      "cagr": 19.8,
+      "payout": 69,
+      "quality": "高增长",
+      "redLine": false,
+      "pending": false
+    },
+    "000651": {
+      "name": "格力电器",
+      "ind": "consumer",
+      "p75": 5.73,
+      "p90": 6.19,
+      "p95": 6.42,
+      "p90_1y": 6.43,
+      "cagr": -20.6,
+      "payout": null,
+      "quality": "负增长",
+      "redLine": false,
+      "pending": false
+    },
+    "000858": {
+      "name": "五粮液",
+      "ind": "consumer",
+      "p75": 3.16,
+      "p90": 3.63,
+      "p95": 5.1,
+      "p90_1y": 5.18,
+      "cagr": 10.9,
+      "payout": 104,
+      "quality": "高增长",
+      "redLine": true,
+      "pending": false
+    },
+    "000895": {
+      "name": "双汇发展",
+      "ind": "consumer",
+      "p75": 4.08,
+      "p90": 4.28,
+      "p95": 4.44,
+      "p90_1y": 4.38,
+      "cagr": -3.2,
+      "payout": 98,
+      "quality": "负增长",
+      "redLine": true,
+      "pending": false
+    }
+  },
+  "bench": {
+    "bank": {
+      "roe": [
+        7,
+        9,
+        11
+      ],
+      "yieldMid": 5,
+      "yieldUp": 1,
+      "note": "银行 10 样本实测（2026-08-18）：中位 5.27%；资本约束分红率 30-35%；三档 5.0/6.0/7.0"
+    },
+    "consumer": {
+      "roe": [
+        15,
+        20,
+        24
+      ],
+      "yieldMid": 5,
+      "yieldUp": 1,
+      "note": "消费 9 样本实测（2026-08-18）：中位 5.36%；高分红率 70%+ 常见；三档 5.0/6.0/7.0（弱依据·样本2持仓·待扩充）"
+    },
+    "telecom": {
+      "roe": [
+        8,
+        10,
+        13
+      ],
+      "yieldMid": 4.5,
+      "yieldUp": 1.5,
+      "note": "电信实测（3 样本·未达权威线）：中位 4.14%；三档 4.5/6.0/7.0（4.5 基于个股可达性修正）"
+    },
+    "insurer": {
+      "roe": [
+        14,
+        18,
+        28
+      ],
+      "yieldMid": 4,
+      "yieldUp": 1.5,
+      "note": "保险 5 样本实测（2026-08-18）：中位 3.84%；平安 5.26 特例拉高；三档 4.0/5.5/6.5"
+    },
+    "utility": {
+      "roe": [
+        11,
+        12,
+        16
+      ],
+      "yieldMid": 4,
+      "yieldUp": 1.5,
+      "note": "公用事业 6 样本实测（2026-08-18）：中位 3.70%；三档 4.0/5.5/6.5"
+    },
+    "energy": {
+      "roe": [
+        10,
+        11,
+        13
+      ],
+      "yieldMid": 5.5,
+      "yieldUp": 1.5,
+      "note": "能源 6 样本实测（2026-08-18）：中位 3.95%；⚠️ 周期行业·中位数法不适用·临时线 7.0%（待周期样本扩充）"
+    }
+  },
+  "ruleStats": {
+    "strong": [
+      43,
+      74,
+      684
+    ],
+    "buy": [
+      37.6,
+      72,
+      1468
+    ],
+    "watch": [
+      42.2,
+      77,
+      1029
+    ],
+    "avoid": [
+      33,
+      67,
+      30
+    ],
+    "avoid_small": [
+      16.5,
+      55,
+      11
+    ],
+    "wait": [
+      0.8,
+      52,
+      958
+    ]
+  },
+  "sigStats": {
+    "bank": {
+      "small": {
+        "all": "58%",
+        "n": 210,
+        "seg": "43-69%",
+        "last": "69%",
+        "lastN": 69,
+        "note": "随机等效"
+      },
+      "add": {
+        "all": "82%",
+        "n": 118,
+        "seg": "65-100%",
+        "last": "91%",
+        "lastN": 47,
+        "note": ""
+      },
+      "heavy": {
+        "all": "96%",
+        "n": 80,
+        "seg": "75-100%",
+        "last": "100%",
+        "lastN": 50,
+        "note": ""
+      }
+    },
+    "consumer": {
+      "small": {
+        "all": "76%",
+        "n": 75,
+        "seg": "69-100%",
+        "last": "83%",
+        "lastN": 24,
+        "note": "随机等效"
+      },
+      "add": {
+        "all": "80%",
+        "n": 46,
+        "seg": "75-85%",
+        "last": "75%",
+        "lastN": 20,
+        "note": ""
+      },
+      "heavy": {
+        "all": "62%",
+        "n": 32,
+        "seg": "50-81%",
+        "last": "50%",
+        "lastN": 4,
+        "note": "2021 格力时段全亏"
+      }
+    },
+    "insurer": {
+      "small": {
+        "all": "58%",
+        "n": 24,
+        "seg": "27-100%",
+        "last": "80%",
+        "lastN": 10,
+        "note": "随机等效"
+      },
+      "add": {
+        "all": "100%",
+        "n": 8,
+        "seg": "",
+        "last": "",
+        "lastN": 0,
+        "note": "样本不足(n=8)"
+      },
+      "heavy": {
+        "all": "100%",
+        "n": 1,
+        "seg": "",
+        "last": "",
+        "lastN": 0,
+        "note": "样本不足(n=1)"
+      }
+    },
+    "utility": {
+      "small": {
+        "all": "68%",
+        "n": 99,
+        "seg": "53-85%",
+        "last": "76%",
+        "lastN": 25,
+        "note": "随机等效"
+      },
+      "add": {
+        "all": "79%",
+        "n": 29,
+        "seg": "66-100%",
+        "last": "100%",
+        "lastN": 3,
+        "note": ""
+      },
+      "heavy": {
+        "all": "100%",
+        "n": 11,
+        "seg": "100%",
+        "last": "100%",
+        "lastN": 7,
+        "note": ""
+      }
+    },
+    "energy": {
+      "small": {
+        "all": "74%",
+        "n": 98,
+        "seg": "33-96%",
+        "last": "68%",
+        "lastN": 69,
+        "note": "随机等效；拆子类(D6)：煤炭100%胜率/石化72%（n=39）"
+      },
+      "add": {
+        "all": "61%",
+        "n": 59,
+        "seg": "51-100%",
+        "last": "65%",
+        "lastN": 26,
+        "note": "石化拖累；拆子类(D6)：煤炭100%（n=18）/石化85%（n=20）"
+      },
+      "heavy": {
+        "all": "69%",
+        "n": 52,
+        "seg": "60-88%",
+        "last": "88%",
+        "lastN": 17,
+        "note": "石化拖累；拆子类(D6)：煤炭100%（n=11）/石化89%（n=9）"
+      }
+    },
+    "telecom": {
+      "small": {
+        "all": "",
+        "n": 0,
+        "seg": "",
+        "last": "",
+        "lastN": 0,
+        "note": "样本不足"
+      },
+      "add": {
+        "all": "",
+        "n": 0,
+        "seg": "",
+        "last": "",
+        "lastN": 0,
+        "note": "样本不足"
+      },
+      "heavy": {
+        "all": "",
+        "n": 0,
+        "seg": "",
+        "last": "",
+        "lastN": 0,
+        "note": "样本不足"
+      }
+    }
+  },
+  "maxDd": {
+    "bank": {
+      "add": {
+        "dd": -25,
+        "seg": "2018-21"
+      },
+      "heavy": {
+        "dd": -23,
+        "seg": "2018-21"
+      }
+    },
+    "consumer": {
+      "add": {
+        "dd": -45,
+        "seg": "2014-17"
+      },
+      "heavy": {
+        "dd": -49,
+        "seg": "2014-17"
+      }
+    },
+    "insurer": {
+      "add": null,
+      "heavy": null
+    },
+    "utility": {
+      "add": {
+        "dd": -12,
+        "seg": "2014-17"
+      },
+      "heavy": {
+        "dd": 0,
+        "seg": "—"
+      }
+    },
+    "energy": {
+      "add": {
+        "dd": -28,
+        "seg": "2022-26"
+      },
+      "heavy": {
+        "dd": -27,
+        "seg": "2022-26"
+      }
+    },
+    "telecom": {
+      "add": null,
+      "heavy": null
+    }
+  },
+  "p95Triggers": {
+    "600036": 20,
+    "600066": 3,
+    "600887": 1,
+    "600941": 3,
+    "601318": 0,
+    "601398": 20,
+    "000333": 2
+  },
+  "treasuryNow": 1.681,
+  "treasuryAsOf": "2026-08-18"
+}

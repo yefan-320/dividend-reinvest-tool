@@ -323,6 +323,8 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
 <!-- ===== 决策台 tab（v1.7.0 新增） ===== -->
 <section id="tab-home" class="tab-panel">
   <div id="onboardGuide" style="display:none"></div>
+  <!-- v3.9.0 今日简报：打开就知道今天要关注什么 -->
+  <div id="todayBrief" style="display:none;margin-bottom:8px"></div>
   <div id="dailyBar" style="display:none"></div>
   <div style="margin-bottom:8px"><button type="button" class="chip" id="paramToggle" style="color:#5aa9e6;border-color:#5aa9e6">⚙️ 参数中心</button></div>
   <div id="paramPanel" style="display:none"></div>
@@ -341,6 +343,8 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
     <h2>⭐ 我的自选 <span class="hint" style="float:right" id="wlFresh">—</span></h2>
     <!-- P72（2026-08-21）：机会速览并入自选卡头部（父卡收子卡，首页 6 元素） -->
     <div id="homeOpportunities" style="margin-bottom:8px"></div>
+    <!-- v3.9.0 U8 自选机会地图：X=估值分位（右=便宜）、Y=股息率（上=高）、气泡=市值、颜色=结论 -->
+    <div id="oppMap" style="margin-bottom:8px"></div>
     <div id="homeWatchlist"></div>
   </div>
   <div class="card">
@@ -572,6 +576,12 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
   </div>
   <div class="card" id="cmpResult" style="display:none">
     <div class="hint err" id="cmpWarn" style="display:none;margin-bottom:8px"></div>
+    <!-- v3.9.0 对比裁判：结论条 + 风险-收益散点图 -->
+    <div id="cmpVerdict" style="display:none;padding:8px 12px;border:1px solid rgba(217,164,65,.5);border-radius:10px;background:rgba(217,164,65,.07);margin-bottom:10px"></div>
+    <div id="cmpScatterCard" style="display:none;margin-bottom:10px">
+      <h2>⚖️ 风险-收益裁判（右上=高收益低回撤=最优）</h2>
+      <div class="chart" id="cmpScatter" style="height:240px"></div>
+    </div>
     <h2>总资产走势（同起点买入）</h2>
     <div style="font-size:11px;color:var(--muted);margin:4px 0 2px">🎬 时间轴回放（拖动看各标的走势）：</div>
     <input type="range" id="cmpTimeline" min="0" max="0" value="0" style="width:100%;accent-color:var(--gold);margin-bottom:4px" disabled>
@@ -618,6 +628,9 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
       <div class="hint">每月首个交易日投入，不足一手自动累计下月；首月不追加</div>
     </div>
   </div>
+  <!-- v3.9.0 参数分档：月追加/税档/复投折叠进"高级参数"，简单模式零术语门槛 -->
+  <details style="margin-top:4px"><summary style="font-size:11px;color:#5aa9e6;cursor:pointer;user-select:none">⚙️ 高级参数（月追加 / 红利税 / 复投）</summary>
+  <div style="margin-top:4px">
   <div class="switch"><input type="checkbox" id="reinvest" checked><label for="reinvest">红利再投资（分红按除息日收盘价买入，碎股模型）</label></div>
   <div class="switch" style="flex-wrap:wrap"><span style="font-size:12px;color:var(--sub)">红利税档位</span>
     <select id="taxRate" style="background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 8px;font-size:12px">
@@ -627,6 +640,7 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
     </select>
     <span style="font-size:11px;color:var(--sub)">分红现金按税率扣税后再复投/累计（口径与对比页免税基准区分）</span>
   </div>
+  </div></details>
   <div class="btnrow">
     <button class="btn" id="btnRun">▶ 回测（联网拉最新数据）</button>
     <button class="btn ghost" id="btnDemo">离线演示（仅招行，不联网）</button>
@@ -643,6 +657,14 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
   <div class="gauge-note" id="gaugeNote"></div>
 </div>
 
+<!-- v3.9.0 回测结论卡 + 收益瀑布图（一眼看懂钱怎么变的） -->
+<div class="card" id="cardConclusion" style="display:none">
+  <div id="btConclusion"></div>
+</div>
+<div class="card" id="cardWaterfall" style="display:none">
+  <h2>收益瀑布（钱是怎么变出来的）</h2>
+  <div class="chart" id="btWaterfall" style="height:200px"></div>
+</div>
 <div class="card" id="cardSummary" style="display:none">
   <h2>收益概览 <span id="stockName" style="color:var(--txt);font-weight:700"></span></h2>
   <div class="hint err" id="btEtfNote" style="display:none"></div>
@@ -980,6 +1002,60 @@ function renderAll(res, name, res2){
   }
   renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2);
 }
+/* v3.9.0 回测结论卡（接手 AI）：一眼看懂"赚多少、分红贡献多少、跑赢国债吗" */
+function renderBtConclusion(res, f) {
+  const cc = $('cardConclusion');
+  if (!cc || !f) return;
+  try {
+    const gain = f.finalValue - f.finalInvested;
+    const divShare = gain > 0 ? Math.min(100, f.totalDiv / gain * 100) : 0;
+    const yearsN = (res.years || []).length || 1;
+    const treasury = (typeof DL !== 'undefined' && DL.TREASURY_NOW != null) ? DL.TREASURY_NOW : 1.68;
+    const beat = f.xirr != null ? (f.xirr - treasury / 100) : null;
+    $('btConclusion').innerHTML = `
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:22px;font-weight:800;color:var(--gold)">${fmt(f.finalValue, 0)} 元</div>
+          <div style="font-size:12px;color:var(--sub)">${yearsN} 年：投入 ${fmt(f.finalInvested, 0)} 元 → 期末总资产（含现金池 ${fmt(f.cashPool, 0)} 元）</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="padding:6px 12px;border-radius:8px;background:rgba(76,175,125,.12);border:1px solid rgba(76,175,125,.4);text-align:center"><div style="font-size:11px;color:var(--sub)">年化(XIRR)</div><div style="font-size:16px;font-weight:700;color:#4caf7d">${f.xirr != null ? (f.xirr * 100).toFixed(1) + '%' : '—'}</div></div>
+          <div style="padding:6px 12px;border-radius:8px;background:rgba(217,164,65,.12);border:1px solid rgba(217,164,65,.4);text-align:center"><div style="font-size:11px;color:var(--sub)">分红贡献</div><div style="font-size:16px;font-weight:700;color:#d9a441">${fmt(f.totalDiv, 0)} 元 · ${divShare.toFixed(0)}%</div></div>
+          <div style="padding:6px 12px;border-radius:8px;background:rgba(90,169,230,.12);border:1px solid rgba(90,169,230,.4);text-align:center"><div style="font-size:11px;color:var(--sub)">vs 国债 ${treasury.toFixed(2)}%</div><div style="font-size:16px;font-weight:700;color:${beat != null && beat > 0 ? '#4caf7d' : '#e05a5a'}">${beat != null ? (beat * 100).toFixed(1) + ' pp' : '—'}</div></div>
+          <div style="padding:6px 12px;border-radius:8px;background:rgba(90,169,230,.12);border:1px solid rgba(90,169,230,.4);text-align:center"><div style="font-size:11px;color:var(--sub)">回本进度</div><div style="font-size:16px;font-weight:700;color:#5aa9e6">${res.principal > 0 ? (f.totalDiv / res.principal * 100).toFixed(1) : '—'}%</div></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">一句话：${yearsN} 年投入 ${fmt(f.finalInvested, 0)} 元 → ${fmt(f.finalValue, 0)} 元，其中分红累计 ${fmt(f.totalDiv, 0)} 元（占总收益 ${divShare.toFixed(0)}%）${beat != null ? '，年化 ' + (f.xirr * 100).toFixed(1) + '% 跑赢国债 ' + (beat * 100).toFixed(1) + ' 个百分点' : ''}。历史回测非未来承诺。</div>`;
+    cc.style.display = 'block';
+  } catch (e) { cc.style.display = 'none'; }
+}
+/* v3.9.0 收益瀑布图（接手 AI）：初始本金→月追加→分红再投→价格涨跌→期末 */
+function renderBtWaterfall(res, f) {
+  const wf = $('btWaterfall');
+  if (!wf || !f || typeof echarts === 'undefined') return;
+  const priceGain = f.finalValue - f.finalInvested;
+  const monthly = f.monthlyTotal || 0;
+  const items = [
+    { n: '初始本金', v: res.principal, c: '#5aa9e6' },
+    ...(monthly > 0 ? [{ n: '月追加', v: monthly, c: '#8bc34a' }] : []),
+    { n: '分红再投', v: f.finalInvested - res.principal - monthly, c: '#d9a441' },
+    { n: '价格涨跌', v: priceGain, c: priceGain >= 0 ? '#4caf7d' : '#e05a5a' },
+  ];
+  const ch = ensureChart('btWaterfall');
+  ch.setOption({
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => `<b>${p[0].name}</b>：${fmt(p[0].value, 0)} 元` },
+    grid: { left: 60, right: 14, top: 18, bottom: 24 },
+    xAxis: { type: 'category', data: items.map(i => i.n), axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#3a4f46' } } },
+    yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 1e4).toFixed(0) + '万' }, splitLine: { lineStyle: { color: '#22322c' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 46,
+      data: items.map(i => ({ value: +i.v.toFixed(0), itemStyle: { color: i.c, borderRadius: [4, 4, 0, 0] }, label: { show: true, position: 'top', color: '#8fa69c', fontSize: 9, formatter: x => (x.value / 1e4).toFixed(0) + '万' } })),
+    }],
+  });
+  $('cardWaterfall').style.display = 'block';
+}
+
 function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
   // v1.8.13 BUG-3：echarts CDN 未就绪时的降级渲染——记录补图钩子，onload 后自动补全图表
   window.__pendingFull = () => { try { renderAllFull(res, name, null, showY, showY0, rateNote1, rateNote2); } catch (e) { setStatus('⚠️ 图表渲染失败：' + e.message, true); } };
@@ -1008,6 +1084,8 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
     : `总收益率 ${fmtPct(f.totalReturn)}`;
   $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：${retCaliberTxt} · 年化(XIRR) ${fmtPct(f.xirr)}`;
   $('cardSummary').style.display='block';
+  renderBtConclusion(res, f);   /* v3.9.0 回测结论卡+瀑布图 */
+  try { renderBtWaterfall(res, f); } catch (e) {}
   // v1.8.7：降级模式也显示年度明细表（纯 HTML 不依赖 echarts，主人要求"每年分红的钱都要体现"）
   if (yrs.length) { renderYearTable(yrs, 'pay'); $('cardTable').style.display='block'; }
   ['cardAsset','cardDiv','cardRate','cardShares'].forEach(id=>$(id).style.display='none');
@@ -1040,6 +1118,8 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     : `总收益率 ${fmtPct(f.totalReturn)}`;
   $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：${retCaliberTxt} · 年化(XIRR) ${fmtPct(f.xirr)}`;
   $('cardSummary').style.display='block';
+  renderBtConclusion(res, f);   /* v3.9.0 回测结论卡+瀑布图 */
+  try { renderBtWaterfall(res, f); } catch (e) {}
   // v1.8.7：点击"累计分红/年均分红/最近年度"滚动到年度明细表（主人要求"每年分红的钱都要体现"）
   const yt = $('#stats');
   if (yt) yt.querySelectorAll('.stat').forEach((el, i) => {
