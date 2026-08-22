@@ -110,6 +110,11 @@ if [ -f test/unit-v37.js ]; then
   echo "==> unit-v37 v3.7.0 回归断言（总收益率口径/陷阱拦截/财报闸 8 断言）…"
   node test/unit-v37.js || { echo "!! unit-v37 失败，中止发布"; exit 1; }
 fi
+# v3.10+ 新增：unit-metrics 口径层断言（股息率主口径/统一命名/储备/便宜度 9 断言）——失败即中止发布
+if [ -f test/unit-metrics.js ]; then
+  echo "==> unit-metrics 统一口径层断言（9 断言）…"
+  node test/unit-metrics.js || { echo "!! unit-metrics 失败，中止发布"; exit 1; }
+fi
 DIRTY=$(git status --porcelain | grep -v '^??' | grep -v -E '^ M (index\.html|data-layer\.js|views\.js|backtest-worker\.js|sim-core\.js)$' | head -5)
 if [ -n "$DIRTY" ]; then
   echo "!! 工作区有未提交改动，中止发布："
