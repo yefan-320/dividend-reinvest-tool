@@ -2643,6 +2643,8 @@ function calcComboBacktest(combo, pool, opts) {
     const byMonth = {};
     r.sim.daily.forEach(dd => { byMonth[dd.date.slice(0, 7)] = dd; });
     const navSeries = Object.keys(byMonth).sort().map(m => +(byMonth[m].value / Math.max(1, r.amount || 1)).toFixed(3)); /* v3.2 S7：迷你图序列（每月末采样归一化） */
+    /* v3.6 F1（大师 P0-3 落点）：月采样曲线内嵌 perStock——快照/缓存/排序切换自包含，个股市值曲线不再依赖外部 pool */
+    const mSeries = Object.keys(byMonth).sort().map(m => ({ d: m + '-01', value: +(byMonth[m].value / 10000).toFixed(2), invested: +(byMonth[m].invested / 10000).toFixed(2) }));
     const byYear = {};
     r.sim.daily.forEach(dd => { byYear[dd.date.slice(0, 4)] = dd.cumDiv; });
     const ys = Object.keys(byYear).sort(); let prev = 0;
@@ -2653,7 +2655,7 @@ function calcComboBacktest(combo, pool, opts) {
       finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested, extInvested: r.sim.extInvested,
       cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
       divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
-      yearlyDivs, navSeries, monthlyFlow: r.sim.monthlyFlow || [],
+      yearlyDivs, navSeries, mSeries, monthlyFlow: r.sim.monthlyFlow || [],
       yearly: (window.simOneCore && window.simOneCore.yearlyOf) ? window.simOneCore.yearlyOf(r.sim) : [],
     };
   });

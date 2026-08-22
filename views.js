@@ -137,7 +137,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
               if (snap && snap.full.res) {
                 el.dataset.loaded = '1';
                 const combo = snap.full.combo;
-                const meta = { modeTxt: snap.meta.mode === 'weight' ? '按初始权重分配' : snap.meta.mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote: '', failed: [], cashTxt: '' };
+                const meta = { modeTxt: snap.meta.mode === 'weight' ? '按初始权重分配' : snap.meta.mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote: '', failed: [], cashTxt: '', ver: (snap.meta && snap.meta.ver) || '' };
                 renderCockpit(snap.full.res, combo, {}, meta);
                 btSnapNotice(snap.meta);
               }
@@ -3717,30 +3717,36 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         series: [{ type: 'bar', data: yl.map(y => +y.gain.toFixed(2)), itemStyle: { color: p => p.value >= 0 ? '#e05a5a' : '#4caf7d', borderRadius: [2, 2, 0, 0] }, barMaxWidth: 14 }],
       });
     }
-    /* 市值曲线（月粒度默认，日粒度按钮切换——simOne 重算降采样，AC-D4） */
+    /* 市值曲线（月粒度默认，日粒度按钮切换——simOne 重算降采样，AC-D4）
+     * v3.6 F1（大师 P0-3）：月粒度改用 perStock 内嵌 mSeries（快照/缓存自包含），不再依赖外部 pool；日粒度需 simOne 重算，无 pool 时禁用按钮 */
     const cvEl = document.getElementById('sdCurve_' + p.code);
     if (cvEl) {
       const ch = echarts.init(cvEl);
-      const byMonth = {};
       const t = res.totalAsset || [];
-      /* 该股月粒度：从 totalAsset 提取需要 perStock daily，此处用 navSeries 反推不可靠——改用 pool 缓存重算 */
+      const pool2 = _cockpitPool || {};
+      const hasPool = !!(pool2[p.code] && pool2[p.code].kline);
       const draw = (granularity) => {
         let seriesData = [], investData = [];
-        const pool2 = _cockpitPool || {};
-        const src = pool2[p.code];
-        if (src && src.kline) {
-          const sim = window.simOneCore ? window.simOneCore(p.amount, p.monthly || 0, src.kline, src.divs || [], true, 0) : null;
-          if (sim) {
-            const daily = sim.daily;
-            if (granularity === 'month') {
-              const bm = {};
-              daily.forEach(dd => { bm[dd.date.slice(0, 7)] = dd; });
-              const mks = Object.keys(bm).sort();
-              seriesData = mks.map(m => [m + '-01', +(bm[m].value / 10000).toFixed(2)]);
-              investData = mks.map(m => [m + '-01', +(bm[m].invested / 10000).toFixed(2)]);
-            } else {
-              seriesData = daily.map(dd => [dd.date, +(dd.value / 10000).toFixed(2)]);
-              investData = daily.map(dd => [dd.date, +(dd.invested / 10000).toFixed(2)]);
+        if (granularity === 'month' && p.mSeries && p.mSeries.length) {
+          /* 内嵌月采样：快照/缓存/排序切换全部自包含 */
+          seriesData = p.mSeries.map(m => [m.d, m.value]);
+          investData = p.mSeries.map(m => [m.d, m.invested]);
+        } else {
+          const src = pool2[p.code];
+          if (src && src.kline) {
+            const sim = window.simOneCore ? window.simOneCore(p.amount, p.monthly || 0, src.kline, src.divs || [], true, 0) : null;
+            if (sim) {
+              const daily = sim.daily;
+              if (granularity === 'month') {
+                const bm = {};
+                daily.forEach(dd => { bm[dd.date.slice(0, 7)] = dd; });
+                const mks = Object.keys(bm).sort();
+                seriesData = mks.map(m => [m + '-01', +(bm[m].value / 10000).toFixed(2)]);
+                investData = mks.map(m => [m + '-01', +(bm[m].invested / 10000).toFixed(2)]);
+              } else {
+                seriesData = daily.map(dd => [dd.date, +(dd.value / 10000).toFixed(2)]);
+                investData = daily.map(dd => [dd.date, +(dd.invested / 10000).toFixed(2)]);
+              }
             }
           }
         }
@@ -3761,6 +3767,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const hint = document.getElementById('sdDailyHint_' + p.code);
       let isDaily = false;
       if (btn && hint) {
+        if (!hasPool) {
+          /* v3.6 F1（大师 P1-1）：快照/缓存模式无 K线池 → 禁用日粒度，防切了空白 */
+          btn.disabled = true;
+          btn.style.opacity = .45;
+          btn.title = '快照/缓存模式仅月粒度（重跑体检后可切日粒度）';
+          hint.textContent = '· 快照模式仅月粒度';
+        }
         btn.onclick = () => {
           isDaily = !isDaily;
           draw(isDaily ? 'day' : 'month');
@@ -3955,6 +3968,26 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   function renderCockpit(res, combo, pool, meta) {
     const el = $('#pfbtResult');
     if (!el) return;
+    /* v3.6 F2（大师 P0-2）：旧快照 schema 校验必须在读 res.last 之前——v3.4.3 快照无 weightEvol（v3.5 分水岭字段），后面 4261 .map 会 TypeError 整页崩 */
+    const metaVer = (meta && meta.ver) || '';
+    const curVer = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+    const oldSchema = !res || !res.weightEvol || !res.perStock || !res.perStock.length || (metaVer && curVer && metaVer !== curVer);
+    if (oldSchema) {
+      const cmb = (res && res.perStock && res.perStock.length) ? res.perStock : [];
+      const gV = (res && res.last && res.last.value != null) ? (res.last.value / 10000).toFixed(0) : '—';
+      const gD = (res && res.cumDivTotal != null) ? (res.cumDivTotal / 10000).toFixed(0) : '—';
+      const gI = (res && res.invested != null) ? (res.invested / 10000).toFixed(0) : '—';
+      const rows = cmb.map(p => `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 6px;text-align:left">${esc(p.name || p.code)}</td><td style="padding:3px 6px;text-align:right">${p.finalValue != null ? (p.finalValue / 10000).toFixed(1) + '万' : '—'}</td><td style="padding:3px 6px;text-align:right">${p.cumDiv != null ? '+' + (p.cumDiv / 10000).toFixed(1) + '万' : '—'}</td></tr>`).join('');
+      el.innerHTML = `<div style="padding:16px;border:1px solid rgba(217,164,65,.4);border-radius:12px;background:rgba(217,164,65,.06)">
+        <div style="font-size:14px;font-weight:700;color:var(--gold,#d9a441)">📦 旧版快照（${esc(metaVer || '旧版本')}）· 无逐年数据</div>
+        <div style="font-size:12px;color:var(--sub);margin:8px 0">当前工具 ${esc(curVer)} 需要重跑体检才能展示市值曲线/逐年明细（旧快照不含这些字段）。组合总览仍可看：</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:13px"><span>投入 <b>${gI}万</b></span><span>现值 <b>${gV}万</b></span><span>累计分红 <b style="color:#d9a441">${gD}万</b></span></div>
+        ${cmb.length ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:6px 0"><thead><tr style="color:var(--muted)"><th style="text-align:left;padding:3px 6px">股票</th><th style="text-align:right;padding:3px 6px">现值</th><th style="text-align:right;padding:3px 6px">累计分红</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+        <button type="button" class="btn flexbtn" onclick="document.getElementById('pfbtRun') && document.getElementById('pfbtRun').click()">🔄 重跑体检（更新到最新版）</button>
+      </div>`;
+      try { const anc = document.getElementById('pfbtAnchor'); if (anc) anc.style.display = 'none'; } catch (e) { }
+      return;
+    }
     const last = res.last;
     const divRatio = res.divRatio;
     const yearDiv = res.yearDiv;
@@ -4285,9 +4318,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         title: { text: '收益贡献（金=分红 · 红涨/绿赔=价格）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p.map(x => x.marker + ' ' + x.seriesName + '：' + x.value + '万').join('<br>') },
         legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 10 } },
-        grid: { left: 14, right: 90, top: 40, bottom: 24 },
+        grid: { left: 76, right: 90, top: 40, bottom: 24 },
         xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-        yAxis: { type: 'category', data: names, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        yAxis: { type: 'category', data: names, axisLabel: { color: '#b8c9c0', fontSize: 12, interval: 0 } },
         series: [
           { name: '分红贡献', type: 'bar', data: divC, itemStyle: { color: '#d9a441', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 10 },
           { name: '价格贡献', type: 'bar', data: priceC, itemStyle: { color: (p) => p.value >= 0 ? '#e05a5a' : '#4caf7d', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 10 },
@@ -4384,9 +4417,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       ch.setOption({
         title: { text: '行业分布' + (maxInd && maxInd.value / (combo.items.reduce((s, it) => s + (it.amount || 0), 0) || 1) > 0.5 ? ' · ⚠️集中' : ''), left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p[0].name + '：' + (p[0].value / 10000).toFixed(1) + '万' },
-        grid: { left: 14, right: 50, top: 28, bottom: 20 },
+        grid: { left: 34, right: 50, top: 28, bottom: 20 },
         xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-        yAxis: { type: 'category', data: rows2.map(r => r.name), axisLabel: { color: '#8fa69c', fontSize: 10 } },
+        yAxis: { type: 'category', data: rows2.map(r => r.name), axisLabel: { color: '#b8c9c0', fontSize: 12, interval: 0 } },
         series: [{ type: 'bar', data: rows2.map(r => r.value), itemStyle: { color: '#9b6df0', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 12 }],
         animationDuration: 600,
       });
@@ -4685,7 +4718,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }
       /* 结果缓存（W1：同配置同区间秒出） */
       let cacheNote = '';
-      const cacheKey = 'combo_bt_' + combo.id + '_' + y + '_' + mode;
+      const cacheKey = 'combo_bt_v2_' + combo.id + '_' + y + '_' + mode; /* v3.6 P2-2：schema 版本 v2——旧缓存（无 mSeries/yearly）不再命中 */
       let res = null;
       try {
         const hit = await DL.cacheGet(cacheKey);
@@ -4724,7 +4757,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         sel2.onchange = () => { const c3 = DL.loadCombos(); const ac = c3.combos.find(x => x.id === sel2.value); if (ac) { c3.activeId = ac.id; DL.saveCombos(c3); } runPortfolioBacktest(); };
       }
       fillCmpSel();
-      const meta = { modeTxt: mode === 'weight' ? '按初始权重分配' : mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote, failed, cashTxt: (combo.cashPct || 0) > 0 ? `现金仓位 ${combo.cashPct}% 按 1.5%/年滚入（近似货基/短债，可改）；` : '' };
+      const meta = { modeTxt: mode === 'weight' ? '按初始权重分配' : mode === 'fixed' ? '每只固定' : '智慧定投（按分位）', cacheNote, failed, cashTxt: (combo.cashPct || 0) > 0 ? `现金仓位 ${combo.cashPct}% 按 1.5%/年滚入（近似货基/短债，可改）；` : '', ver: (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '' };
       renderCockpit(res, combo, pool, meta);
       /* v3.2 S2：跑完自动存快照（独立库 divtool-bt，不被缓存卫生误删）——不阻塞渲染 */
       btAutoSave(combo, y, mode, res);
