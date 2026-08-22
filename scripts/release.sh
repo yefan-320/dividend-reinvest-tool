@@ -103,14 +103,15 @@ fi
 
 # 5. 提交 + 打 tag + 推送（大师 P0-③：发布必打 tag，供下次校验/回滚）
 # v1.9.1 O3：发布前检查工作区是否干净（防"测完忘推"——大师基座签名红灯教训）
-# v1.9.25 修复：排除三受管文件（index.html/data-layer.js/views.js）——版本号更新是脚本自己改的预期改动，否则每次发布自相矛盾中止（本次踩到）
-DIRTY=$(git status --porcelain | grep -v '^??' | grep -v -E '^ M (index\.html|data-layer\.js|views\.js)$' | head -5)
+# v1.9.25 修复：排除受管文件（index.html/data-layer.js/views.js）——版本号更新是脚本自己改的预期改动，否则每次发布自相矛盾中止（本次踩到）
+# v3.6.1 修复：backtest-worker.js/sim-core.js 加入受管列表（v3.5 引入 worker 时漏掉——worker 改动从不被发布，本次 mSeries 缺失根因）
+DIRTY=$(git status --porcelain | grep -v '^??' | grep -v -E '^ M (index\.html|data-layer\.js|views\.js|backtest-worker\.js|sim-core\.js)$' | head -5)
 if [ -n "$DIRTY" ]; then
   echo "!! 工作区有未提交改动，中止发布："
   echo "$DIRTY"
   exit 1
 fi
-git add index.html data-layer.js views.js
+git add index.html data-layer.js views.js backtest-worker.js sim-core.js
 git commit -m "$VER: 发布（版本号由 scripts/release.sh 自动同步）" 2>/dev/null || echo "(无变更可提交)"
 git tag "$VER" 2>/dev/null || echo "(tag 已存在)"
 git push origin main --tags
