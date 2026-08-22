@@ -1402,6 +1402,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const divYield = dy ? dy.yieldPct : null;
       const dps = dy ? dy.annualDps : null;
       const yieldLabel = dy && dy.count === 1 ? '近1财年' : '近2财年';
+      /* v3.8.0 口径归一（接手 AI）：全站股息率主口径=报告期（最近已公告完整财年分红÷现价，与分位线/信号同尺），
+       * 年化近2财年降为 hover 附注——消灭同屏同名多值 */
+      let repDy = null, repDps = null;
+      try { const t = DL.reportYearDivAt(divs, DL.todayStr()); if (t > 0 && lastPrice > 0) { repDps = t; repDy = t / lastPrice * 100; } } catch (e) {}
+      const mainDy = repDy != null ? repDy : divYield;
+      const mainDps = repDps != null ? repDps : dps;
       // 股息覆盖率 C2（v1.9.6 大师裁决）：近2个完整财年累计分红 ÷ 对应2年EPS（排除未完成年；同财年多笔派息 EPS 取全年最大值，防中期/末期重复计）
       const todayY0 = parseInt(DL.todayStr().slice(0, 4), 10);
       const byRep = {};
@@ -1425,13 +1431,86 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const yearsSpan = dates.length ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / (365 * 86400000) : 0;
       const cagr = (startPrice && lastPrice && yearsSpan > 0) ? Math.pow(lastPrice / startPrice, 1 / yearsSpan) - 1 : null;
       $('#diagStats').innerHTML = `<div style="margin-bottom:6px">${srcBadge(diagCode + ':div', '分红 ')}${srcBadge(diagCode + ':k', 'K线 ')}${srcBadge('qt:' + (homeState.watchlist || []).map(x => x.code).join(',') || diagCode, '行情 ')}</div><div class="stats">
-        <div class="stat"><div class="k">当前股息率(年化)</div><div class="v gold">${divYield != null ? divYield.toFixed(2) + '%' : '—'}</div></div>
-        <div class="stat"><div class="k">每股分红(年化${yieldLabel})</div><div class="v">${fmt(dps, 3)} 元</div></div>
-        <div class="stat"><div class="k">分红率(近2财年)</div><div class="v">${cover != null ? (cover * 100).toFixed(0) + '%' : '—'}</div></div>
+        <div class="stat"><div class="k">当前股息率<span class="tt" title="报告期口径：最近已公告完整财年分红÷现价（与分位线/信号同尺）${dy ? '；年化近' + yieldLabel + '：' + divYield.toFixed(2) + '%' : ''}">(报告期)</span></div><div class="v gold">${mainDy != null ? mainDy.toFixed(2) + '%' : '—'}</div></div>
+        <div class="stat"><div class="k">每股分红<span class="tt" title="报告期口径：最近已公告完整财年每股分红${dy ? '；年化近' + yieldLabel + '：' + fmt(dps, 3) + ' 元' : ''}">(报告期)</span></div><div class="v">${fmt(mainDps, 3)} 元</div></div>
+        <div class="stat"><div class="k">分红占利润<span class="tt" title="近2个完整财年累计分红 ÷ 对应 2 年 EPS（支付率口径，同数异名已统一）">(近2财年)</span></div><div class="v">${cover != null ? (cover * 100).toFixed(0) + '%' : '—'}</div></div>
         <div class="stat"><div class="k">近${diagYears}年年化</div><div class="v ${cagr >= 0 ? 'green' : 'red'}">${cagr != null ? fmtPct(cagr) : '—'}</div></div>
         <div class="stat"><div class="k">近${diagYears}年最大回撤</div><div class="v red">${fmtPct(-maxDD)}</div></div>
         <div class="stat"><div class="k">PE / PB</div><div class="v">${s.pe != null ? fmt(s.pe, 1) : '—'} / ${s.pb != null ? fmt(s.pb, 2) : '—'}</div></div>
       </div>`;
+      /* v3.8.0 U2 分位仪表盘 + U4 关键数据雷达图（接手 AI）——数字图形化，一眼看懂画像 */
+      try {
+        let _pctNow = null;
+        try { const _ser = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS); const _l = _ser.filter(x => x.pct != null).pop(); _pctNow = _l ? _l.pct : null; } catch (e5) {}
+        const _vizEl = $('#diagStats');
+        if (_vizEl && typeof echarts !== 'undefined') {
+          _vizEl.insertAdjacentHTML('beforeend', `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:stretch">
+            <div style="flex:0 0 190px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:6px"><div id="diagGaugePct" style="height:130px"></div><div style="font-size:10px;color:var(--muted);text-align:center">便宜度仪表（右=便宜，绿区=买点区）</div></div>
+            <div style="flex:1;min-width:260px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:6px"><div id="diagRadar" style="height:150px"></div><div style="font-size:10px;color:var(--muted);text-align:center">六维画像（越大越好；虚线=行业参考）</div></div>
+          </div>`);
+          /* U2 分位仪表 */
+          try {
+            const _g = echarts.init(document.getElementById('diagGaugePct'));
+            const _pv = _pctNow != null ? _pctNow : 0;
+            _g.setOption({
+              backgroundColor: 'transparent',
+              series: [{
+                type: 'gauge', min: 0, max: 100, startAngle: 200, endAngle: -20, radius: '100%',
+                progress: { show: true, width: 12, itemStyle: { color: _pv >= 75 ? '#4caf7d' : (_pv >= 50 ? '#d9a441' : '#e05a5a') } },
+                axisLine: { lineStyle: { width: 12, color: [[0.3, 'rgba(224,90,90,.5)'], [0.5, 'rgba(217,164,65,.5)'], [0.75, 'rgba(76,175,125,.35)'], [1, 'rgba(76,175,125,.8)']] } },
+                axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false },
+                detail: { valueAnimation: true, formatter: x => x.toFixed(0) + ' 分位', fontSize: 15, fontWeight: 700, color: '#e8efe9', offsetCenter: [0, '-6%'] },
+                title: { show: false },
+                data: [{ value: _pv }],
+              }],
+            });
+          } catch (e6) { try { const g0 = document.getElementById('diagGaugePct'); if (g0) g0.remove(); } catch (e7) {} }
+          /* U4 六维雷达（行业参考虚线用 BENCH）——数据源：REPORT_CARD_EXTRA（内置持仓）或空缺降级 */
+          try {
+            const _rr = document.getElementById('diagRadar');
+            const _rce = (window.REPORT_CARD_EXTRA && window.REPORT_CARD_EXTRA[code]) || {};
+            const _ind = _rce.industry || null;
+            const _bench = _ind && DL.BENCH ? DL.BENCH[_ind] : null;
+            const _roe = _rce.roe || null;
+            const _resv = (_rce.reserve != null && mainDps > 0) ? _rce.reserve / mainDps : null;
+            const _r = echarts.init(_rr);
+            _r.setOption({
+              backgroundColor: 'transparent',
+              tooltip: { trigger: 'item', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+              radar: {
+                indicator: [
+                  { name: 'ROE', max: 25 }, { name: '股息率', max: 10 }, { name: '分红占利润', max: 100 },
+                  { name: '分红增速', max: 50 }, { name: '储备(年)', max: 10 }, { name: '波动容忍', max: 100 },
+                ],
+                radius: '68%', center: ['50%', '52%'],
+                axisName: { color: '#8fa69c', fontSize: 9 },
+                splitArea: { areaStyle: { color: ['rgba(42,61,54,.15)', 'rgba(42,61,54,.05)'] } },
+                splitLine: { lineStyle: { color: '#2a3d36' } },
+                axisLine: { lineStyle: { color: '#2a3d36' } },
+              },
+              series: [{
+                type: 'radar',
+                data: [
+                  { value: [
+                      _roe != null ? Math.min(25, _roe) : 0,
+                      mainDy != null ? Math.min(10, mainDy) : 0,
+                      cover != null ? Math.min(100, cover * 100) : 0,
+                      cagr != null ? Math.min(50, Math.max(0, cagr * 100)) : 0,
+                      _resv != null ? Math.min(10, _resv) : 0,
+                      maxDD > 0 ? Math.min(100, (1 - maxDD) * 100) : 100,
+                    ], name: '本股',
+                    lineStyle: { color: '#d9a441', width: 2 }, itemStyle: { color: '#d9a441' },
+                    areaStyle: { color: 'rgba(217,164,65,.25)' } },
+                  ...(_bench ? [{ value: [
+                      _bench.roe ? _bench.roe[1] : 0, _bench.yieldMid != null ? _bench.yieldMid : 0,
+                      50, 15, 5, 60,
+                    ], name: '行业参考', lineStyle: { color: '#5aa9e6', width: 1.5, type: 'dashed' }, itemStyle: { color: '#5aa9e6' }, areaStyle: { color: 'transparent' } }] : []),
+                ],
+              }],
+            });
+          } catch (e8) { try { const r0 = document.getElementById('diagRadar'); if (r0) r0.remove(); } catch (e9) {} }
+        }
+      } catch (e4) { try { console.warn('U2/U4 渲染失败', e4); } catch (e10) {} }
       // M5+M7（阶段3）：分红预测三情景区间卡（divForecast 引擎）——卡面单点→区间
       try {
         const fc = DL.divForecast(divs, kline[dates[dates.length - 1]]);
@@ -1823,7 +1902,33 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       }
     } catch (e) {}
     html += '<div class="hint" style="margin-top:4px">口径：报告期归组（含中期+末期）；连续2年停增/下调 → 降级观察（卖出第1级信号）</div>';
+    /* v3.8.0 U5 分红瀑布柱状图（接手 AI）：涨绿跌红，一眼看增长节奏 */
+    html += '<div id="diagDivChart" style="height:150px;margin-top:6px"></div>';
     el.innerHTML = html;
+    try {
+      if (typeof echarts !== 'undefined') {
+        const ch = echarts.init(document.getElementById('diagDivChart'));
+        const vals = last5.map(y => byYear[y]);
+        ch.setOption({
+          backgroundColor: 'transparent',
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => { const i = p[0].dataIndex; return `<b>${last5[i]}</b> 报告期：每股分红 <b>${vals[i].toFixed(3)} 元</b>`; } },
+          grid: { left: 44, right: 10, top: 14, bottom: 20 },
+          xAxis: { type: 'category', data: last5, axisLine: { lineStyle: { color: '#3a4f46' } }, axisLabel: { color: '#8fa69c', fontSize: 10 } },
+          yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: '#22322c' } } },
+          series: [{
+            type: 'bar', barMaxWidth: 30,
+            data: vals.map((v, i) => ({
+              value: +v.toFixed(3),
+              itemStyle: {
+                color: i === 0 ? '#5aa9e6' : (v > vals[i - 1] ? '#4caf7d' : (v < vals[i - 1] ? '#e05a5a' : '#8fa69c')),
+                borderRadius: [3, 3, 0, 0],
+              },
+              label: { show: true, position: 'top', color: '#8fa69c', fontSize: 9, formatter: x => x.value.toFixed(2) },
+            })),
+          }],
+        });
+      }
+    } catch (e) { try { const d0 = document.getElementById('diagDivChart'); if (d0) d0.remove(); } catch (e2) {} }
   }
 
   /* 策略对比表（三列：收益+浮亏+风险效率，默认风险效率排序+三行导读）
@@ -2135,6 +2240,90 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     });
     return out;
   }
+  /* ===== v3.8.0 结论层（U1 红绿灯大图标 + 一句话 + U3 买点标尺 + U6 风险图标行 + 动作按钮）=====
+   * 由 renderReportCard 在算完 verdictEngine/tradingSignal 后调用，填充 #diagConclusion */
+  function renderConclusionLayer({ code, divs, kline, extra, v, dy, pct, ts, mainDy, price, lastDate }) {
+    const el = document.getElementById('diagConclusion');
+    if (!el) return;
+    /* ---- 一句话理由（人话模板） ---- */
+    let oneLiner = '';
+    if (v.trap && v.trap.level === 'hard') {
+      oneLiner = `现价 <b>${price != null ? fmt(price, 2) : '—'} 元</b>，股息率 <b>${mainDy != null ? mainDy.toFixed(2) + '%' : '—'}</b>（报告期）。⚠️ 净利下滑 + 分红占利润过高，<b>先别买</b>——等财报转好或价格更安全再看。`;
+    } else if (ts && (ts.action === 'sell' || ts.action === 'reduce' || ts.action === 'watch')) {
+      oneLiner = `现价 <b>${price != null ? fmt(price, 2) : '—'} 元</b>。⚠️ 基本面有恶化信号（${(ts.reason || '').replace(/^证据[^：]*：/, '').slice(0, 40)}），建议<b>${ts.action === 'sell' ? '回避/考虑卖出' : ts.action === 'reduce' ? '减仓观察' : '观察'}</b>。`;
+    } else {
+      const tLine = (v.tiers || []).filter(t => t.type !== 'cur');
+      const small = tLine.find(t => t.type === 'small'), add = tLine.find(t => t.type === 'add'), full = tLine.find(t => t.type === 'full');
+      const buyTxt = small ? `跌到 <b>${small.price} 元</b>可小仓` : '';
+      const addTxt = add ? `、<b>${add.price} 元</b>加仓` : '';
+      const fullTxt = full ? `、<b>${full.price} 元</b>重仓` : '';
+      const dd = v.tiers && v.tiers.length ? null : null;
+      const ddNote = (extra && extra.industry) ? DL.ddNote(extra.industry, (v.curTier && v.curTier.name === '深度低估') ? 'heavy' : (v.curTier && v.curTier.name === '低估二档') ? 'add' : (v.curTier && v.curTier.name === '低估一档') ? 'small' : null) : null;
+      oneLiner = `现价 <b>${price != null ? fmt(price, 2) : '—'} 元</b>，股息率 <b>${mainDy != null ? mainDy.toFixed(2) + '%' : '—'}</b>（报告期口径）。想买：${buyTxt}${addTxt}${fullTxt || ''}。${ddNote ? '历史最坏浮亏 <b>' + ddNote.replace(/^.*?浮亏/, '') + '</b>' : ''}`;
+    }
+    /* ---- U3 买点价格标尺（纯 CSS，无 echarts 依赖） ---- */
+    const tierList = (v.tiers || []).filter(t => t.type !== 'cur' && t.price != null);
+    let scaleHtml = '';
+    if (tierList.length && price != null) {
+      const prices = tierList.map(t => parseFloat(t.price)).concat([price]);
+      const lo = Math.min.apply(null, prices), hi = Math.max.apply(null, prices);
+      const span = (hi - lo) || 1;
+      const pos = p => ((parseFloat(p) - lo) / span * 100);
+      const pct = pos(price);
+      const marks = tierList.map(t => `
+        <div style="position:absolute;left:${pos(t.price).toFixed(1)}%;transform:translateX(-50%);bottom:-14px;text-align:center;font-size:10px;color:${t.hit ? 'var(--gold)' : 'var(--sub)'}">
+          <div style="width:2px;height:14px;background:${t.hit ? 'var(--gold)' : 'var(--line)'};margin:0 auto"></div>
+          <div>${t.label} ${t.rate != null ? t.rate.toFixed(1) + '%' : ''}</div>
+          <div style="font-weight:700">${t.price} 元${t.hit ? ' ✅' : ''}</div>
+        </div>`).join('');
+      scaleHtml = `<div style="margin-top:10px;padding:2px 4px 26px;border:1px solid var(--line);border-radius:8px;background:var(--card2);position:relative">
+        <div style="position:absolute;left:${pct.toFixed(1)}%;transform:translateX(-50%);top:-6px;z-index:3;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:var(--gold);background:var(--card);padding:0 4px;border-radius:4px;border:1px solid var(--gold)">现价 ${fmt(price, 2)}</div>
+          <div style="width:2px;height:22px;background:var(--gold);margin:1px auto"></div>
+          <div style="font-size:10px;color:var(--gold)">▲</div>
+        </div>
+        ${marks}
+        <div style="height:6px;border-radius:3px;background:linear-gradient(90deg, var(--red), #d9a441 40%, var(--green));opacity:.55"></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:14px;display:flex;justify-content:space-between"><span>便宜（左）</span><span>贵（右）</span></div>
+      </div>`;
+    } else if (v.tiers && v.tiers.length) {
+      scaleHtml = '<div style="font-size:11px;color:var(--muted);margin-top:6px">买点线待补（K线源故障），暂以股息率线参考</div>';
+    }
+    /* ---- U6 风险图标行 ---- */
+    const riskIcons = [];
+    if (v.trap) riskIcons.push(`<span style="color:#e05a5a;font-weight:700">${v.trap.level === 'hard' ? '🚫' : '⚠️'} ${v.trap.level === 'hard' ? '陷阱拦截' : '陷阱观察'}</span>`);
+    if (v.filters && v.filters.length) v.filters.forEach(f => riskIcons.push(`<span style="color:#d9a441">🟡 ${f.txt}</span>`));
+    const q3txt = v.q3 && v.q3.msg && v.q3.msg !== '未见显著风险' ? v.q3.msg : '';
+    if (q3txt) riskIcons.push(`<span style="color:${v.q3.verdict && v.q3.verdict.includes('✅') ? 'var(--green)' : '#d9a441'}">${v.q3.verdict || '⚠️'} ${q3txt}</span>`);
+    if (!riskIcons.length) riskIcons.push('<span style="color:var(--green)">✅ 无明显风险</span>');
+    /* ---- 结论大卡 ---- */
+    const verdict = (document.getElementById('diagMainVerdict') || {}).innerHTML || '';
+    el.innerHTML = `
+      <div style="border:2px solid ${v.trap && v.trap.level === 'hard' ? 'var(--red)' : 'rgba(217,164,65,.6)'};border-radius:12px;padding:12px;background:linear-gradient(135deg, rgba(217,164,65,.08), transparent 60%), var(--card2)">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:260px">
+            <div style="font-size:24px;font-weight:800;letter-spacing:.5px" id="diagBigVerdict">${verdict}</div>
+            <div style="font-size:13px;color:var(--txt);margin-top:6px;line-height:1.6">${oneLiner}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:150px">
+            <button type="button" class="chip" id="conclWl" style="color:#5aa9e6">⭐ 加自选</button>
+            <button type="button" class="chip" id="conclBt" style="color:#d9a441">📊 回测验证</button>
+            <button type="button" class="chip" id="conclDec" style="color:#4caf7d">📒 记决策</button>
+          </div>
+        </div>
+        ${scaleHtml}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:11px">${riskIcons.join(' ')}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">数据截至 ${lastDate || '—'} · 股息率口径=报告期（最近已公告完整财年÷现价）· 等级=风险提示，最终动作由您拍板</div>
+      </div>`;
+    /* 绑定动作按钮 */
+    const wlBtn = document.getElementById('conclWl');
+    if (wlBtn) wlBtn.onclick = () => { try { addToWatchlist(code); } catch (e) {} };
+    const btBtn = document.getElementById('conclBt');
+    if (btBtn) btBtn.onclick = () => { const b = document.getElementById('btnDiagBacktest'); if (b) b.click(); };
+    const decBtn = document.getElementById('conclDec');
+    if (decBtn) decBtn.onclick = () => { try { const d = document.getElementById('decBtnBuy'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'center' }); d.focus(); } } catch (e) {} };
+  }
+
   function renderReportCard(code, divs, kline, extra) {
     const el = $('#diagReportCard');
     if (!el) return;
@@ -2231,7 +2420,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       : '';
     const netTxt = (extra && extra.netProfit != null) ? (extra.netProfit >= 100 ? extra.netProfit.toFixed(0) + ' 亿' : extra.netProfit.toFixed(1) + ' 亿') : '<span style="color:var(--muted)">待接入</span>';
     const cagrTxt = cagr != null ? (cagr * 100).toFixed(1) + '%' : '—';
-    const covTxt = cov != null ? '覆盖 ' + (1 / cov).toFixed(1) + ' 倍' : '<span style="color:var(--muted)">数据不足</span>';
+    const covTxt = cov != null ? termTip('覆盖率') + ' ' + (1 / cov).toFixed(1) + ' 倍' : '<span style="color:var(--muted)">数据不足</span>';
     const reserveTxt = reserveYears != null ? reserveYears.toFixed(1) + ' 年' : '—';
     const payoutTxt = payoutRate != null ? (payoutRate * 100).toFixed(0) + '%' : '—';
     const dyTxt = dy != null ? dy.toFixed(2) + '%' : '—';
@@ -2281,6 +2470,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig, industry, finGood: !!(extra && extra.deductNetProfit != null && extra.deductNetProfitPrev != null && extra.deductNetProfitPrev > 0 && extra.deductNetProfit > extra.deductNetProfitPrev), valuation: null });
           /* v3.7.0 统一结论：陷阱/卖出信号合并到主结论（applyUnifiedVerdict 更新决策主卡），本指令条同步降级文案防两处打架 */
           applyUnifiedVerdict(ts, v.trap);
+          /* v3.8.0 结论层：红绿灯大卡+一句话+买点标尺+风险图标+动作按钮 */
+          try {
+            const _price = (extra && extra.price) || (kline && kline.length ? (kline[kline.length - 1].close != null ? kline[kline.length - 1].close : null) : null);
+            let _mainDy = null;
+            try { const _t = DL.reportYearDivAt(divs, DL.todayStr()); if (_t > 0 && _price > 0) _mainDy = _t / _price * 100; } catch (e3) {}
+            renderConclusionLayer({ code, divs, kline, extra, v, dy, pct, ts, mainDy: _mainDy, price: _price, lastDate: (kline && kline.length && kline[kline.length - 1].d) || '' });
+          } catch (e3) { try { console.warn('结论层渲染失败', e3); } catch (e4) {} }
           let tsText = ts.text;
           if (v.trap && v.trap.level === 'hard') tsText = '🚫 陷阱拦截：主结论已降级回避';
           else if (v.trap && v.trap.level === 'soft') tsText = ts.text + '（⚠️ 陷阱观察，降为小仓）';
@@ -2426,8 +2622,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>
       <div style="font-size:12px;margin-top:6px;color:var(--txt)">当前分位 ${last.pct.toFixed(0)}%（${tcls.label} · ${ecoName}）${waitHint}</div>
       ${conflictHtml}
-      <div style="font-size:11px;color:var(--sub);margin-top:4px">股息率(年化近2财年) ${yieldTxt} · 分红率(近2财年) ${cov != null ? (cov * 100).toFixed(0) + '%' : '—'} · 分红CAGR ${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</div>
-      <details style="margin-top:6px"><summary style="font-size:11px;color:var(--sub);cursor:pointer">查看判定依据</summary>${stepsHtml}<div style="font-size:11px;color:var(--muted);margin-top:4px">规则：分红趋势一票否决 → 覆盖率降级 → 分位×生态类型 → 等待成本；历史胜率=40只×16年回测（${termTip('W375')}）；非投资建议，不构成买卖依据</div></details>
+      <div style="font-size:11px;color:var(--sub);margin-top:4px"><span class="tt" title="报告期口径：最近已公告完整财年分红÷现价；年化近2财年=${yieldTxt}">股息率(报告期)</span> ${(() => { try { const _t = DL.reportYearDivAt(divs, last.d); return _t > 0 ? (_t / Object.values(kline).pop() * 100).toFixed(2) + '%' : yieldTxt; } catch (e) { return yieldTxt; } })()} · <span class="tt" title="支付率口径：近2财年分红÷EPS">分红占利润(近2财年)</span> ${cov != null ? (cov * 100).toFixed(0) + '%' : '—'} · 分红CAGR ${cagr != null ? (cagr * 100).toFixed(1) + '%' : '—'}</div>
+      <details style="margin-top:6px"><summary style="font-size:11px;color:var(--sub);cursor:pointer">查看判定依据</summary>${stepsHtml}<div style="font-size:11px;color:var(--muted);margin-top:4px">规则：分红趋势一票否决 → ${termTip('覆盖率')}降级 → 分位×${termTip('生态类型')} → 等待成本；历史胜率=40只×16年回测（${termTip('W375')}）；非投资建议，不构成买卖依据</div></details>
       <div style="margin-top:6px;border-top:1px dashed var(--line);padding-top:6px">
         <div style="font-size:11px;color:var(--sub);margin-bottom:4px">📒 决策日志（D6：记下今天的选择，1-3 年后自动对照）</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
@@ -2498,10 +2694,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const byYear = {};
     divs.forEach(d => { if (!d.ex) return; const y = d.ex.slice(0, 4), m = parseInt(d.ex.slice(5, 7), 10); (byYear[y] = byYear[y] || []).push(m); });
     const years = Object.keys(byYear).sort().slice(-10);
-    el.innerHTML = years.length ? years.map(y => {
-      const ms = byYear[y].sort((a, b) => a - b);
-      return `<div class="rhythm-row"><span class="rhythm-year">${y}年</span>${ms.map(m => `<span class="rhythm-m">${m}月</span>`).join('')}</div>`;
-    }).join('') : '<div class="hint">暂无分红记录</div>';
+    /* v3.8.0 U7 派息热力条（接手 AI）：年×12月网格，深色=派息月——一年几派/几月派一眼看出 */
+    if (years.length) {
+      const grid = years.map(y => {
+        const ms = byYear[y];
+        const cells = [];
+        for (let m = 1; m <= 12; m++) {
+          const hit = ms.includes(m);
+          cells.push(`<div style="flex:1;height:18px;border-radius:3px;background:${hit ? 'var(--gold)' : 'rgba(42,61,54,.35)'};${hit ? 'box-shadow:0 0 4px rgba(217,164,65,.6)' : ''};margin:1px;display:flex;align-items:center;justify-content:center;font-size:9px;color:${hit ? '#201703' : 'transparent'}" title="${y}年${m}月${hit ? '派息' : ''}">${hit ? m : ''}</div>`);
+        }
+        return `<div style="display:flex;align-items:center;margin:2px 0"><span style="width:42px;font-size:10px;color:var(--sub);flex-shrink:0">${y}年</span><div style="display:flex;flex:1">${cells.join('')}</div></div>`;
+      }).join('');
+      el.innerHTML = `<div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px">${grid}<div style="font-size:9px;color:var(--muted);margin-top:2px;text-align:right">■ 派息月（一年几派、几月派，一眼看规律）</div></div>`;
+    } else {
+      el.innerHTML = '<div class="hint">暂无分红记录</div>';
+    }
   }
 
   /* v1.8.13 功能D：多起点敏感度（1/3/5/10年前买入对比，回答"现在买划不划算"） */
@@ -3169,6 +3376,35 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     '回本率': '累计分红 ÷ 累计投入：多少年能靠分红回本',
     '事件胜率': '同类触发事件（如“分位≥80”）历史上买入后 3 年正收益的比例',
     '风险效率': '收益 ÷ 最大浮亏：每亏 1% 能赚多少（越高越优）',
+    /* v3.8.0 术语全覆盖（接手 AI，D13/V2-2）：高频词补录，触屏点击 ⓘ 弹解释（T2 三端适配） */
+    '覆盖率': '分红占利润的比例（支付率）：近2财年分红合计 ÷ 对应2年EPS。越高=分红越慷慨，但 >90% 有"吃老本"风险',
+    '支付率': '同"覆盖率"：分红占利润的比例，全站已统一称呼',
+    '储备年数': '每股未分配利润 ÷ 每股分红：按当前分红水平还能分几年（家底厚度）',
+    '除息日': '分红"到账扣价"的日期：这天股价会扣除分红金额，账户收到现金分红',
+    '权益登记日': '在这天收盘前持有股票的人，才有资格拿本次分红',
+    '到账年': '分红实际到账的年份（与报告期年份可能差一年，如 2024 年报分红 2025 年到账）',
+    '报告期年': '分红归属的会计年度（如 2025 年报=2025 报告期，即使 2026 年才到账）',
+    '复投': '分红再投资：分红现金按除息日收盘价自动买入股票，钱生钱（复利）',
+    '现金池': '零钱池：不足 100 股（一手）的分红/零钱先存着，够一手再买入',
+    '整手': 'A股最小交易单位 100 股：买入必须是 100 股的整数倍',
+    '碎股': '不足一手的零散股数（送转可能产生），只能卖不能买',
+    '分红CAGR': '分红复合年均增速：过去几年分红每年平均涨多少（几何平均）',
+    '买点线': '买入触发线：股息率到达该线说明"便宜到值得买"（分位 P75/P90/P95 对应小仓/加仓/重仓）',
+    '低估一档': '小仓买点：股息率达到历史 P75 分位线（首次可以买一点试试）',
+    '低估二档': '加仓买点：股息率达到历史 P90 分位线（更便宜，可以多加）',
+    '深度低估': '重仓买点：股息率达到历史 P95 分位线（历史级便宜，可重仓）',
+    '分位窗口': '计算"便宜度"时回看的天数：W375=看最近 375 个交易日（约 1.5 年）',
+    '卖出信号': '基本面恶化的预警：EPS/分红连续下滑、毛利率连降等（纪律参考，非自动卖出）',
+    '高估保险丝': '极端高估熔断：分位<5 且 股息率<2.2% 时提示"可能是泡沫顶"（历史罕见，防卖飞）',
+    '分红陷阱': '分红连续 2 年下降的高股息股：看起来股息高，其实分红在缩水（价值毁灭型）',
+    '事件层': '特殊股票（如伊利/平安）：历史数据测不准，工具只监控财报不给自动买卖信号',
+    '冷却期': '买入触发后 60 个交易日不再重复触发：防止追涨杀跌频繁交易',
+    '智慧定投': '按月分位自动调节投入：便宜（分位<30）加倍投，贵（分位>70）减半投',
+    '月追加': '每月固定追加投入的金额（每月首个交易日投入）',
+    '严格同期': '对比时所有标的用同一个买入日：不足周期的标的直接跳过（防"上市早占便宜"）',
+    '税前/税后': '红利税：持有超 1 年免 10% 税；1 个月~1 年 10%；不足 1 个月 20%',
+    '回本进度': '累计分红 ÷ 初始本金：分红拿回本金的百分比（100%=靠分红回本了）',
+    '行业超限': '同一行业持仓超过 3 只：组合集中度风险提示，触发后该股建议强度减半',
   };
   const termTip = key => { const d = termGlossary[key]; return d ? `<span class="tt" title="${esc(d)}">${key}</span>` : key; };
 
@@ -3218,6 +3454,127 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   function setParam(k, v) { try { localStorage.setItem(paramKey(k), ptype(v)); } catch (e) {} }
   function ptype(v) { return typeof v === 'boolean' ? (v ? '1' : '0') : String(v); }
   /* 参数中心面板（决策台顶部 ⚙️ 入口） */
+  /* ===== v3.8.0 三端数据同步包（接手 AI，方案 T/6.3-A）：手机/iPad/电脑同一份数据 =====
+   * 导出 JSON → iCloud Drive/文件 App → 另一台设备导入合并（按记录级 updatedAt 智能合并，非覆盖）
+   * 数据不出机器（无后端）；本地旧数据无 updatedAt 字段时视为旧格式，以导入为准 */
+  function collectSyncData() {
+    const now = Date.now();
+    let wl = [], holds = [], decisions = [];
+    try { wl = (JSON.parse(localStorage.getItem('divtool_watchlist_v1') || '[]')).map(w => ({ ...w, updatedAt: w.updatedAt || w.addedAt || now })); } catch (e) {}
+    try { holds = loadHoldings().map(h => ({ ...h, updatedAt: h.updatedAt || now })); } catch (e) {}
+    try { decisions = decLog(); } catch (e) {}
+    const combos = DL.loadCombos();
+    const params = {};
+    PARAMS.forEach(p => { try { const v = localStorage.getItem(paramKey(p.key)); if (v != null) params[p.key] = v; } catch (e) {} });
+    const misc = {};
+    ['divtool_div_target', 'divtool_monthly_exp', 'divtool_add_amt', 'divtool_zone_mode'].forEach(k => { try { const v = localStorage.getItem(k); if (v != null) misc[k] = v; } catch (e) {} });
+    return { watchlist: wl, holdings: holds, combos, decisions, params, misc };
+  }
+  function exportSyncPackage() {
+    try {
+      const data = {
+        app: 'dividend-tool-sync', v: 1,
+        device: /iPhone/.test(navigator.userAgent) ? 'iPhone' : (/iPad/.test(navigator.userAgent) ? 'iPad' : '电脑'),
+        exportedAt: new Date().toISOString(),
+        data: collectSyncData(),
+      };
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+      a.download = '红利工具同步-' + DL.todayStr() + '.json';
+      a.click();
+      try { localStorage.setItem('divtool_last_export', String(Date.now())); } catch (e) {}
+      try { toast('📤 同步包已导出——用 iCloud/文件传到另一台设备，再点「导入合并」'); } catch (e) {}
+    } catch (e) { try { toast('导出失败：' + e.message); } catch (e2) {} }
+  }
+  /* 合并预览：返回 { wlAdd, wlUpd, hAdd, hUpd, cAdd, cUpd, dAdd } 计数 */
+  function mergePreview(pkg) {
+    const d = (pkg && pkg.data) || {};
+    const now = Date.now();
+    const out = { wlAdd: 0, wlUpd: 0, hAdd: 0, hUpd: 0, cAdd: 0, cUpd: 0, dAdd: 0 };
+    try {
+      const curWl = new Map((JSON.parse(localStorage.getItem('divtool_watchlist_v1') || '[]')).map(w => [w.code, w]));
+      (d.watchlist || []).forEach(w => { const cur = curWl.get(w.code); if (!cur) out.wlAdd++; else if ((w.updatedAt || 0) > (cur.updatedAt || cur.addedAt || 0)) out.wlUpd++; });
+    } catch (e) {}
+    try {
+      const curH = new Map(loadHoldings().map(h => [h.code, h]));
+      (d.holdings || []).forEach(h => { const cur = curH.get(h.code); if (!cur) out.hAdd++; else if ((h.updatedAt || 0) > (cur.updatedAt || 0)) out.hUpd++; });
+    } catch (e) {}
+    try {
+      const curC = new Map((DL.loadCombos().combos || []).map(c => [c.id, c]));
+      (d.combos && d.combos.combos || []).forEach(c => { const cur = curC.get(c.id); if (!cur) out.cAdd++; else if ((c.savedAt || 0) > (cur.savedAt || 0)) out.cUpd++; });
+    } catch (e) {}
+    try { out.dAdd = (d.decisions || []).filter(x => !decLog().some(y => y.ts === x.ts)).length; } catch (e) {}
+    return out;
+  }
+  function applySyncPackage(pkg) {
+    const d = (pkg && pkg.data) || {};
+    const now = Date.now();
+    try {   // watchlist 合并（同 code 取 updatedAt 新者）
+      const cur = new Map((JSON.parse(localStorage.getItem('divtool_watchlist_v1') || '[]')).map(w => [w.code, w]));
+      (d.watchlist || []).forEach(w => {
+        const old = cur.get(w.code);
+        if (!old || (w.updatedAt || 0) > (old.updatedAt || old.addedAt || 0)) cur.set(w.code, { ...w, updatedAt: w.updatedAt || now });
+      });
+      localStorage.setItem('divtool_watchlist_v1', JSON.stringify([...cur.values()]));
+    } catch (e) {}
+    try {   // holdings 合并
+      const cur = new Map(loadHoldings().map(h => [h.code, h]));
+      (d.holdings || []).forEach(h => { const old = cur.get(h.code); if (!old || (h.updatedAt || 0) > (old.updatedAt || 0)) cur.set(h.code, { ...h, updatedAt: h.updatedAt || now }); });
+      saveHoldings([...cur.values()]);
+    } catch (e) {}
+    try {   // combos 合并（同 id 取 savedAt 新者）
+      const c2 = DL.loadCombos();
+      const cur = new Map((c2.combos || []).map(c => [c.id, c]));
+      (d.combos && d.combos.combos || []).forEach(c => { const old = cur.get(c.id); if (!old || (c.savedAt || 0) > (old.savedAt || 0)) cur.set(c.id, c); });
+      c2.combos = [...cur.values()];
+      if (d.combos && d.combos.activeId) c2.activeId = d.combos.activeId;
+      DL.saveCombos(c2);
+    } catch (e) {}
+    try {   // 决策日志合并（按 ts 去重，导入并入）
+      const cur = decLog();
+      const seen = new Set(cur.map(x => x.ts));
+      (d.decisions || []).forEach(x => { if (!seen.has(x.ts)) { cur.push(x); seen.add(x.ts); } });
+      localStorage.setItem('divtool_decisions_v1', JSON.stringify(cur.slice(0, 200)));
+    } catch (e) {}
+    try {   // 参数 + 杂项：导入覆盖（另一台设备的配置视为最新）
+      Object.keys(d.params || {}).forEach(k => { try { localStorage.setItem(paramKey(k), d.params[k]); } catch (e) {} });
+      Object.keys(d.misc || {}).forEach(k => { try { localStorage.setItem(k, d.misc[k]); } catch (e) {} });
+    } catch (e) {}
+    try { localStorage.setItem('divtool_last_import', String(Date.now())); } catch (e) {}
+  }
+  function installSyncUI() {
+    const el = document.getElementById('paramPanel');
+    if (!el) return;
+    const box = document.getElementById('syncBox');
+    if (!box) return;
+    const btnEx = document.getElementById('syncExport');
+    if (btnEx && !btnEx.dataset.bound) { btnEx.dataset.bound = '1'; btnEx.onclick = exportSyncPackage; }
+    const btnIm = document.getElementById('syncImport');
+    const file = document.getElementById('syncFile');
+    if (btnIm && !btnIm.dataset.bound) { btnIm.dataset.bound = '1'; btnIm.onclick = () => { if (file) file.click(); }; }
+    if (file && !file.dataset.bound) {
+      file.dataset.bound = '1';
+      file.onchange = async () => {
+        const f = file.files && file.files[0];
+        if (!f) return;
+        try {
+          const pkg = JSON.parse(await f.text());
+          if (pkg.app !== 'dividend-tool-sync') { try { toast('⚠️ 这不是同步包（请用「导出同步包」生成的文件）'); } catch (e) {} return; }
+          const diff = mergePreview(pkg);
+          const total = diff.wlAdd + diff.wlUpd + diff.hAdd + diff.hUpd + diff.cAdd + diff.cUpd + diff.dAdd;
+          if (total === 0) { try { toast('✅ 已是最新，无变更可合并'); } catch (e) {} return; }
+          const msg = `来自 ${pkg.device || '另一台设备'}（导出于 ${(pkg.exportedAt || '').slice(0, 10)}）\n将合并：\n· 自选新增 ${diff.wlAdd} / 更新 ${diff.wlUpd}\n· 持仓新增 ${diff.hAdd} / 更新 ${diff.hUpd}\n· 组合新增 ${diff.cAdd} / 更新 ${diff.cUpd}\n· 决策记录新增 ${diff.dAdd}\n\n按时间戳智能合并（不覆盖你的新数据），继续？`;
+          if (!confirm(msg)) return;
+          applySyncPackage(pkg);
+          try { toast('✅ 同步合并完成'); } catch (e) {}
+          try { renderHome(); } catch (e) {}
+          try { renderParamPanel(); } catch (e) {}
+        } catch (e) { try { toast('导入失败：' + e.message); } catch (e2) {} }
+        file.value = '';
+      };
+    }
+  }
+
   function renderParamPanel() {
     const el = document.getElementById('paramPanel');
     if (!el) return;
@@ -3230,6 +3587,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     };
     const presets = PARAMS.filter(p => p.presets);
     el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:13px">⚙️ 参数中心（20+3 参数，改完即时生效）</b><button type="button" class="chip" id="paramResetAll">↺ 全部重置默认</button></div>` +
+      `<div id="syncBox" style="padding:6px 8px;border:1px solid rgba(90,169,230,.4);border-radius:8px;background:rgba(90,169,230,.06);margin-bottom:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;color:#5aa9e6">📱 三端同步（手机/iPad/电脑同一份数据）</span><button type="button" class="chip" id="syncExport" style="color:#5aa9e6">📤 导出同步包</button><button type="button" class="chip" id="syncImport" style="color:#4caf7d">📥 导入合并</button><input type="file" id="syncFile" accept=".json,application/json" style="display:none"><span style="font-size:10px;color:var(--muted)">导出→iCloud/文件→另一台导入，按时间戳智能合并，数据不出机器</span></div>` +
       (presets.length ? `<div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">${presets.map(p => Object.entries(p.presets).map(([label, v]) => `<button type="button" class="chip" data-preset="${p.key}" data-pv="${v}" style="color:#5aa9e6">${label}（${p.label} ${v}${p.unit || ''}）</button>`).join('')).join('')}</div>` : '') +
       `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px">` + PARAMS.map(p =>
         `<div style="padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card2)"><div style="font-size:12px">${p.label} <span style="font-size:10px;color:var(--muted)">默认 ${p.def}${p.unit || ''}</span></div><div style="margin:4px 0">${ctl(p)}</div><div style="font-size:10px;color:var(--muted)">${p.reason}</div></div>`).join('') + `</div>` +
@@ -3251,6 +3609,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     el.querySelectorAll('[data-preset]').forEach(b => { b.onclick = () => { setParam(b.dataset.preset, ptype(b.dataset.pv === 'true' ? true : (b.dataset.pv === 'false' ? false : parseFloat(b.dataset.pv)))); renderParamPanel(); }; });
     const ra = document.getElementById('paramResetAll');
     if (ra) ra.onclick = () => { PARAMS.forEach(p => { try { localStorage.removeItem(paramKey(p.key)); } catch (e) {} }); renderParamPanel(); };
+    installSyncUI();
   }
   function toggleParamPanel() {
     const el = document.getElementById('paramPanel');

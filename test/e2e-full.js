@@ -336,7 +336,7 @@ async function main() {
     // 60s 曾连续 2 次误报 → 提到 120s（与 B6 上市日回填 150s 同量级），网络慢时不误报
     await waitFor(cdp, `(document.getElementById('diagStats').innerText||'').includes('当前股息率') && !(document.getElementById('diagStats').innerText||'').includes('加载中')`, 120000, '诊断统计');
     const st = await evalIn(cdp, `document.getElementById('diagStats').innerText`);
-    for (const k of ['当前股息率', '每股分红', '分红率(近2财年)', '年化', '最大回撤', 'PE / PB'])
+    for (const k of ['当前股息率', '每股分红', '分红占利润', '年化', '最大回撤', 'PE / PB'])
       assert(st.includes(k), '缺诊断项: ' + k);
     // 2026-08-21：带状图依赖 K线（腾讯风控时新浪降级需 25s+）——先等渲染完成（≥2 series 或明确空态）再断言，防时序误报
     await waitFor(cdp, `(() => { const c = echarts.getInstanceByDom(document.getElementById('diagYieldChart')); if (!c) return false; const s = c.getOption().series || []; if (s.length >= 2) return true; const t = (document.getElementById('diagYieldChart').innerText || ''); return t.includes('数据不足') || t.includes('暂无分红'); })()`, 90000, '带状图渲染(≥2series或空态)');
