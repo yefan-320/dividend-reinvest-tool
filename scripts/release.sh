@@ -58,6 +58,11 @@ if [ -f test/e2e-full.js ]; then
   echo "==> e2e 全功能实测（27 场景）…"
   node test/e2e-full.js || { echo "!! e2e-full 失败，中止发布"; exit 1; }
 fi
+# v3.4：组合情况独立页专项（21 断言：总卡/KPI/锚点/年度表7列/色块热力/日粒度/分红日标记/E2三条）——失败即中止发布
+if [ -f test/e2e-v34.js ]; then
+  echo "==> e2e-v34 组合情况独立页（21 断言）…"
+  node test/e2e-v34.js || { echo "!! e2e-v34 失败，中止发布"; exit 1; }
+fi
 # v1.9.4：自选入口闭环实测（A/B/C 三入口+去重）——失败即中止发布
 if [ -f test/e2e-v194.js ]; then
   echo "==> e2e-v194 自选入口闭环（10 断言）…"
