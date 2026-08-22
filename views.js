@@ -961,13 +961,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* E3 分红里程碑：按自选平均 CAGR（保守口径）算月分红翻倍年数（72 法则精确式 ln2/ln(1+g)） */
     const avgCagr = cagrs.length ? cagrs.reduce((s, x) => s + x, 0) / cagrs.length : null;
     const doubleY = (avgCagr != null && avgCagr > 0) ? Math.log(2) / Math.log(1 + avgCagr) : null;
-    const etfRefId = 'divLifeEtf';
     const lifeHtml = `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
-      <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 年报 · D12 消费覆盖 · E2 追加 · E3 里程碑 · D11 ETF 参照）</summary>
+      <details><summary style="font-size:11px;color:var(--sub);cursor:pointer">💸 分红生活视角（E1 年报 · D12 消费覆盖 · E2 追加 · E3 里程碑）</summary>
         <div style="font-size:11px;color:var(--sub);margin:6px 0 4px">📅 近 ${Math.min(6, years.length)} 年实际分红收入（需在决策台录入持仓）：</div>
         <div>${yearRows || '<span class="hint">到决策台「📊 我的持仓」录入后显示历史分红收入</span>'}</div>
         <div style="font-size:11px;margin-top:6px">🚀 分红里程碑：${doubleY ? `按近 3 年分红增速 ${(avgCagr * 100).toFixed(1)}% 持续（保守口径），月分红翻倍还需约 <b>${doubleY.toFixed(0)} 年</b>` : '<span class="hint">自选样本不足，无法估算增速（分红不增长时永远不翻倍）</span>'}</div>
-        <div id="${etfRefId}" style="font-size:11px;margin-top:4px"><span class="hint">红利 ETF 参照加载中…</span></div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:8px"><span style="font-size:11px;color:var(--muted)">月生活支出（元）：</span><input id="divLifeExp" type="number" min="0" placeholder="如 15000" value="${expDef || ''}" style="width:90px;padding:4px 6px;background:var(--card2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:11px"><button type="button" class="chip" id="divLifeExpSave">💾 算覆盖</button></div>
         <div style="font-size:11px;margin-top:4px">${covPct != null ? `当前年分红 <b>${(yearIncome / 10000).toFixed(2)}万</b>（月 ${(yearIncome / 12 / 10000).toFixed(2)}万）→ 覆盖月支出 <b style="color:var(--gold)">${covPct.toFixed(0)}%</b>；${gapRange}` : '<span class="hint">填月支出后显示覆盖率与缺口本金</span>'}</div>
         <!-- v2.0 批次3：#13 反向本金 + #12 退休时间点模拟 -->
@@ -1139,30 +1137,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
       } catch (err) { try { toast('导入失败：' + err.message); } catch (e2) {} }
     };
-    // P2 D11：红利 ETF 年化分红参照（近 12 月每份分红 ÷ 现价，异步填充失败静默）
-    (async () => {
-      const etfEl = document.getElementById(etfRefId);
-      if (!etfEl) return;
-      try {
-        const etfs = [['512890', '红利低波'], ['515080', '红利ETF'], ['510300', '沪深300']];
-        const rows = [];
-        for (const [code, name] of etfs) {
-          try {
-            const divs = await DL.fetchEtfDividends(code);
-            const snap = await DL.getStockQuotes([code]);
-            const price = snap[code] && snap[code].price;
-            if (!divs || !divs.length || !price) continue;
-            const start = DL.daysAgo(366);
-            let sum = 0;
-            divs.forEach(d => { if (d.ex && d.ex >= start && d.ex <= DL.todayStr()) sum += d.dps; });
-            rows.push(name + ' <b>' + (sum / price * 100).toFixed(1) + '%</b>');
-          } catch (e) {}
-        }
-        etfEl.innerHTML = rows.length
-          ? '📊 红利ETF 年化分红参照（近12月每份分红÷现价）：' + rows.join(' · ') + ' <span style="color:var(--muted)">vs 自选平均 ' + (avgDy * 100).toFixed(1) + '%</span>'
-          : '<span class="hint">ETF 参照加载失败（数据源暂不可用）</span>';
-      } catch (e) { const el2 = document.getElementById(etfRefId); if (el2) el2.innerHTML = '<span class="hint">ETF 参照加载失败</span>'; }
-    })();
   }
 
   /* 扫描入口：决策台底部按钮 → 打开扫描子页（简单内嵌） */
@@ -3948,7 +3922,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (_cockpitChart) { _cockpitChart.dispose(); _cockpitChart = null; }
       const ch = _cockpitChart = echarts.init(mainEl);
       /* v3.4 主人令（13:20）：「不要净值要具体的钱」——主图改金额轴（万元），基准换算同本金投入金额 */
-      const baseInvest = t[0] && t[0].invested > 0 ? t[0].invested : 1; /* 初始投入（基准换算同本金） */
       /* 回撤副图数据（灰蓝，非红——主人点名"回测搞成红色太难看"） */
       const ddData = []; let peak = -Infinity;
       t.forEach(x => { if (x.value > peak) peak = x.value; ddData.push(+( (x.value - peak) / peak * 100).toFixed(2)); });
@@ -3969,7 +3942,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             if (dv) s += `<br/><b style="color:#d9a441">● 分红到账 ${(dv / 10000).toFixed(2)}万</b>`;
             return s;
           } },
-        legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 }, selected: { '沪深300': true, '红利低波': true } },
+        legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 } },
         grid: [
           { left: 62, right: 14, top: 28, height: '62%' },
           { left: 62, right: 14, top: '74%', height: '20%' },
@@ -3989,33 +3962,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         series: [
           { name: '组合市值', type: 'line', data: navData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.25)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
           { name: '累计投入', type: 'line', data: investNav, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.5, type: 'dashed' } },
-          { name: '沪深300', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#8fa69c', width: 1.25 } },
-          { name: '红利低波', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#5b8db8', width: 1.25 } },
           { name: '回撤', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.map((x, i) => [x.d, ddData[i]]), smooth: true, showSymbol: false, lineStyle: { color: 'rgba(100,130,160,.6)', width: 1 }, areaStyle: { color: 'rgba(100,130,160,.15)' } },
           /* v3.4 D2：分红日标记点（金色小圆点，hover 显示"X月X日分红到账 X万"）——金额轴同尺 */
           { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / 10000).toFixed(2)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
         ],
         animationDuration: 800,
       });
-      /* v3.2 S5：基准对比异步拉取（沪深300+红利低波，同本金换算为金额——主人令"不要净值要具体的钱"） */
-      (async () => {
-        try {
-          const from = t[0] ? t[0].d : (() => { const x = new Date(); x.setDate(x.getDate() - (res.span || 10) * 366); return x.toISOString().slice(0, 10); })();
-          const to = t[t.length - 1] ? t[t.length - 1].d : DL.todayStr();
-          const [k300, khv] = await Promise.all([
-            DL.getIndexKline('000300', from, to).catch(() => null),
-            DL.getIndexKline('000922', from, to).catch(() => null),
-          ]);
-          /* 基准=同本金投入金额：指数倍数 × 初始投入（万元），与组合市值同轴可比 */
-          const normMoney = k => { if (!k || !Object.keys(k).length) return []; const ks = Object.keys(k).sort(); const b = k[ks[0]]; if (!(b > 0)) return []; return ks.map(d => [d, +(k[d] / b * baseInvest / 10000).toFixed(2)]); };
-          ch.setOption({ series: [
-            { name: '组合市值', data: navData }, { name: '累计投入', data: investNav },
-            { name: '沪深300', data: normMoney(k300) }, { name: '红利低波', data: normMoney(khv) },
-            { name: '回撤', data: t.map((x, i) => [x.d, ddData[i]]) },
-            { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / 10000).toFixed(2)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
-          ] });
-        } catch (e) { /* 基准失败不影响主图 */ }
-      })();
+
     }
     /* 覆盖率环（用年分红 vs 月支出 12 倍估算） */
     const ringEl = document.getElementById('cockpitRing');
