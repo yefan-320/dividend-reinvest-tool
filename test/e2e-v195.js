@@ -48,10 +48,14 @@ async function waitFor(expr, timeout = 10000) {
 }
 
 async function main() {
+  /* v3.7.0（接手 AI）：启动前清理残留实例（release 连续跑 CDP 测试时旧 Chrome 占端口→连旧页面→Page.enable 超时/状态污染）
+   * 加 --no-sandbox（沙箱环境）+ --remote-allow-origins（Chrome 111+ WS Origin 校验） */
+  try { require('child_process').execSync('lsof -tiTCP:' + CDP_PORT + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
     '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--user-data-dir=' + PROFILE,
-    '--no-first-run', '--disable-gpu', '--window-size=420,1000', 'about:blank'
-  ]);
+    '--no-first-run', '--disable-gpu', '--window-size=420,1000', '--no-sandbox', '--remote-allow-origins=*', 'about:blank'
+  ], { detached: true, stdio: 'ignore' });
+  chrome.unref();
   let ready = false;
   for (let i = 0; i < 40; i++) { try { const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`); if (r.ok) { ready = true; break; } } catch (e) {} await sleep(500); }
   if (!ready) { console.error('CDP 未就绪'); process.exit(2); }

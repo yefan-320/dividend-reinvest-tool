@@ -35,7 +35,7 @@ function launchChrome(profile) {
   if (!fs.existsSync(CHROME)) die('Chrome 不存在');
   const cp = spawn(CHROME, [
     '--headless=new', '--disable-gpu', `--remote-debugging-port=${CDP_PORT}`,
-    '--window-size=900,1600', `--user-data-dir=${profile}`, 'about:blank',
+    '--window-size=900,1600', `--user-data-dir=${profile}`, '--no-sandbox', '--remote-allow-origins=*', 'about:blank',
   ], { detached: true, stdio: 'ignore' });
   cp.unref();
   return new Promise((resolve, reject) => {
@@ -137,6 +137,8 @@ function waitPortFree(timeout) {
 }
 
 async function main() {
+  /* v3.7.0（接手 AI）：启动前清理残留实例（release 连续跑 CDP 测试时旧 Chrome 占端口→连旧页面→超时） */
+  try { require('child_process').execSync('lsof -tiTCP:' + ' + CDP_PORT + ' + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   console.log('🌐 用户视角线上走查: ' + LIVE + '\n');
   /* 先清场：残留的无头 Chrome（含上次崩溃遗留）全杀，防端口冲突连错实例 */
   killChrome();

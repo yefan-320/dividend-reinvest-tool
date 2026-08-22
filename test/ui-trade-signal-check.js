@@ -10,7 +10,7 @@ const PROFILE = '/tmp/chrome-ui-check-' + Date.now();
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 function launchChrome() {
-  return spawn(CHROME, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${CDP_PORT}`, '--window-size=1000,1800', `--user-data-dir=${PROFILE}`, 'about:blank'], { detached: true, stdio: 'ignore' });
+  return spawn(CHROME, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${CDP_PORT}`, '--window-size=1000,1800', `--user-data-dir=${PROFILE}`, '--no-sandbox', '--remote-allow-origins=*', 'about:blank'], { detached: true, stdio: 'ignore' });
 }
 async function getWs() {
   for (let i = 0; i < 40; i++) {

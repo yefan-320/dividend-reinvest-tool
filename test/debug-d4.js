@@ -39,9 +39,11 @@ async function evalJS(expr) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
+  /* v3.7.0（接手 AI）：启动前清理残留实例（release 连续跑 CDP 测试时旧 Chrome 占端口→连旧页面→超时） */
+  try { require('child_process').execSync('lsof -tiTCP:' + ' + CDP_PORT + ' + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
     '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--user-data-dir=' + PROFILE,
-    '--no-first-run', '--disable-gpu', '--window-size=420,900', 'about:blank'
+    '--no-first-run', '--disable-gpu', '--window-size=420,900', '--no-sandbox', '--remote-allow-origins=*', 'about:blank'
   ]);
   let ready = false;
   for (let i = 0; i < 40; i++) { try { const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`); if (r.ok) { ready = true; break; } } catch (e) {} await sleep(500); }
