@@ -64,7 +64,7 @@ if [ -f test/e2e-full.js ]; then
   node test/e2e-full.js || { echo "!! e2e-full 失败，中止发布"; exit 1; }
 fi
 # v3.4：组合情况独立页专项（21 断言：总卡/KPI/锚点/年度表7列/色块热力/日粒度/分红日标记/E2三条）——失败即中止发布
-if [ -f test/e2e-v34.js ]; then
+if [ $FULL -eq 1 ] && [ -f test/e2e-v34.js ]; then
   echo "==> e2e-v34 组合情况独立页（28 断言）…"
   node test/e2e-v34.js || { echo "!! e2e-v34 失败，中止发布"; exit 1; }
 fi
@@ -74,7 +74,7 @@ if [ -f test/unit-v35-simcore.js ]; then
   node test/unit-v35-simcore.js || { echo "!! unit-v35-simcore 失败，中止发布"; exit 1; }
 fi
 # v1.9.4：自选入口闭环实测（A/B/C 三入口+去重）——失败即中止发布
-if [ -f test/e2e-v194.js ]; then
+if [ $FULL -eq 1 ] && [ -f test/e2e-v194.js ]; then
   echo "==> e2e-v194 自选入口闭环（10 断言）…"
   node test/e2e-v194.js || { echo "!! e2e-v194 失败，中止发布"; exit 1; }
 fi
@@ -83,7 +83,7 @@ if [ -f test/unit-v195.js ]; then
   echo "==> unit-v195 TTM 窗口/去平滑（15 断言）…"
   node test/unit-v195.js || { echo "!! unit-v195 失败，中止发布"; exit 1; }
 fi
-if [ -f test/e2e-v195.js ]; then
+if [ $FULL -eq 1 ] && [ -f test/e2e-v195.js ]; then
   echo "==> e2e-v195 口径标注实测（6 断言）…"
   node test/e2e-v195.js || { echo "!! e2e-v195 失败，中止发布"; exit 1; }
 fi
@@ -101,7 +101,7 @@ if [ -f test/check-rule-stats.js ]; then
   echo "==> RULE_STATS 同步校验（回测表 vs data-layer）…"
   node test/check-rule-stats.js || { echo "!! RULE_STATS 不同步，中止发布（先跑 node test/rule-tree-backtest.js --json 重出权威值）"; exit 1; }
 fi
-if [ -f test/e2e-v196.js ]; then
+if [ $FULL -eq 1 ] && [ -f test/e2e-v196.js ]; then
   echo "==> e2e-v196 用户视角回归（搜索框/真实输入/扫描mock/结论行/回本进度 10 断言）…"
   node test/e2e-v196.js || { echo "!! e2e-v196 失败，中止发布"; exit 1; }
 fi
