@@ -1458,7 +1458,7 @@ function calcPortfolioBacktest(pool, opts) {
         if (d3 >= buyP * 0.15) totDiv3yRate++;
         if (buyP > 0) cashflows.push({ d: dates[0], v: -buyP });
       }
-      const span = (new Date(endD) - new Date(dates[0])) / (365 * 86400000);
+      const span = (() => { const t0 = buys.length ? buys[0].d : dates[0]; const s = (new Date(endD) - new Date(t0)) / (365 * 86400000); return Math.max(s, 0.01); })();   // 修复 B6（2026-08-23 接手 AI）：年化分母用持有期（首笔买入→期末），原用数据起点 dates[0]（可能远早于买入）拉低年化
       totRet += ret; totMdd += mdd; totWin += winCnt; totEv += evCnt; n++;
       if (div3yCnt > 0) totDiv3y += div3ySum / div3yCnt;
       if (span > 0 && (1 + ret) > 0) totAnnual += Math.pow(1 + ret, 1 / span) - 1;
@@ -1964,8 +1964,10 @@ function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays,
   const curLvl = tier ? lvl[tier] : -1;
   if (tier && curLvl >= minLvl) {
     // 财报确认硬闸：不过关=禁止买入（即使 P95）——主人令：买卖依据财报
-    if (finOk === false) {
-      return { action: 'hold', level: null, strength: '0%', text: '❌ 禁止买入（财报不过关）', reason: `dy已到${tier.toUpperCase()}但财报确认失败：${(finChecks || []).join('；')}`, evidence: '财报确认闸（主依据）' };
+    // 修复 B3（2026-08-23 接手 AI）：原 `finOk === false` 在 F10 数据获取失败（finOk 为 null/undefined）时
+    // fail-open 放行买入，违背"财报是买入主依据"。改为 finOk !== true：数据缺失同样禁买，宁缺勿买。
+    if (finOk !== true) {
+      return { action: 'hold', level: null, strength: '0%', text: '❌ 禁止买入（财报不过关/数据缺失）', reason: `dy已到${tier.toUpperCase()}但财报确认${finOk === false ? '失败' : '数据缺失'}：${(finChecks && finChecks.length) ? finChecks.join('；') : 'F10 财报数据未获取，暂不可决策'}`, evidence: '财报确认闸（主依据）' };
     }
     // 冷却：距上次买入 <60 交易日 → 提示但不动
     if (lastBuyDays != null && lastBuyDays < 60) {
@@ -2012,8 +2014,13 @@ function tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays,
  *   signal: 'hint'(PB>P95·估值极端·仅提醒不动作) / 'hint'(PB>P90·仅提醒) / 'hint'(PB>P75·仅提示) / null
  */
 function calcPbPercentile(kline, annuals, dateStr) {
-  if (!kline || !kline.length || !annuals || !annuals.length) return null;
-  const rows = kline.filter(x => x.close != null && x.close > 0).map(x => ({ d: x.d, c: parseFloat(x.close) })).sort((a, b) => a.d < b.d ? -1 : 1);
+  if (!kline || !annuals || !annuals.length) return null;
+  /* 修复 C5（2026-08-23 接手 AI）：原实现假设 kline 为数组 [{d,close}]，但全文件其余处 kline 均为对象 {date:price}，
+   * 形状不符导致 filter() 报错/静默 null。此处加适配层：数组照用，对象转数组。 */
+  const karr = Array.isArray(kline)
+    ? kline.map(x => ({ d: x.d, close: x.close }))
+    : Object.keys(kline).sort().map(d => ({ d, close: kline[d] }));
+  const rows = karr.filter(x => x.close != null && x.close > 0).map(x => ({ d: x.d, c: parseFloat(x.close) })).sort((a, b) => a.d < b.d ? -1 : 1);
   const date = dateStr || (rows.length ? rows[rows.length - 1].d : '');
   const limit = (() => { const y = parseInt(date.slice(0, 4), 10); const m = parseInt(date.slice(5, 7), 10) - 5; return y + '-' + String(m <= 0 ? 12 + m : m).padStart(2, '0'); })();
   // 当日 BPS（≤limit 的最新年报）
@@ -2141,7 +2148,7 @@ function verdictEngine({ divs, coverage, reserveYears, payoutRate, eps, dps, pri
   out.trap = null;
   if (netProfitYoY != null && netProfitYoY < 0) {
     const tr = trapFilter({ netProfitYoY, payout: coverage, dy, p90Line: line });
-    if (tr.level === 'hard' && curTier && curTier.name === '重仓区') {
+    if (tr.level === 'hard' && curTier && curTier.name === '深度低估') {   // 修复 C4（2026-08-23 接手 AI）：原 '重仓区' 在 v1.9.15 词表分离后永不成立（死代码），hard 陷阱拦截从未触发；深度低估=重仓档
       out.trap = { level: 'hard', msg: tr.msg + '——重仓线拦截，降级观察' };
       curTier = { name: '深度低估(陷阱拦截)', note: '陷阱确认：净利下滑+支付率过高，深度低估线不生效，降级观察' };
     } else if (tr.level) {
@@ -2654,7 +2661,7 @@ function calcComboBacktest(combo, pool, opts) {
     return {
       code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
       finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested, extInvested: r.sim.extInvested,
-      cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
+      cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.sim.extInvested) - 1,   // 修复 B6（2026-08-23 接手 AI）：分母用 extInvested（本金+月追加），原用初始金额忽略月追加→回报虚高
       divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
       yearlyDivs, navSeries, mSeries, monthlyFlow: r.sim.monthlyFlow || [],
       yearly: (window.simOneCore && window.simOneCore.yearlyOf) ? window.simOneCore.yearlyOf(r.sim) : [],

@@ -730,14 +730,14 @@ details.v3-fold[open] summary{margin-bottom:6px;color:var(--txt)}
   </div>
 </section>
 
-<script src="demo-data.js?v=v3.6.1"></script>
-<script src="i18n.js?v=v3.6.1"></script>
+<script src="demo-data.js?v=v3.7.0"></script>
+<script src="i18n.js?v=v3.7.0"></script>
 <script src="data/track-record.js?v=v1.9.15"></script>
-<script src="sim-core.js?v=v3.6.1"></script>
-<script src="data-layer.js?v=v3.6.1"></script>
+<script src="sim-core.js?v=v3.7.0"></script>
+<script src="data-layer.js?v=v3.7.0"></script>
 <script>
 /* ================= 工具函数 ================= */
-const APP_VERSION = 'v3.6.1';
+const APP_VERSION = 'v3.7.0';
 /* v1.7.0 变更提示条：送转口径修正，旧结果可能与新计算有差异 */
 (function(){
   try{
@@ -909,7 +909,9 @@ function simulate(principal, buyDate, reinvest, closes, dividends, monthly = 0, 
     principal, buyDateReal, buyPrice, buyIdx,
     daily, years: yearsOut, reportYears: reportYearsOut, divEvents,
     final:{ finalValue, finalInvested, monthlyTotal, cashPool, shares:lastDaily.shares,
-      totalReturn: finalValue/principal-1, xirr,
+      totalReturn: finalValue/principal-1,   // 相对初始本金（月追加时虚高，展示层已按口径切换）
+      totalReturnInvested: finalValue/finalInvested-1,   // 修复 A1（2026-08-23 接手 AI）：相对累计投入（含月追加+复投），月追加>0 时主显此口径
+      xirr,
       totalDiv: divEvents.reduce((s,x)=>s+x.cash,0),
       latestDps: yearsOut.length? yearsOut[yearsOut.length-1].dps : 0,
       latestRate: yearsOut.length? yearsOut[yearsOut.length-1].rate : 0,
@@ -999,7 +1001,10 @@ function renderStatsOnly(res, name, showY, showY0, rateNote1, rateNote2){
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
-  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：总收益率 ${fmtPct(f.totalReturn)} · 年化(XIRR) ${fmtPct(f.xirr)}`;
+  const retCaliberTxt = (window.CURRENT_MONTHLY > 0 && f.totalReturnInvested != null)
+    ? `总收益率(相对累计投入) ${fmtPct(f.totalReturnInvested)}（相对初始本金 ${fmtPct(f.totalReturn)}，口径不同防误导）`
+    : `总收益率 ${fmtPct(f.totalReturn)}`;
+  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：${retCaliberTxt} · 年化(XIRR) ${fmtPct(f.xirr)}`;
   $('cardSummary').style.display='block';
   // v1.8.7：降级模式也显示年度明细表（纯 HTML 不依赖 echarts，主人要求"每年分红的钱都要体现"）
   if (yrs.length) { renderYearTable(yrs, 'pay'); $('cardTable').style.display='block'; }
@@ -1028,7 +1033,10 @@ function renderAllFull(res, name, res2, showY, showY0, rateNote1, rateNote2){
     ['期末持股(股)', fmt(f.shares,0), ''],
   ];
   $('stats').innerHTML = stats.map(s=>`<div class="stat"><div class="k">${s[0]}</div><div class="v ${s[2]}">${s[1]}</div></div>`).join('');
-  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：总收益率 ${fmtPct(f.totalReturn)} · 年化(XIRR) ${fmtPct(f.xirr)}`;
+  const retCaliberTxt = (window.CURRENT_MONTHLY > 0 && f.totalReturnInvested != null)
+    ? `总收益率(相对累计投入) ${fmtPct(f.totalReturnInvested)}（相对初始本金 ${fmtPct(f.totalReturn)}，口径不同防误导）`
+    : `总收益率 ${fmtPct(f.totalReturn)}`;
+  $('#btPriceNote').textContent = `价格视角（附注，持有决策以分红口径为准）：${retCaliberTxt} · 年化(XIRR) ${fmtPct(f.xirr)}`;
   $('cardSummary').style.display='block';
   // v1.8.7：点击"累计分红/年均分红/最近年度"滚动到年度明细表（主人要求"每年分红的钱都要体现"）
   const yt = $('#stats');
@@ -1441,7 +1449,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   };
   // 版本号
   const ver = $('appVer');
-  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-22 · 数据在本地（IndexedDB），发布自动清旧缓存';
+  if(ver) ver.textContent = APP_VERSION + ' · 2026-08-23 · 数据在本地（IndexedDB），发布自动清旧缓存';
 
   // URL 带 code → 自动联网回测该股票；无参 → 离线演示；带 cmp（对比分享链接）→ 不跑演示（防覆盖对比状态/链接警告）
   // v1.8.13 BUG-3：延迟到 window load（全部脚本含 views.js 执行完）再自动运行——原同步执行在 views.js 前崩溃致首屏半渲染
@@ -1460,7 +1468,7 @@ function setStatus(msg, isErr){ const el=$('status'); el.textContent=msg; el.cla
   <button data-tab="backtest">📊 回测</button>
   <button data-tab="pfbt">📊 组合情况</button>
 </nav>
-<script src="views.js?v=v3.6.1"></script>
+<script src="views.js?v=v3.7.0"></script>
 <script src="pwa.js?v=v3.2"></script>
 </body>
 </html>

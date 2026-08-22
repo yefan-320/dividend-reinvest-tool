@@ -1289,9 +1289,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         </div>`).join('') + '<div class="hint" style="margin-top:4px">⚠️ 高股息≠稳赚：历史信号胜率分行业/档位差异大（见诊断卡标注），历史胜率≠本次会赢</div>';
       el.querySelectorAll('.scan-row').forEach(r => r.onclick = () => { addToWatchlist(r.dataset.code); openDiagnose(r.dataset.code); });
     } catch (e) {
-      el.innerHTML = `<div class="hint err">⚠️ 发现器失败：${e.message.includes('限流') || e.message.includes('繁忙') ? '东财行情接口繁忙（限流），请稍后重试' : '数据获取失败，请稍后重试'} <button type="button" class="chip" id="btnDiscoverRetry" style="margin-left:8px">🔄 重试</button></div>`;
+      /* v3.7.0 发现器降级（接手 AI S4）：限流时不再裸报失败——
+       * ①提示限流 ②自动切换到扫描器通道（效果相同的替代入口）③重试带 10s 冷却防撞限流窗口 */
+      const limited = e.message.includes('限流') || e.message.includes('繁忙') || e.message.includes('为空');
+      window.__discCooldown = Date.now();
+      if (limited) {
+        el.innerHTML = `<div class="hint err">⚠️ 发现器限流（东财接口繁忙）。已自动切换到【📡 扫描器】通道（效果相同）：<button type="button" class="chip" id="btnDiscoverRetry" style="margin-left:8px">🔄 10s 后重试发现器</button></div>`;
+        const scanTab = document.querySelector('.opp-tab[data-opp="scan"]');
+        if (scanTab) { try { scanTab.click(); } catch (e2) {} }
+      } else {
+        el.innerHTML = `<div class="hint err">⚠️ 发现器失败：${'数据获取失败，请稍后重试'} <button type="button" class="chip" id="btnDiscoverRetry" style="margin-left:8px">🔄 重试</button></div>`;
+      }
     const rb = document.getElementById('btnDiscoverRetry');
-    if (rb) rb.onclick = runDiscoverer;
+    if (rb) rb.onclick = () => {
+      const wait = Date.now() - (window.__discCooldown || 0);
+      if (wait < 10000) { rb.textContent = `🔄 ${Math.ceil((10000 - wait) / 1000)}s 后重试`; setTimeout(() => { rb.textContent = '🔄 重试'; }, 10000 - wait); return; }
+      runDiscoverer();
+    };
     }
     } finally {
       _discRunning = false;
@@ -2265,10 +2279,15 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             if (cur && cur.close != null && cur.close <= low60 * 1.02) trendOk = false;
           }
           const ts = DL.tradingSignal({ code, dy, tier, trendOk, finOk, finChecks, lastBuyDays: null, industrySignals: indSig, industry, finGood: !!(extra && extra.deductNetProfit != null && extra.deductNetProfitPrev != null && extra.deductNetProfitPrev > 0 && extra.deductNetProfit > extra.deductNetProfitPrev), valuation: null });
-          const col = ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a441' : ts.action === 'watch' ? '#d9a441' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)');
+          /* v3.7.0 统一结论：陷阱/卖出信号合并到主结论（applyUnifiedVerdict 更新决策主卡），本指令条同步降级文案防两处打架 */
+          applyUnifiedVerdict(ts, v.trap);
+          let tsText = ts.text;
+          if (v.trap && v.trap.level === 'hard') tsText = '🚫 陷阱拦截：主结论已降级回避';
+          else if (v.trap && v.trap.level === 'soft') tsText = ts.text + '（⚠️ 陷阱观察，降为小仓）';
+          const col = v.trap && v.trap.level === 'hard' ? '#e05a5a' : (v.trap && v.trap.level === 'soft' ? '#d9a441' : (ts.action === 'sell' ? '#e05a5a' : ts.action === 'reduce' ? '#d9a441' : ts.action === 'watch' ? '#d9a441' : (ts.action.startsWith('buy_') ? '#4caf7d' : 'var(--muted)')));
           const lvNote = ts.level ? ` <span style="font-weight:400;font-size:11px;color:var(--sub)">等级 ${ts.level} · 建议强度 ${ts.strength}</span>` : '';
           const disclaimer = ts.level ? '<span style="font-weight:400;font-size:11px;color:var(--muted);display:block;margin-top:2px">⚠️ 等级=风险提示+建议，最终动作由您拍板</span>' : '';
-          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + ts.text + lvNote + '<span style="font-weight:400;font-size:11px;color:var(--sub)"> — ' + ts.reason + '</span>' + disclaimer + '</div>';
+          return '<div style="font-size:12px;margin-top:6px;padding:6px 9px;border-radius:8px;border:1px solid ' + col + ';background:rgba(0,0,0,.2);color:' + col + ';font-weight:700">' + layerBadge + tsText + lvNote + '<span style="font-weight:400;font-size:11px;color:var(--sub)"> — ' + ts.reason + '</span>' + disclaimer + '</div>';
         })()}
         ${v.tiers && v.tiers.length ? '<div style="font-size:11px;color:var(--sub);margin-top:4px">🎯 ' + v.tiers.map(t => t.type === 'cur' ? t.text : (t.label || t.type) + ' <b>' + t.rate.toFixed(1) + '%</b><span style="font-size:11px;opacity:.7">（' + t.price + ' 元）</span>' + (t.hit ? ' ✅' : '')).join(' &nbsp;|&nbsp; ') + '</div>' : ''}
         ${v.ref3D ? '<div style="font-size:11px;color:var(--muted);margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">📐 三维参考：' + ['abs', 'pct', 'fin'].map(k => { const r = v.ref3D[k]; return r ? `<span style="margin-right:8px"><b>${r.label}</b> ${r.val}${r.ref ? '（' + r.ref + '）' : ''}</span>` : ''; }).join('') + '</div>' : ''}
@@ -2321,6 +2340,38 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* v1.9.6 P0-8/9：决策摘要区（买入结论行 + 关键三数）——规则树与 rule-tree-backtest.js 一致，历史胜率来自回测表
    * C10/P56（2026-08-21）：opts.dataTs = {kTs, dTs} 数据源时间戳（结论行数字可回源） */
+  /* ===== v3.7.0 统一结论引擎（接手 AI）：三套结论合并为唯一主结论 =====
+   * 背景：诊断页曾有 3 个并列结论互相矛盾（规则树"条件建仓" vs 陷阱过滤器"陷阱确认" vs 等级引擎"L3 小仓"）。
+   * 合并规则（展示层，不动三套引擎算法）：
+   *   1. 卖出侧优先：tradingSignal 出 sell/reduce/watch（S1-S3）→ 主结论=回避/减仓/观察
+   *   2. 陷阱 hard（净利大幅下滑+支付率过高+高股息画像）→ 主结论=回避（陷阱拦截）
+   *   3. 陷阱 soft → 买入档主结论降级为"观察（陷阱风险）"
+   *   4. 否则保持规则树结论（strong/buy/watch/wait/avoid）
+   * 结果：页面只出现 1 个主结论，陷阱确认时绝不再显示"条件建仓"。 */
+  function applyUnifiedVerdict(ts, trap) {
+    const box = document.getElementById('diagMainVerdict');
+    if (!box) return;
+    const base = window.__ruleVerdict || null;
+    if (!base) return;
+    let label = base.label, color = base.color, icon = base.icon;
+    let extraHtml = '';
+    if (ts && (ts.action === 'sell' || ts.action === 'reduce' || ts.action === 'watch')) {
+      const m = ts.text.match(/^(\S+\s*\S*)/);
+      label = m ? m[1] : '回避/观察';
+      color = ts.action === 'sell' ? '#e05a5a' : '#d9a441';
+      icon = ts.action === 'sell' ? '🔴' : '🟡';
+      extraHtml = `<span style="font-size:11px;color:var(--sub);font-weight:400">— ${ts.reason}</span>`;
+    } else if (trap && trap.level === 'hard') {
+      label = '回避（陷阱拦截）';
+      color = '#e05a5a'; icon = '🚫';
+      extraHtml = `<span style="font-size:11px;color:#e05a5a;font-weight:400">— ${trap.msg}</span>`;
+    } else if (trap && trap.level === 'soft') {
+      if (base.tier === 'strong' || base.tier === 'buy' || base.tier === 'watch') { label = '观察（陷阱风险）'; color = '#d9a441'; icon = '🟡'; }
+      extraHtml = `<span style="font-size:11px;color:#d9a441;font-weight:400">— ${trap.msg}：加仓降为小仓</span>`;
+    }
+    box.innerHTML = `<b style="color:${color};font-size:16px">${icon} ${label}</b>${extraHtml ? ' ' + extraHtml : ''}`;
+  }
+
   function renderDecisionSummary(code, divs, kline, dataTs) {
     const el = $('#diagSummary');
     if (!el) return;
@@ -2370,7 +2421,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     body.innerHTML = `
       ${gapBar}
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid rgba(217,164,65,.5);border-radius:10px;padding:8px 10px;background:rgba(217,164,65,.06)">   <!-- W3（2026-08-21）：主信号金描边 -->
-        <b style="color:${color};font-size:16px">${icon} ${label}</b>
+        <span id="diagMainVerdict"><b style="color:${color};font-size:16px">${icon} ${label}</b></span>
         <span style="font-size:12px;color:var(--sub)">${statTxt} · 基于历史数据${dataTsTxt}</span>
       </div>
       <div style="font-size:12px;margin-top:6px;color:var(--txt)">当前分位 ${last.pct.toFixed(0)}%（${tcls.label} · ${ecoName}）${waitHint}</div>
@@ -2388,6 +2439,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         <!-- C17/E4（2026-08-21）：查看全部+筛选（手动/自动+时间范围） -->
         <div style="margin-top:4px"><button type="button" class="chip" id="decLogMore">📖 查看全部（${decLog().length} 条）</button></div>
       </div>`;
+    /* v3.7.0 统一结论：存规则树结论快照，供 renderReportCard 的 applyUnifiedVerdict 合并陷阱/卖出信号 */
+    window.__ruleVerdict = { tier: v.tier, label, color, icon };
     const bindDec = (decision) => {
       decAdd({ code, name: (window.REPORT_CARD_EXTRA && window.REPORT_CARD_EXTRA[code] && window.REPORT_CARD_EXTRA[code].name) || code, tier: v.tier, pct: last.pct, dy: dyTmp ? dyTmp.yieldPct : null, note: label, trap: null, decision });
       const ll = document.getElementById('decLogList');
@@ -2398,8 +2451,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const b3 = document.getElementById('decBtnWait'); if (b3) b3.onclick = () => bindDec('wait');
     /* C17/E4（2026-08-21）：查看全部→全量列表+筛选（手动/自动/近7天/近30天），展开后绑定筛选 chips */
     const decMore = document.getElementById('decLogMore');
-    /* v2.0 #22：决策日志删除（事件委托，快照已带 tier/pct/dy/note） */
-    if (!document.querySelector('#decLogList[data-delbound]')) {
+    /* v2.0 #22：决策日志删除（事件委托，快照已带 tier/pct/dy/note）
+     * 修复 C1（2026-08-23 接手 AI）：原 `!document.querySelector('#decLogList[data-delbound]')` 的 data-delbound
+     * 从未被任何代码设置 → 条件恒真 → 每次渲染诊断页都追加一个 document click 委托，删一条触发多次。
+     * 改为 body dataset 真实标记，全局只绑定一次。 */
+    if (!document.body.dataset.decDelBound) {
+      document.body.dataset.decDelBound = '1';
       document.addEventListener('click', (e) => {
         const b = e.target && e.target.closest && e.target.closest('[data-del]');
         if (!b) return;
@@ -3519,16 +3576,18 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     const divTotal = ps.reduce((s, p) => s + p.cumDiv, 0);
     const lastW = (res.weightEvol && res.weightEvol.length) ? res.weightEvol[res.weightEvol.length - 1] : null;
     const lastDate = (res.totalAsset && res.totalAsset.length) ? res.totalAsset[res.totalAsset.length - 1].d : '';
-    /* v3.5 排序状态（存模块级，切换器读写） */
-    if (typeof _stockSortKey === 'undefined') var _stockSortKey = 'mkt'; /* mkt=市值占比 / gain=总收益 / name=拼音 */
+    /* v3.5 排序状态（存 window 模块级，切换器读写）
+     * 修复 C3（2026-08-23 接手 AI）：原 var 声明在函数内每次调用重建 → typeof 恒 undefined → 恒重置 'mkt'
+     * → L4663 设置的值下次渲染被清掉 → 排序切换器实际不生效。改 window 属性持久。 */
+    if (window._stockSortKey == null) window._stockSortKey = 'mkt'; /* mkt=市值占比 / gain=总收益 / name=拼音 */
     let sorted = ps.slice();
-    if (_stockSortKey === 'mkt') {
+    if (window._stockSortKey === 'mkt') {
       sorted.sort((a, b) => {
         const wa = lastW ? (lastW.weights[a.code] || 0) : 0;
         const wb = lastW ? (lastW.weights[b.code] || 0) : 0;
         return wb - wa;
       });
-    } else if (_stockSortKey === 'gain') {
+    } else if (window._stockSortKey === 'gain') {
       sorted.sort((a, b) => (((b.finalValue - b.invested) + b.cumDiv) - ((a.finalValue - a.invested) + a.cumDiv)));
     } else {
       sorted.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
@@ -3615,9 +3674,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       </div>`;
     });
     const sortSel = `<select id="stockSortSel" style="font-size:10px;padding:2px 4px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
-      <option value="mkt" ${_stockSortKey === 'mkt' ? 'selected' : ''}>按市值占比</option>
-      <option value="gain" ${_stockSortKey === 'gain' ? 'selected' : ''}>按总收益</option>
-      <option value="name" ${_stockSortKey === 'name' ? 'selected' : ''}>按名称</option>
+      <option value="mkt" ${window._stockSortKey === 'mkt' ? 'selected' : ''}>按市值占比</option>
+      <option value="gain" ${window._stockSortKey === 'gain' ? 'selected' : ''}>按总收益</option>
+      <option value="name" ${window._stockSortKey === 'name' ? 'selected' : ''}>按名称</option>
     </select>`;
     return `<div style="margin-top:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line);padding:8px">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700">🧩 每只股票</span><span style="font-size:10px;color:var(--muted)">总收益/账户增值/本金回报三口径 · 市值占比=当前 · 点卡片看逐年详情</span><span style="margin-left:auto">${sortSel}</span></div>
@@ -4656,7 +4715,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (sel && !sel.dataset.bound) {
         sel.dataset.bound = '1';
         sel.onchange = () => {
-          _stockSortKey = sel.value;
+          window._stockSortKey = sel.value;
           const grid2 = document.getElementById('stockCardsGrid');
           if (grid2) {
             const container = grid2.closest('#pfbtResult');
@@ -5296,13 +5355,18 @@ async function renderComboCard() {
   if (runBtn && !runBtn.dataset.bound) { runBtn.dataset.bound = '1'; runBtn.onclick = () => { if (!_comboItems.length) { toast('组合为空，先加股'); return; } const name = comboPersist(); switchTab('pfbt'); setTimeout(() => { const sel2 = $('#pfbtComboSel'); if (sel2) { sel2.innerHTML = ''; const c3 = DL.loadCombos(); (c3.combos || []).forEach(cm => { const o = document.createElement('option'); o.value = cm.id; o.textContent = cm.name + '（' + cm.items.length + '只）'; sel2.appendChild(o); }); sel2.value = _comboId || ''; } const run = $('#pfbtRun'); if (run) run.click(); }, 300); }; }
   /* 环形图视图切换（金额/分红） */
   $b('comboDonutMode', () => { _comboDonutMode = _comboDonutMode === 'amt' ? 'div' : 'amt'; renderComboDonut(); });
-  /* 快捷键（Ctrl+Z 撤销 / Ctrl+S 保存 / Ctrl+Enter 回测） */
-  document.addEventListener('keydown', e => {
-    const k = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && k === 'z') { if (typeof comboUndo === 'function') { e.preventDefault(); comboUndo(); } }
-    if ((e.ctrlKey || e.metaKey) && k === 's') { const sb = $('#comboSave'); if (sb && sb.dataset.bound) { e.preventDefault(); sb.click(); } }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { const rb = $('#pfbtRun'); if (rb) { e.preventDefault(); rb.click(); } }
-  });
+  /* 快捷键（Ctrl+Z 撤销 / Ctrl+S 保存 / Ctrl+Enter 回测）
+   * 修复 C2（2026-08-23 接手 AI）：原绑定在 renderComboCard 内，每次 renderHome 重渲染都新增一个全局 keydown
+   * 监听（dataset.bound 只保护了按钮没保护本监听）→ Ctrl+S 触发多次保存。改 body dataset 标记，全局只绑定一次。 */
+  if (!document.body.dataset.comboKeysBound) {
+    document.body.dataset.comboKeysBound = '1';
+    document.addEventListener('keydown', e => {
+      const k = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && k === 'z') { if (typeof comboUndo === 'function') { e.preventDefault(); comboUndo(); } }
+      if ((e.ctrlKey || e.metaKey) && k === 's') { const sb = $('#comboSave'); if (sb && sb.dataset.bound) { e.preventDefault(); sb.click(); } }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { const rb = $('#pfbtRun'); if (rb) { e.preventDefault(); rb.click(); } }
+    });
+  }
 }
 
   /* D2（M186）：合并 renderHoldingsEditor + renderPortfolioSample → renderHoldingsCard
