@@ -62,8 +62,14 @@ self.onmessage = e => {
       const mKeys = Object.keys(byMonth).sort();
       return mKeys.map(m => +(byMonth[m].value / Math.max(1, amount)).toFixed(3));
     }
+    /* v3.6.1 F1（大师 P0-1 落点）：月采样曲线内嵌 perStock（快照/缓存自包含）——与主线程 data-layer.js 同构，含 cumDiv 供 tooltip 分红行 */
+    function mSeriesOf(dailyArr) {
+      const byMonth = {};
+      dailyArr.forEach(dd => { byMonth[dd.date.slice(0, 7)] = dd; });
+      return Object.keys(byMonth).sort().map(m => ({ d: m + '-01', value: +(byMonth[m].value / 10000).toFixed(2), invested: +(byMonth[m].invested / 10000).toFixed(2), cumDiv: +(byMonth[m].cumDiv / 10000).toFixed(2) }));
+    }
     /* v3.5 AC-D1/D2：逐年明细——用 sim-core.js 共享 yearlyOf（防双份） */
-    const perStock = rows.filter(r => !r._cash).map(r => ({ code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2), finalValue: r.sim.daily[r.sim.daily.length - 1].value, invested: r.sim.daily[r.sim.daily.length - 1].invested, extInvested: r.sim.extInvested, cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.daily[r.sim.daily.length - 1].value / Math.max(1, r.amount) - 1, divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0, yearlyDivs: yearlyDivsOf(r.sim.daily), monthlyFlow: r.sim.monthlyFlow, navSeries: navSeriesOf(r.sim.daily, r.amount), yearly: simOne.yearlyOf(r.sim) }));
+    const perStock = rows.filter(r => !r._cash).map(r => ({ code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2), finalValue: r.sim.daily[r.sim.daily.length - 1].value, invested: r.sim.daily[r.sim.daily.length - 1].invested, extInvested: r.sim.extInvested, cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.daily[r.sim.daily.length - 1].value / Math.max(1, r.amount) - 1, divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0, yearlyDivs: yearlyDivsOf(r.sim.daily), monthlyFlow: r.sim.monthlyFlow, navSeries: navSeriesOf(r.sim.daily, r.amount), mSeries: mSeriesOf(r.sim.daily), yearly: simOne.yearlyOf(r.sim) }));
     const weightEvol = [];
     const yearsList = {}; totalAsset.forEach(t => { yearsList[t.d.slice(0, 4)] = true; });
     Object.keys(yearsList).sort().forEach(y => { const yearEnd = totalAsset.filter(t => t.d.slice(0, 4) === y).pop(); if (!yearEnd) return; const wt = {}; let sum = 0; rows.forEach(r => { const dd = r._cash ? null : (r.sim.daily.find(x => x.date === yearEnd.d)); const v = dd ? dd.value : 0; wt[r.code] = v; sum += v; }); Object.keys(wt).forEach(c => { wt[c] = sum > 0 ? wt[c] / sum * 100 : 0; }); weightEvol.push({ y, weights: wt }); });

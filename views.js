@@ -3751,7 +3751,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           }
         }
         ch.setOption({
-          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].axisValue; return `<b>${d}</b><br/>市值 <b>${ps[0].value}万</b> · 累计投入 ${ps[1] ? ps[1].value + '万' : '—'}`; } },
+          /* v3.6.1 P0-1/P2-2（大师）：time 轴 axisValue 是时间戳 → 用 data[0] 取原始日期（对齐 4212 主图先例）；日期统一中文格式；加月分红到账行（mSeries.cumDiv 相邻差，旧快照 undefined 容错） */
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].data ? ps[0].data[0] : (typeof ps[0].axisValue === 'string' ? ps[0].axisValue : ''); if (!d) return ''; const mm = d.length >= 10 ? (Number(d.slice(5, 7)) + '月' + Number(d.slice(8, 10)) + '日') : ''; let s = `<b>${Number(d.slice(0, 4))}年${mm}</b><br/>市值 <b>${ps[0].value}万</b> · 累计投入 ${ps[1] ? ps[1].value + '万' : '—'}`;
+            /* 月分红到账：mSeries 相邻 cumDiv 差（>0 金色行）；旧快照无 cumDiv 字段 → 跳过不崩 */
+            try { const ms = p.mSeries || []; const idx = ms.findIndex(m => m.d === d); if (idx >= 0 && ms[idx].cumDiv != null) { const prev = idx > 0 ? (ms[idx - 1].cumDiv || 0) : 0; const md = ms[idx].cumDiv - prev; if (md > 0.0001) s += `<br/><span style="color:#d9a441">● 该月分红到账 ${md.toFixed(2)}万</span>`; } } catch (e) {}
+            return s; } },
           legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 } },
           grid: { left: 50, right: 12, top: 26, bottom: 22 },
           xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 9 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
@@ -4389,7 +4393,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       ch.setOption({
         title: { text: '分红复投 vs 提取（复利的力量）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 10 } },
-        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+        /* v3.6.1 P0-2（大师）：默认 tooltip 显示原始元数值不可读 → 自定义：中文日期 + 万单位 */
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].data ? ps[0].data[0] : ''; const ds = String(d); const mm = ds.length >= 10 ? (Number(ds.slice(5, 7)) + '月' + Number(ds.slice(8, 10)) + '日') : ''; let s = `<b>${Number(ds.slice(0, 4))}年${mm}</b>`; ps.forEach(x => { s += `<br/>${x.marker} ${x.seriesName} <b>${(x.value / 10000).toFixed(1)}万</b>`; }); return s; } },
         grid: { left: 44, right: 14, top: 40, bottom: 24 },
         xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 } },
         yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
@@ -4820,7 +4825,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         ch.setOption({
           title: { text: '组合对比（总资产）', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
           legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 } },
-          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+          /* v3.6.1 P0-2（大师）：元→万 + 中文日期 */
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].data ? ps[0].data[0] : ''; const ds = String(d); const mm = ds.length >= 10 ? (Number(ds.slice(5, 7)) + '月' + Number(ds.slice(8, 10)) + '日') : ''; let s = `<b>${Number(ds.slice(0, 4))}年${mm}</b>`; ps.forEach(x => { s += `<br/>${x.marker} ${x.seriesName} <b>${(x.value / 10000).toFixed(1)}万</b>`; }); return s; } },
           grid: { left: 56, right: 14, top: 44, bottom: 26 },
           xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 } },
           yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
@@ -5507,7 +5513,8 @@ async function renderComboCard() {
     if (divData.length) series.push({ name: '累计分红', type: 'line', data: divData, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 2, type: 'dashed' }, itemStyle: { color: '#d9a441' } });
     chart.setOption({
       title: { text: '组合净值曲线', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
-      tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
+      /* v3.6.1 P0-2（大师）：元→万 + 中文日期 */
+      tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].data ? ps[0].data[0] : ''; const ds = String(d); const mm = ds.length >= 10 ? (Number(ds.slice(5, 7)) + '月' + Number(ds.slice(8, 10)) + '日') : ''; let s = `<b>${Number(ds.slice(0, 4))}年${mm}</b>`; ps.forEach(x => { s += `<br/>${x.marker} ${x.seriesName} <b>${(x.value / 10000).toFixed(1)}万</b>`; }); return s; } },
       legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 }, data: series.map(s => s.name) },
       grid: { left: 52, right: 12, top: 40, bottom: 24 },
       xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
