@@ -1001,7 +1001,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           const cc = echarts.init(ccEl);
           cc.setOption({
             series: [{ type: 'pie', radius: ['62%', '82%'], silent: true, label: { show: true, position: 'center', formatter: () => coverPct.toFixed(0) + '%\n覆盖', fontSize: 14, color: '#e8efe9' }, data: [{ value: coverPct, itemStyle: { color: '#4caf7d' } }, { value: 100 - coverPct, itemStyle: { color: 'rgba(255,255,255,.08)' } }] }],
-            title: { text: '分红目标覆盖', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+            title: { text: '分红目标覆盖', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
           });
         } else {
           ccEl.innerHTML = '<div class="hint" style="font-size:11px;padding-top:56px;text-align:center">🎯 上方填年度分红目标<br>这里显示覆盖进度环</div>';
@@ -1014,7 +1014,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       if (cmEl && typeof echarts !== 'undefined') {
         const cm = echarts.init(cmEl);
         cm.setOption({
-          title: { text: '未来 12 个月到账（税前·元）' + (getParam('monthSmooth') ? '·平滑' : '·实际到账月'), left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+          title: { text: '未来 12 个月到账（税前·元）' + (getParam('monthSmooth') ? '·平滑' : '·实际到账月'), left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
           grid: { left: 44, right: 8, top: 26, bottom: 22 },
           xAxis: { type: 'category', data: cf.map(m => m.month.slice(5) + '月'), axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
           yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
@@ -3807,44 +3807,49 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     </div>`;
     if (meta.failed && meta.failed.length) html += `<div class="hint v3-blink" style="color:#e05a5a;border:1px solid rgba(224,90,90,.3);padding:4px 8px;border-radius:6px">⚠️ 数据可信度：${meta.failed.length}/${combo.items.length} 只数据缺失（${meta.failed.join('、')}），结果未含——请检查网络或数据源</div>`;
     else html += `<div class="hint" style="color:var(--sub)">✅ 数据可信度：${res.rows}/${combo.items.length} 只数据完整（本地缓存/实时行情）</div>`;
-    /* 主图（净值从1起 + 双基准 + 下挂回撤副图——v3.2 S5/D3） */
+    /* 主图（金额轴 + 双基准 + 下挂回撤副图——v3.2 S5/D3 + v3.4 主人令） */
     html += `<div id="cockpitMain" style="width:100%;height:320px;margin-top:4px"></div>`;
-    /* 辅助 3 图（覆盖率环/分红质量环/健康雷达） */
-    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <div id="cockpitRing" style="width:32%;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-      <div id="cockpitDivRing" style="width:32%;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-      <div id="cockpitRadar" style="flex:1;min-width:180px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-    </div>`;
-    /* v1 新增可视化：收益贡献 + 组合股息日历 */
-    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <div id="cockpitContrib" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-      <div id="cockpitDivCal" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line);overflow:auto"></div>
-    </div>`;
-    /* v1 新增可视化：覆盖率演进 + 复投vs提取 + 行业分布 */
-    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-      <div id="cockpitCovEvol" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-      <div id="cockpitReinv" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-      <div id="cockpitIndustry" style="flex:1;min-width:170px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
-    </div>`;
+    /* v3.4 P9：16 图平铺→折叠面板——辅助图区分组折叠，默认开 ①体检三件套 ②分红节奏；其余点开才显（长页不吓人） */
+    html += `<details class="v3-fold" open><summary>📊 体检三件套（覆盖率 / 分红质量 / 健康雷达）</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <div id="cockpitRing" style="flex:1;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+        <div id="cockpitDivRing" style="flex:1;min-width:150px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+        <div id="cockpitRadar" style="flex:1;min-width:180px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+      </div>
+    </details>`;
+    /* 收益贡献 + 组合股息日历（折叠） */
+    html += `<details class="v3-fold"><summary>💰 收益贡献 + 📅 组合股息日历</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <div id="cockpitContrib" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+        <div id="cockpitDivCal" style="flex:1;min-width:280px;height:190px;background:var(--card2);border-radius:10px;border:1px solid var(--line);overflow:auto"></div>
+      </div>
+    </details>`;
+    /* 覆盖率演进 + 复投vs提取 + 行业分布（折叠） */
+    html += `<details class="v3-fold"><summary>📈 覆盖率演进 / 复投vs提取 / 行业分布</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <div id="cockpitCovEvol" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+        <div id="cockpitReinv" style="flex:1;min-width:240px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+        <div id="cockpitIndustry" style="flex:1;min-width:170px;height:170px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>
+      </div>
+    </details>`;
     /* 回本进度环（W2：组合环+每只小环） */
     html += `<div id="cockpitPayback" style="width:100%;margin-top:8px;padding:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line)"></div>`;
     /* 时间轴回放 */
     html += `<div style="margin-top:8px"><div style="font-size:11px;color:var(--muted);margin-bottom:2px">🎬 时间轴回放：拖动看「我的钱怎么长大」（预计算，拖动只切帧）</div>
       <input type="range" id="cockpitTimeline" min="0" max="${Math.max(0, res.totalAsset.length - 1)}" value="${res.totalAsset.length - 1}" style="width:100%;accent-color:var(--gold)"></div>`;
-    /* v3.2 S4：逐年分红柱 + 增长率双轴（年/季切换 + CAGR 徽章 + 三态色 + 断档断开） */
-    html += `<div id="cockpitDivBarWrap" style="margin-top:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line);padding:8px">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:12px;font-weight:700">📊 分红节奏</span>
-        <span id="divCagrBadge" style="font-size:10px;color:var(--muted)"></span>
-        <span id="divStabWarn" style="font-size:10px;color:var(--muted)"></span>
+    /* v3.2 S4：逐年分红柱 + 增长率双轴（日/月/年切换 + CAGR 徽章 + 三态色 + 断档断开）——默认开 */
+    html += `<details class="v3-fold" open><summary>📊 分红节奏（逐年/逐月/逐日）</summary>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <span id="divCagrBadge" style="font-size:11px;color:var(--muted)"></span>
+        <span id="divStabWarn" style="font-size:11px;color:var(--muted)"></span>
         <span style="margin-left:auto;display:flex;gap:4px" id="divGranSwitch">
-          <button type="button" class="chip" data-g="day" style="font-size:10px;padding:2px 8px">日</button>
-          <button type="button" class="chip" data-g="month" style="font-size:10px;padding:2px 8px">月</button>
-          <button type="button" class="chip" data-g="year" style="font-size:10px;padding:2px 8px">年</button>
+          <button type="button" class="chip" data-g="day" style="font-size:11px;padding:2px 8px">日</button>
+          <button type="button" class="chip" data-g="month" style="font-size:11px;padding:2px 8px">月</button>
+          <button type="button" class="chip" data-g="year" style="font-size:11px;padding:2px 8px">年</button>
         </span>
       </div>
       <div id="cockpitDivBar" style="width:100%;height:170px;margin-top:4px"></div>
-    </div>`;
+    </details>`;
     /* v3.2 S6/S7：个股卡片区（分红柱之下） */
     html += renderStockCards(res, pool);
     /* 每只贡献 + 权重演化（折叠） */
@@ -3975,11 +3980,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         ],
         yAxis: [
           { type: 'value', gridIndex: 0, name: '金额(万)', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, scale: true },
-          { type: 'value', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v + '%' }, splitLine: { show: false }, min: 'dataMin' },
+          { type: 'value', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { show: false }, min: 'dataMin' },
         ],
         dataZoom: [
           { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-          { type: 'slider', xAxisIndex: [0, 1], bottom: 2, height: 14, borderColor: '#2a3d36', backgroundColor: '#16211d', fillerColor: 'rgba(217,164,65,.12)', textStyle: { color: '#8fa69c', fontSize: 9 } },
+          { type: 'slider', xAxisIndex: [0, 1], bottom: 2, height: 14, borderColor: '#2a3d36', backgroundColor: '#16211d', fillerColor: 'rgba(217,164,65,.12)', textStyle: { color: '#8fa69c', fontSize: 10 } },
         ],
         series: [
           { name: '组合市值', type: 'line', data: navData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.25)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
@@ -4044,8 +4049,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const ddMax = 100;
       const growth = res.perStock.length ? res.perStock.reduce((s, p) => s + Math.max(0, Math.min(100, (p.ret + 1) * 50)), 0) / res.perStock.length : 0;
       ch.setOption({
-        title: { text: '组合健康', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
-        radar: { indicator: [{ name: '分红回报', max: 100 }, { name: '覆盖率', max: 100 }, { name: '分散度', max: 100 }, { name: '回撤控制', max: 100 }, { name: '成长性', max: 100 }], radius: '62%', axisName: { color: '#8fa69c', fontSize: 9 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+        title: { text: '组合健康', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
+        radar: { indicator: [{ name: '分红回报', max: 100 }, { name: '覆盖率', max: 100 }, { name: '分散度', max: 100 }, { name: '回撤控制', max: 100 }, { name: '成长性', max: 100 }], radius: '62%', axisName: { color: '#8fa69c', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
         series: [{ type: 'radar', data: [{ value: [Math.min(100, divRatio * 2), cov, Math.max(0, 100 - conc), Math.max(0, 100 - ddMax), growth], name: '健康', areaStyle: { color: 'rgba(76,175,125,.2)' }, lineStyle: { color: '#4caf7d' }, itemStyle: { color: '#4caf7d' } }] }],
       });
     }
@@ -4060,8 +4065,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         return { name: nm, type: 'line', stack: 'w', data: res.weightEvol.map(w => +(w.weights[code] || 0).toFixed(1)), smooth: true, showSymbol: false, lineStyle: { width: 1 } };
       });
       ch.setOption({
-        title: { text: '权重演化（动态再平衡视角）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
-        legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 9 }, type: 'scroll' },
+        title: { text: '权重演化（动态再平衡视角）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
+        legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 }, type: 'scroll' },
         tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
         grid: { left: 40, right: 12, top: 40, bottom: 24 },
         xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
@@ -4077,9 +4082,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const divC = res.perStock.map(p => +(p.cumDiv / 10000).toFixed(2));
       const priceC = res.perStock.map(p => +((p.finalValue - p.invested) / 10000).toFixed(2));
       ch.setOption({
-        title: { text: '收益贡献（金=分红 · 红涨/绿赔=价格）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        title: { text: '收益贡献（金=分红 · 红涨/绿赔=价格）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p.map(x => x.marker + ' ' + x.seriesName + '：' + x.value + '万').join('<br>') },
-        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 } },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 10 } },
         grid: { left: 14, right: 90, top: 40, bottom: 24 },
         xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
         yAxis: { type: 'category', data: names, axisLabel: { color: '#8fa69c', fontSize: 10 } },
@@ -4105,8 +4110,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         });
       });
       const ms = Object.keys(months).sort();
-      dcEl.innerHTML = `<div style="font-size:10px;color:#8fa69c;padding:6px 8px 0">📅 组合股息日历（未来12个月 · 估=上年同期推算）</div>` + (ms.length
-        ? `<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px">${ms.map(m => `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 8px;color:var(--gold);font-weight:700">${m}</td><td style="padding:3px">${months[m].map(x => `${esc(x.name)} ${x.cash.toFixed(2)}`).join(' · ')}</td><td style="padding:3px;text-align:right;color:var(--sub)">${(months[m].reduce((s, x) => s + x.cash, 0)).toFixed(2)}/股</td></tr>`).join('')}</table>`
+      dcEl.innerHTML = `<div style="font-size:12px;color:#8fa69c;padding:6px 8px 0">📅 组合股息日历（未来12个月 · 估=上年同期推算）</div>` + (ms.length
+        ? `<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">${ms.map(m => `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 8px;color:var(--gold);font-weight:700">${m}</td><td style="padding:3px">${months[m].map(x => `${esc(x.name)} ${x.cash.toFixed(2)}`).join(' · ')}</td><td style="padding:3px;text-align:right;color:var(--sub)">${(months[m].reduce((s, x) => s + x.cash, 0)).toFixed(2)}/股</td></tr>`).join('')}</table>`
         : `<div style="padding:10px;font-size:11px;color:var(--muted)">未来 12 个月暂无已宣告分红（或数据未含）</div>`);
     }
     /* v1 N13：覆盖率演进曲线（年分红÷月支出×12 逐年） */
@@ -4117,12 +4122,12 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const ys = Object.keys(res.divByYear).sort();
       const cov = monthlyExp > 0 ? ys.map(y => +(res.divByYear[y] / 12 / monthlyExp * 100).toFixed(1)) : [];
       ch.setOption({
-        title: { text: monthlyExp > 0 ? '覆盖率演进（年分红÷月支出×12）' : '覆盖率演进（填月支出后显示）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        title: { text: monthlyExp > 0 ? '覆盖率演进（年分红÷月支出×12）' : '覆盖率演进（填月支出后显示）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p[0].name + '：' + p[0].value + '%' },
         grid: { left: 40, right: 14, top: 30, bottom: 24 },
         xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 10 } },
         yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-        series: [{ name: '覆盖率', type: 'line', data: cov, smooth: true, showSymbol: false, lineStyle: { color: '#5aa9e6', width: 2 }, areaStyle: { color: 'rgba(90,169,230,.12)' }, markLine: { data: [{ yAxis: 100, lineStyle: { color: '#4caf7d', type: 'dashed' }, label: { formatter: '100%', color: '#4caf7d', fontSize: 9 } }] } }],
+        series: [{ name: '覆盖率', type: 'line', data: cov, smooth: true, showSymbol: false, lineStyle: { color: '#5aa9e6', width: 2 }, areaStyle: { color: 'rgba(90,169,230,.12)' }, markLine: { data: [{ yAxis: 100, lineStyle: { color: '#4caf7d', type: 'dashed' }, label: { formatter: '100%', color: '#4caf7d', fontSize: 10 } }] } }],
         animationDuration: 600,
       });
     }
@@ -4149,8 +4154,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
       } catch (e) {}
       ch.setOption({
-        title: { text: '分红复投 vs 提取（复利的力量）', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
-        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 9 } },
+        title: { text: '分红复投 vs 提取（复利的力量）', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 10 } },
         tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
         grid: { left: 44, right: 14, top: 40, bottom: 24 },
         xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 10 } },
@@ -4177,10 +4182,10 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const rows2 = Object.keys(indMap).map(k => ({ name: IND_NAME[k] || k, value: indMap[k] })).sort((a, b) => b.value - a.value);
       const maxInd = rows2.length ? rows2[0] : null;
       ch.setOption({
-        title: { text: '行业分布' + (maxInd && maxInd.value / (combo.items.reduce((s, it) => s + (it.amount || 0), 0) || 1) > 0.5 ? ' · ⚠️集中' : ''), left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+        title: { text: '行业分布' + (maxInd && maxInd.value / (combo.items.reduce((s, it) => s + (it.amount || 0), 0) || 1) > 0.5 ? ' · ⚠️集中' : ''), left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => p[0].name + '：' + (p[0].value / 10000).toFixed(1) + '万' },
         grid: { left: 14, right: 50, top: 28, bottom: 20 },
-        xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        xAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
         yAxis: { type: 'category', data: rows2.map(r => r.name), axisLabel: { color: '#8fa69c', fontSize: 10 } },
         series: [{ type: 'bar', data: rows2.map(r => r.value), itemStyle: { color: '#9b6df0', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 12 }],
         animationDuration: 600,
@@ -4277,13 +4282,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           grid: { left: 56, right: 46, top: 28, bottom: 24 },
           xAxis: { type: 'category', data: seq.map(s => s.key), axisLabel: { color: '#8fa69c', fontSize: 10, interval: g === 'day' ? Math.ceil(seq.length / 8) : (g === 'month' ? 'auto' : 0), rotate: g === 'day' ? 45 : 0 } },
           yAxis: [
-            { type: 'value', name: '分红', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
-            { type: 'value', name: 'YoY%', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, min: -100, max: 300, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { show: false } },
+            { type: 'value', name: '分红', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+            { type: 'value', name: 'YoY%', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, min: -100, max: 300, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '%' }, splitLine: { show: false } },
           ],
           series: [
             { name: '分红', type: 'bar', data: vals, barMaxWidth: g === 'quarter' ? 14 : 30, itemStyle: { color: p => colors[p.dataIndex], borderRadius: [3, 3, 0, 0] },
-              label: { show: true, position: 'top', fontSize: 9, color: '#8fa69c', formatter: p => { const s = seq[p.dataIndex]; if (s.div <= 0) return '—'; const n = seq.length; const mark = p.dataIndex === 0 || p.dataIndex === n - 1 || vals[p.dataIndex] === Math.max.apply(null, vals) ? (s.div / 10000).toFixed(1) + '万' : ''; return mark; } } },
-            { name: 'YoY', type: 'line', yAxisIndex: 1, data: yoyShow, connectNulls: false, symbolSize: 5, lineStyle: { color: '#d9a441', width: 1.5 }, itemStyle: { color: '#d9a441' }, label: { show: true, position: 'top', fontSize: 9, color: '#d9a441', formatter: p => yoyData[p.dataIndex] != null ? (p.value === '*' ? (yoyData[p.dataIndex] > 0 ? '+' : '') + yoyData[p.dataIndex].toFixed(0) + '%*' : p.value + '%') : '' } },
+              label: { show: true, position: 'top', fontSize: 10, color: '#8fa69c', formatter: p => { const s = seq[p.dataIndex]; if (s.div <= 0) return '—'; const n = seq.length; const mark = p.dataIndex === 0 || p.dataIndex === n - 1 || vals[p.dataIndex] === Math.max.apply(null, vals) ? (s.div / 10000).toFixed(1) + '万' : ''; return mark; } } },
+            { name: 'YoY', type: 'line', yAxisIndex: 1, data: yoyShow, connectNulls: false, symbolSize: 5, lineStyle: { color: '#d9a441', width: 1.5 }, itemStyle: { color: '#d9a441' }, label: { show: true, position: 'top', fontSize: 10, color: '#d9a441', formatter: p => yoyData[p.dataIndex] != null ? (p.value === '*' ? (yoyData[p.dataIndex] > 0 ? '+' : '') + yoyData[p.dataIndex].toFixed(0) + '%*' : p.value + '%') : '' } },
           ],
           animationDuration: 600,
         });
@@ -5214,7 +5219,7 @@ async function renderComboCard() {
     const series = [{ name: '持仓市值', type: 'line', data: mvData, smooth: true, showSymbol: false, lineStyle: { color: '#4caf7d', width: 2 }, itemStyle: { color: '#4caf7d' } }];
     if (divData.length) series.push({ name: '累计分红', type: 'line', data: divData, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 2, type: 'dashed' }, itemStyle: { color: '#d9a441' } });
     chart.setOption({
-      title: { text: '组合净值曲线', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+      title: { text: '组合净值曲线', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
       tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 } },
       legend: { top: 16, textStyle: { color: '#8fa69c', fontSize: 10 }, data: series.map(s => s.name) },
       grid: { left: 52, right: 12, top: 40, bottom: 24 },
@@ -5239,7 +5244,7 @@ async function renderComboCard() {
     chart.setOption({
       tooltip: { trigger: 'item', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => `<b>${p.name}</b><br/>市值 <b>${(p.value / 10000).toFixed(2)} 万</b>（${p.percent.toFixed(1)}%）` },
       series: [{ type: 'pie', radius: ['45%', '72%'], label: { formatter: '{d}%', fontSize: 10, color: '#e8efe9' }, data: rows }],
-      title: { text: '市值占比', left: 'center', top: 2, textStyle: { fontSize: 10, color: '#8fa69c' } },
+      title: { text: '市值占比', left: 'center', top: 2, textStyle: { fontSize: 12, color: '#8fa69c' } },
     });
     chart.on('click', p => { if (p.data && p.data.code) { try { openDiagnose(p.data.code); } catch (e) {} } });
   }
