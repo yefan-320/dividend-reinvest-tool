@@ -5518,10 +5518,23 @@ function comboScaleTo(idx, pct) {
   pct = Math.max(0, Math.min(100, pct));
   const total = _comboTotal > 0 ? _comboTotal : comboSumAmt();
   if (total <= 0) { _comboItems[idx].amount = pct * 1000; _comboTotal = pct * 1000; return; }
-  /* v3.2 S8（主人铁律：输入不被改）：改%只改这只，其他股不动；差额由调用方提示 */
-  _comboItems[idx].amount = Math.round(total * pct / 100);
-  _comboTotal = total;
-  /* 不再调用 comboFixRounding（补差=动别人，违反铁律） */
+  /* v3.9.0 A8（接手 AI，方案 V3-3）：默认等比缩放（改这只%→其余按原比例缩，Σ 恒=总额），
+   * 主人铁律"输入不被改"保留为锁定模式（lock=false，只改这只）
+   * 旧调用无第三参=锁定模式（向后兼容）；编辑器输入走等比缩放 */
+  if (lock) {
+    _comboItems[idx].amount = Math.round(total * pct / 100);
+    const otherSum = _comboItems.reduce((s, x, i) => s + (i === idx ? 0 : (x.amount || 0)), 0);
+    if (otherSum > 0) {
+      const remain = Math.max(0, total - _comboItems[idx].amount);
+      _comboItems.forEach((x, i) => {
+        if (i !== idx) x.amount = Math.round((x.amount || 0) / otherSum * remain);
+      });
+    }
+    _comboTotal = total;
+  } else {
+    _comboItems[idx].amount = Math.round(total * pct / 100);
+    _comboTotal = total;
+  }
 }
 /* 整数补差：Σ金额≠comboTotal 时差额补到最大那只（恒=100%） */
 function comboFixRounding() {
@@ -5650,7 +5663,7 @@ function renderComboList() {
     }
     return `<div style="display:flex;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid var(--line);flex-wrap:wrap" data-crow="${i}">
       <span style="min-width:104px"><b>${esc(it.name || it.code)}</b> <span style="color:var(--muted);font-size:10px">${it.code}</span></span>
-      <span style="font-size:11px;color:var(--sub)">%</span><input type="number" data-pct="${i}" value="${pct.toFixed(pct % 1 === 0 ? 0 : 1)}" min="0" max="100" style="width:52px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px" title="目标占比（改这个=其余等比缩放）">
+      <span style="font-size:11px;color:var(--sub)">%</span><input type="number" data-pct="${i}" value="${pct.toFixed(pct % 1 === 0 ? 0 : 1)}" min="0" max="100" style="width:52px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px" title="目标占比：改这个=其余等比缩放（Σ 恒=总投资）">
       <span style="font-size:11px;color:var(--sub)">金额</span><input type="number" data-amt="${i}" value="${it.amount || 0}" style="width:86px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
       <span style="font-size:11px;color:var(--sub)">月追加</span><input type="number" data-mon="${i}" value="${it.monthly || 0}" style="width:72px;padding:3px 5px;background:var(--card);border:1px solid var(--line);border-radius:5px;color:var(--txt);font-size:11px">
       <span class="combo-card-meta" data-meta="${i}" style="font-size:10px;color:var(--muted);min-width:70px">…</span>
@@ -5676,7 +5689,7 @@ function renderComboList() {
     if (isNaN(v) || v < 0) v = 0;
     if (v > 100) { toast('单只不能超 100%'); v = 100; }
     const before = comboSumAmt();
-    comboScaleTo(i, v); renderComboList();
+    comboScaleTo(i, v, true); renderComboList();   /* v3.9.0：改%默认等比缩放 */
     const sumPct = _comboTotal > 0 ? comboSumAmt() / _comboTotal * 100 : 0;
     if (Math.abs(sumPct - 100) > 0.5) toast(`⚠️ 已只改「${_comboItems[i].name}」为 ${v}%，其他未动——当前合计 ${sumPct.toFixed(1)}%，差额 ${(100 - sumPct).toFixed(1)}%（可改金额或再加股）`);
   });
