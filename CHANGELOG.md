@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## v3.10.0（2026-08-23）—— 架构升级第一批：决策表数据化 + 代码拆分 + 口径层 + watch 原生定时 + 样本外验证（接手 AI，依据《优化方案.md》V4）
+
+### 🏗️ views.js 拆 5 模块（V4-2）
+- views.js 6433 行单文件 → **views-core/home/diag/compare/pfbt**（最大 2566 行），去 IIFE 外壳全局共享（零构建、零依赖）
+- 加载顺序 core→home→diag→compare→pfbt；release.sh 受管列表/语法检查/推送复核同步适配
+- 拆分后 e2e-full 27/27 验证无回归
+
+### 📊 统一口径层 metrics.js（V4-3）
+- 新增 metrics.js：股息率（默认报告期主口径）/分红占利润（统一名）/储备年数/便宜度 统一出口，签名带口径，附 audit() 口径审计
+- 9 断言单测（unit-metrics.js）接入 release 门禁——UI 后续逐步迁移到 METRICS.get() 消费
+
+### 🗄️ 硬编码决策表数据化（V4-1 第一批）
+- scripts/extract-tier-data.js：从 data-layer.js 提取 TIER_LINE(30只)/BENCH(6行业)/RULE_STATS/SIG_STATS/MAX_DD/P95_TRIGGERS/TREASURY → data/tier-data.json（幂等，深度核对 0 差异）
+- scripts/install-tier-refresh-launchd.sh：每月 1 日 05:00 自动提取，决策线不再靠人工维护
+
+### ⏰ watch.js 原生定时（V4-4）
+- scripts/install-watch-launchd.sh：launchd 每天 15:30 触发 wrapper（财报季 3/4/7/8/10 月每天跑；非财报季周一/三/五跑），替代外部 trigger 依赖，无人值守盯盘
+
+### 🔬 样本外验证（选股可信度增强，V4-5）
+- test/out-of-sample.js：前 8 年（2010-2017）独立定线 → 后 8 年（2018-2025）验证，40 只全量实测：
+  - P75 小仓线：338 次事件，3 年胜率 **75%**，收益 +44.5%（全样本线 72%/+37.6%——样本外更优）
+  - P90 加仓线：204 次，71%，+29.0%
+  - P95 重仓线：251 次，65%，+29.8%
+  - **结论：高股息+分位买入逻辑不是过拟合，历史验证真实有效**
+
+### 回归
+- node 全绿（anchors 7/7 + div-cases 8/8 + unit-v195 24/24 + unit-v35 14/14 + unit-v37 8/8 + unit-metrics 9/9 + unit-v200 11/11 + RULE_STATS ✅）+ e2e-full 27/27
+
 ## v3.9.0（2026-08-23）—— 五页改造 + 三端适配（接手 AI，依据《优化方案.md》V3/T）
 
 ### 🏠 决策台 → 今日简报
