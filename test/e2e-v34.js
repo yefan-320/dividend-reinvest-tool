@@ -140,6 +140,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   })()`);
   T('AC-13 1280px 7列全可见', bp && bp.c3 && bp.c5 && bp.c7, JSON.stringify(bp));
 
+  /* ⑨ v3.5 AC 断言：三口径同屏 / 市值占比 / yearly 字段 / 详情面板 */
+  const v35 = await evl(cdp, `(async () => {
+    const c = DL.loadCombos(); const full = await DL.btGet('full:auto:' + c.activeId); if (!full || !full.res) return null;
+    const res = full.res;
+    const p0 = res.perStock[0];
+    const cards = Array.from(document.querySelectorAll('.v3-stock-card'));
+    const trioTxt = cards[0] ? cards[0].textContent : '';
+    const hasTrio = trioTxt.indexOf('总收益') >= 0 && trioTxt.indexOf('账户增值') >= 0 && trioTxt.indexOf('本金回报') >= 0;
+    const hasMktBar = trioTxt.indexOf('组合占比') >= 0;
+    const hasYearly = !!(p0 && p0.yearly && p0.yearly.length > 0 && p0.yearly[0].gain != null && p0.yearly[0].extInvested != null);
+    const yl = p0 && p0.yearly || [];
+    let gainOk = true;
+    for (let i = 0; i < yl.length; i++) {
+      const prev = i > 0 ? yl[i - 1].value : 0;
+      if (Math.abs(yl[i].gain - (yl[i].value - prev - yl[i].added - yl[i].reinvested)) > 1) { gainOk = false; break; }
+    }
+    const sortSel = !!document.getElementById('stockSortSel');
+    const completeness = !!document.querySelector('#pfbtResult details.v3-fold summary');
+    /* 点卡片开详情 */
+    let detailOk = false;
+    if (cards[0]) { cards[0].click(); await new Promise(r => setTimeout(r, 300)); detailOk = !!document.querySelector('.v3-stock-detail'); document.querySelector('.v3-stock-detail') && document.querySelector('.v3-stock-detail').remove(); }
+    return { hasTrio, hasMktBar, hasYearly, gainOk, sortSel, completeness, detailOk, yearlyLen: yl.length };
+  })()`);
+  T('AC-U1 卡片三口径同屏（总收益/账户增值/本金回报）', v35 && v35.hasTrio, JSON.stringify(v35));
+  T('AC-U1 卡片市值占比横条', v35 && v35.hasMktBar);
+  T('AC-D1 worker yearly 字段带 gain/extInvested', v35 && v35.hasYearly, '年数 ' + (v35 && v35.yearlyLen));
+  T('AC-D1 yearly gain 公式自洽（Δvalue−added−reinvested）', v35 && v35.gainOk);
+  T('AC-U5 排序切换器存在', v35 && v35.sortSel);
+  T('AC-U6 数据完整性清单动态生成', v35 && v35.completeness);
+  T('AC-U2 卡片点击弹详情面板', v35 && v35.detailOk);
+
   console.log(`\n===== v3.4 e2e 结果: ${pass} 过 / ${fail} 挂 =====`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('❌ 异常: ' + e.message); process.exit(1); });

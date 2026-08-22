@@ -25,7 +25,7 @@ s = open(p).read()
 s2 = re.sub(r"const APP_VERSION = '[^']*';", f"const APP_VERSION = '{ver}';", s)
 s2 = re.sub(r"APP_VERSION \+ ' · [0-9-]+ ·", f"APP_VERSION + ' · {today} ·", s2)
 # cache-busting：三个本地 JS 加 ?v=版本（强制浏览器拉新，否则旧 JS 缓存让修复不生效）
-s2 = re.sub(r"(src=\"(?:demo-data|data-layer|views)\.js)(\?v=[^\"]*)?\"", lambda m: m.group(1) + f"?v={ver}\"", s2)
+s2 = re.sub(r"(src=\"(?:demo-data|data-layer|views|sim-core|i18n)\.js)(\?v=[^\"]*)?\"", lambda m: m.group(1) + f"?v={ver}\"", s2)
 if s2 == s:
     print(f'==> 版本号已是 {ver}（无变更，继续）')   # v1.8.11 幂等修复：重复发布不再误报退出
 open(p, 'w').write(s2)
@@ -60,8 +60,13 @@ if [ -f test/e2e-full.js ]; then
 fi
 # v3.4：组合情况独立页专项（21 断言：总卡/KPI/锚点/年度表7列/色块热力/日粒度/分红日标记/E2三条）——失败即中止发布
 if [ -f test/e2e-v34.js ]; then
-  echo "==> e2e-v34 组合情况独立页（21 断言）…"
+  echo "==> e2e-v34 组合情况独立页（28 断言）…"
   node test/e2e-v34.js || { echo "!! e2e-v34 失败，中止发布"; exit 1; }
+fi
+# v3.5：sim-core 共享纯函数同源断言（防主线程/worker 双份分叉）——失败即中止发布
+if [ -f test/unit-v35-simcore.js ]; then
+  echo "==> unit-v35 sim-core 同源断言（14 断言）…"
+  node test/unit-v35-simcore.js || { echo "!! unit-v35-simcore 失败，中止发布"; exit 1; }
 fi
 # v1.9.4：自选入口闭环实测（A/B/C 三入口+去重）——失败即中止发布
 if [ -f test/e2e-v194.js ]; then

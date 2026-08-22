@@ -2530,45 +2530,21 @@ window.DL = {
 /* 单股模拟（精简版 simulate，供组合工作台/驾驶舱复用）
  * principal 初始金额, monthly 月追加, closes {d:price}, dividends [{ex,dps}], reinvest 复投, taxRate 税 */
 function simulateOne(principal, monthly, closes, dividends, reinvest = true, taxRate = 0) {
-  const dates = Object.keys(closes).sort();
-  if (!dates.length) return null;
-  const buyIdx = 0, buyDateReal = dates[0], buyPrice = closes[buyDateReal];
-  if (!(buyPrice > 0)) return null;
-  let shares = Math.floor(principal / buyPrice / 100) * 100;
-  let cashPool = principal - shares * buyPrice;
-  let reinvested = 0, monthlyTotal = 0, lastMonth = null;
-  const divByDate = {};
-  (dividends || []).filter(x => x.ex && x.ex >= buyDateReal && x.dps > 0).forEach(x => { (divByDate[x.ex] = divByDate[x.ex] || []).push(x); });
-  const daily = [];
-  let cumDiv = 0;
-  for (let i = 0; i < dates.length; i++) {
-    const d = dates[i], c = closes[d];
-    const ev = divByDate[d];
-    if (ev && ev.length) {
-      let cash = 0;
-      ev.forEach(x => { cash += shares * x.dps * (1 - taxRate); });
-      cumDiv += cash;
-      cashPool += cash;
-      if (reinvest && cash > 0) {
-        const buyShares = Math.floor(cashPool / c / 100) * 100;
-        if (buyShares >= 100) { const spent = buyShares * c; cashPool -= spent; reinvested += spent; shares += buyShares; }
-      }
-    }
-    if (monthly > 0) {
-      const ym = d.slice(0, 7);
-      if (ym !== lastMonth) {
-        lastMonth = ym;
-        if (ym !== buyDateReal.slice(0, 7)) {
-          cashPool += monthly; monthlyTotal += monthly;
-          const buyShares = Math.floor(cashPool / c / 100) * 100;
-          if (buyShares >= 100) { cashPool -= buyShares * c; shares += buyShares; }
-        }
-      }
-    }
-    daily.push({ date: d, value: +(shares * c + cashPool).toFixed(2), invested: +(principal + monthlyTotal + reinvested).toFixed(2), shares, cashPool: +cashPool.toFixed(2), cumDiv: +cumDiv.toFixed(2) });
-  }
-  const last = daily[daily.length - 1];
-  return { daily, buyDateReal, buyPrice, final: { finalValue: last.value, finalInvested: last.invested, cumDiv: last.cumDiv, shares: last.shares, totalDiv: cumDiv }, cumDiv };
+  /* v3.5 C2：统一走 sim-core.js 共享纯函数（防双份代码分叉——主线程/worker 同源） */
+  const r = window.simOneCore ? window.simOneCore(principal, monthly, closes, dividends, reinvest, taxRate) : null;
+  if (!r) return null;
+  /* 兼容旧调用方：补齐 final 结构 */
+  return {
+    daily: r.daily,
+    buyDateReal: r.buyDateReal,
+    buyPrice: r.buyPrice,
+    final: r.final,
+    cumDiv: r.cumDiv,
+    monthlyFlow: r.monthlyFlow,
+    reinvested: r.reinvested,
+    monthlyTotal: r.monthlyTotal,
+    extInvested: r.extInvested,
+  };
 }
 
 /* 组合构建器回测（v3.0 核心）：
@@ -2674,10 +2650,11 @@ function calcComboBacktest(combo, pool, opts) {
     ys.forEach(y => { yearlyDivs[y] = +(byYear[y] - prev).toFixed(2); prev = byYear[y]; }); /* v3.2 S1：逐年分红（对账） */
     return {
       code: r.code, name: r.name, amount: r.amount, monthly: +r.monthly.toFixed(2),
-      finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested,
+      finalValue: r.sim.final.finalValue, invested: r.sim.final.finalInvested, extInvested: r.sim.extInvested,
       cumDiv: +r.sim.cumDiv.toFixed(2), ret: r.sim.final.finalValue / Math.max(1, r.amount) - 1,
       divRatio: r.amount > 0 ? r.sim.cumDiv / r.amount * 100 : 0,
-      yearlyDivs, navSeries,
+      yearlyDivs, navSeries, monthlyFlow: r.sim.monthlyFlow || [],
+      yearly: (window.simOneCore && window.simOneCore.yearlyOf) ? window.simOneCore.yearlyOf(r.sim) : [],
     };
   });
   /* 权重演化（每年末） */

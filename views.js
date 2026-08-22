@@ -3516,10 +3516,23 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   function renderStockCards(res, pool) {
     const ps = res.perStock || [];
     if (!ps.length) return '';
-    const totalGain = ps.reduce((s, p) => s + (p.finalValue - p.invested) + p.cumDiv, 0); /* 价格盈亏+分红 */
     const divTotal = ps.reduce((s, p) => s + p.cumDiv, 0);
-    const priceTotal = ps.reduce((s, p) => s + (p.finalValue - p.invested), 0);
-    const sorted = ps.slice().sort((a, b) => ((b.finalValue - b.invested) + b.cumDiv) - ((a.finalValue - a.invested) + a.cumDiv)); /* 默认贡献降序 */
+    const lastW = (res.weightEvol && res.weightEvol.length) ? res.weightEvol[res.weightEvol.length - 1] : null;
+    const lastDate = (res.totalAsset && res.totalAsset.length) ? res.totalAsset[res.totalAsset.length - 1].d : '';
+    /* v3.5 排序状态（存模块级，切换器读写） */
+    if (typeof _stockSortKey === 'undefined') var _stockSortKey = 'mkt'; /* mkt=市值占比 / gain=总收益 / name=拼音 */
+    let sorted = ps.slice();
+    if (_stockSortKey === 'mkt') {
+      sorted.sort((a, b) => {
+        const wa = lastW ? (lastW.weights[a.code] || 0) : 0;
+        const wb = lastW ? (lastW.weights[b.code] || 0) : 0;
+        return wb - wa;
+      });
+    } else if (_stockSortKey === 'gain') {
+      sorted.sort((a, b) => (((b.finalValue - b.invested) + b.cumDiv) - ((a.finalValue - a.invested) + a.cumDiv)));
+    } else {
+      sorted.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
+    }
     const svgSpark = (ns) => {
       if (!ns || ns.length < 2) return '<div style="font-size:10px;color:var(--muted)">—</div>';
       const pts = ns.length > 50 ? ns.filter((_, i) => i % Math.ceil(ns.length / 50) === 0) : ns; /* 降采样≤50 */
@@ -3541,22 +3554,26 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       return `<svg viewBox="0 0 96 6" preserveAspectRatio="none" style="width:100%;height:6px;display:block">${bars}</svg>`;
     };
     const cards = sorted.map(p => {
-      const contrib = ((p.finalValue - p.invested) + p.cumDiv) / (Math.abs(totalGain) || 1) * 100;
-      const priceContrib = (p.finalValue - p.invested) / (Math.abs(priceTotal) || 1) * 100;
-      const divContrib = p.cumDiv / (Math.abs(divTotal) || 1) * 100;
+      /* v3.5 三口径（AC-U1）：主 C 总收益 + 副 A 账户增值 + 副 B 本金回报 */
+      const extInv = p.extInvested != null && p.extInvested > 0 ? p.extInvested : (p.invested - ((p.invested || 0) - (p.amount || 0) - ((p.monthlyFlow || []).reduce((s, m) => s + m.amount, 0))));
+      const inv = p.invested > 0 ? p.invested : p.amount;
+      const gainC = inv > 0 ? (p.finalValue + p.cumDiv - inv) / inv * 100 : null;   /* 总收益（分红也算） */
+      const gainA = inv > 0 ? (p.finalValue / inv - 1) * 100 : null;               /* 账户增值（含再投成本） */
+      const gainB = p.amount > 0 ? (p.finalValue / p.amount - 1) * 100 : null;     /* 本金回报（只看初始） */
+      const fmtPct = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+      const cColor = gainC == null ? 'var(--muted)' : gainC >= 0 ? 'var(--green,#4caf7d)' : 'var(--red,#e05a5a)';
+      const wPct = lastW ? (lastW.weights[p.code] || 0) : null; /* 市值占比（weightEvol 末点=当前，与 finalValue 同源） */
+      const contrib = (((p.finalValue - p.invested) + p.cumDiv) / (Math.abs(ps.reduce((s, q) => s + ((q.finalValue - q.invested) + q.cumDiv), 0)) || 1)) * 100;
       const cagr = p.ret != null && p.ret > -1 ? (Math.pow(1 + p.ret, 1 / Math.max(1, (res.span || 10))) - 1) * 100 : null;
       const dy = p.cumDiv > 0 && p.amount > 0 ? p.cumDiv / p.amount * 100 : null;
       const badge = dy == null ? '<span style="font-size:10px;color:var(--muted)">—</span>' : dy >= 6 ? '<span style="font-size:10px;background:rgba(76,175,125,.2);color:#4caf7d;border-radius:4px;padding:1px 5px">高息</span>' : dy >= 4 ? '<span style="font-size:10px;background:rgba(217,164,65,.18);color:#d9a441;border-radius:4px;padding:1px 5px">中息</span>' : '<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">低息</span>';
-      /* v3.4 S1：行业徽章（industryForSync 同步缓存，查不到显示"行业待确认"） */
       let indTxt = null;
       try { indTxt = industryForSync(p.code, p.name); } catch (e) {}
       const indBadge = `<span style="font-size:10px;background:rgba(90,169,230,.14);color:#5aa9e6;border-radius:4px;padding:1px 5px">${indTxt || '行业待确认'}</span>`;
-      /* v3.4 S2：分位徽章（pool series 末点 pct——低估绿/高估红/中性灰）+ AC-19 贵/便宜区间轨（0-100 游标，低区绿高区红） */
       let pct = null;
       try { const s = pool && pool[p.code] && pool[p.code].series; if (s && s.length) { const last = s[s.length - 1]; if (last && last.pct != null) pct = last.pct; } } catch (e) {}
       const pctBadge = pct == null ? '' : (pct <= 30 ? '<span style="font-size:10px;background:rgba(76,175,125,.2);color:#4caf7d;border-radius:4px;padding:1px 5px">便宜</span>' : pct >= 70 ? '<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">贵</span>' : '<span style="font-size:10px;background:rgba(143,166,156,.15);color:var(--muted);border-radius:4px;padding:1px 5px">中性</span>');
-      const pctTrack = pct == null ? '' : `<div style="display:flex;align-items:center;gap:5px;margin-top:2px"><span style="font-size:10px;color:var(--muted);flex:none">贵/便宜</span><div class="v3-track" style="flex:1;height:5px"><div class="v3-fill" style="width:${Math.min(100, Math.max(0, pct))}%;background:${pct <= 30 ? 'var(--green)' : pct >= 70 ? 'var(--red)' : 'var(--gold)'}"></div></div><span style="font-size:10px;font-weight:700;color:${pct <= 30 ? '#4caf7d' : pct >= 70 ? '#e05a5a' : 'var(--muted)'};flex:none">${pct.toFixed(0)}分位</span></div>`;
-      /* v3.4 S7：分红缩水预警——个股年度分红同比 -20% 标红（沿用 YoY 预警逻辑） */
+      /* v3.4 S7：分红缩水预警——保留在卡片（大师 R7 P2-1：风险信号一屏可见） */
       let shrinkWarn = '';
       try {
         const yd = p.yearlyDivs || {};
@@ -3566,25 +3583,252 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           if (yd[py] > 0 && yd[ly] > 0 && (yd[ly] - yd[py]) / yd[py] <= -0.2) shrinkWarn = `<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">⚠️ 分红缩水 ${((yd[ly] - yd[py]) / yd[py] * 100).toFixed(0)}%</span>`;
         }
       } catch (e) {}
-      const contribPct = contrib >= 0 ? `<div style="display:flex;align-items:center;gap:4px"><div class="v3-track" style="flex:1"><div class="v3-fill" style="width:${Math.min(100, contrib)}%"></div></div><span style="font-size:10px;color:var(--gold,#d9a441);font-weight:700">${contrib >= 0 ? '+' : ''}${contrib.toFixed(0)}%</span></div>` : '<span style="font-size:10px;color:#e05a5a">' + contrib.toFixed(0) + '%</span>';
-      return `<div class="v3-stock-card" style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0">
-        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap"><b style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</b><span style="font-size:10px;color:var(--muted)">${esc(p.code || '')}</span>${indBadge}${pctBadge}${shrinkWarn}<span style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:${p.cumDiv > 0 ? '#4caf7d' : '#d9a441'}" title="分红数据：${p.cumDiv > 0 ? '有' : '缓存'}"></span></div>
-        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:18px;font-weight:700">${dy != null ? dy.toFixed(1) + '%' : '—'}</span>${badge}<span style="font-size:10px;color:var(--muted)">累计分红率</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;color:var(--muted)">
-          <span>投入 <b style="color:var(--fg,#e8efe9)">${(p.amount / 10000).toFixed(1)}万</b></span><span>现值 <b style="color:var(--fg,#e8efe9)">${(p.finalValue / 10000).toFixed(1)}万</b></span>
-          <span>价格贡献 <b style="color:${p.finalValue - p.invested >= 0 ? '#e05a5a' : '#4caf7d'}">${(p.finalValue - p.invested) >= 0 ? '+' : ''}${(p.finalValue - p.invested) / 10000 >= 0 ? '+' : ''}${((p.finalValue - p.invested) / 10000).toFixed(1)}万</b></span><span>分红贡献 <b style="color:#d9a441">+${(p.cumDiv / 10000).toFixed(1)}万</b></span>
-          <span>年化 <b style="color:var(--fg,#e8efe9)">${cagr != null ? (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%' : '—'}</b></span><span>贡献占比</span>
+      /* v3.5 市值占比横条（主口径，tooltip 标截至日期——大师 R5 P1-1） */
+      const mktBar = wPct == null ? '' : `<div style="display:flex;align-items:center;gap:5px;margin-top:2px" title="市值占比（截至 ${lastDate}）：${wPct.toFixed(1)}%">
+        <span style="font-size:10px;color:var(--muted);flex:none">组合占比</span>
+        <div class="v3-track" style="flex:1;height:5px"><div class="v3-fill" style="width:${Math.min(100, Math.max(0, wPct))}%;background:var(--gold,#d9a441)"></div></div>
+        <span style="font-size:10px;font-weight:700;color:var(--gold,#d9a441);flex:none">${wPct.toFixed(1)}%</span>
+      </div>`;
+      /* v3.5 三口径同屏（主 C + 副 A/B，hover 显公式——R7 定稿） */
+      const trio = `<div style="display:flex;flex-direction:column;gap:2px">
+        <div style="display:flex;align-items:baseline;gap:6px" title="总收益 = (现值 + 分红到手 − 累计投入) ÷ 累计投入（分红也算收益）">
+          <span style="font-size:22px;font-weight:800;color:${cColor}">${fmtPct(gainC)}</span>
+          <span style="font-size:10px;color:var(--muted)">总收益 · 分红也算</span>${badge}
         </div>
-        ${contribPct}
-        ${pctTrack}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--muted)">
+          <span title="账户增值 = 现值 ÷ 累计投入 − 1（分红再投算入成本）">账户增值 <b style="color:var(--fg,#e8efe9)">${fmtPct(gainA)}</b></span>
+          <span title="本金回报 = 现值 ÷ 初始本金 − 1（只看最初那笔）">本金回报 <b style="color:var(--fg,#e8efe9)">${fmtPct(gainB)}</b></span>
+        </div>
+      </div>`;
+      const grid = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;color:var(--muted)">
+          <span>投入 <b style="color:var(--fg,#e8efe9)">${(p.amount / 10000).toFixed(1)}万</b></span><span>现值 <b style="color:var(--fg,#e8efe9)">${(p.finalValue / 10000).toFixed(1)}万</b></span>
+          <span>累计分红 <b style="color:#d9a441">+${(p.cumDiv / 10000).toFixed(1)}万</b></span><span>年化 <b style="color:var(--fg,#e8efe9)">${cagr != null ? (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%' : '—'}</b></span>
+        </div>`;
+      return `<div class="v3-stock-card" data-code="${esc(p.code)}" style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0;cursor:pointer" title="点击看逐年详情">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap"><b style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</b><span style="font-size:10px;color:var(--muted)">${esc(p.code || '')}</span>${indBadge}${pctBadge}${shrinkWarn}<span style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:${p.cumDiv > 0 ? '#4caf7d' : '#d9a441'}" title="分红数据：${p.cumDiv > 0 ? '有' : '缓存'}"></span></div>
+        ${trio}
+        ${grid}
+        ${mktBar}
+        <div style="display:flex;align-items:center;gap:4px">收益贡献 <div class="v3-track" style="flex:1"><div class="v3-fill" style="width:${Math.min(100, Math.max(0, contrib))}%"></div></div><span style="font-size:10px;color:var(--gold,#d9a441);font-weight:700">${contrib >= 0 ? '+' : ''}${contrib.toFixed(0)}%</span></div>
         ${svgSpark(p.navSeries)}
         ${divSpark(p.yearlyDivs)}
       </div>`;
     });
+    const sortSel = `<select id="stockSortSel" style="font-size:10px;padding:2px 4px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--txt)">
+      <option value="mkt" ${_stockSortKey === 'mkt' ? 'selected' : ''}>按市值占比</option>
+      <option value="gain" ${_stockSortKey === 'gain' ? 'selected' : ''}>按总收益</option>
+      <option value="name" ${_stockSortKey === 'name' ? 'selected' : ''}>按名称</option>
+    </select>`;
     return `<div style="margin-top:8px;background:var(--card2);border-radius:10px;border:1px solid var(--line);padding:8px">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:12px;font-weight:700">🧩 每只股票</span><span style="font-size:10px;color:var(--muted)">按贡献降序 · 迷你图统一净值口径 · 点卡片展开诊断</span></div>
-      <div class="v3-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">${cards.join('')}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700">🧩 每只股票</span><span style="font-size:10px;color:var(--muted)">总收益/账户增值/本金回报三口径 · 市值占比=当前 · 点卡片看逐年详情</span><span style="margin-left:auto">${sortSel}</span></div>
+      <div class="v3-stock-grid" id="stockCardsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">${cards.join('')}</div>
     </div>`;
+  }
+
+  /* v3.5 AC-U3/U4：个股逐年详情面板（弹层内嵌）
+   * 摘要条（三口径+市值占比）→ 年表 8 列 → 双柱图（分红/收益）→ 金额轴曲线（叠投入线，日粒度按钮）→ 占比演化（市值vs投入双线） */
+  function renderStockDetail(res, p) {
+    const yl = p.yearly || [];
+    const extInv = p.extInvested != null && p.extInvested > 0 ? p.extInvested : p.amount;
+    const inv = p.invested > 0 ? p.invested : p.amount;
+    const gainC = inv > 0 ? (p.finalValue + p.cumDiv - inv) / inv * 100 : null;
+    const gainA = inv > 0 ? (p.finalValue / inv - 1) * 100 : null;
+    const gainB = p.amount > 0 ? (p.finalValue / p.amount - 1) * 100 : null;
+    const fmtPct = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+    const lastW = (res.weightEvol && res.weightEvol.length) ? res.weightEvol[res.weightEvol.length - 1] : null;
+    const wPct = lastW ? (lastW.weights[p.code] || 0) : null;
+    const lastDate = (res.totalAsset && res.totalAsset.length) ? res.totalAsset[res.totalAsset.length - 1].d : '';
+    /* 摘要条 */
+    const sum = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:8px">
+      <span style="font-size:18px;font-weight:800;color:${gainC != null && gainC >= 0 ? 'var(--green,#4caf7d)' : 'var(--red,#e05a5a)'}" title="总收益 = (现值+分红到手−累计投入)÷累计投入（分红也算）">总收益 ${fmtPct(gainC)}</span>
+      <span style="font-size:11px;color:var(--muted)" title="账户增值 = 现值÷累计投入−1（分红再投算入成本）">账户增值 ${fmtPct(gainA)}</span>
+      <span style="font-size:11px;color:var(--muted)" title="本金回报 = 现值÷初始本金−1（只看最初那笔）">本金回报 ${fmtPct(gainB)}</span>
+      <span style="font-size:11px;color:var(--muted)">累计分红率 <b style="color:#d9a441">${p.divRatio != null ? p.divRatio.toFixed(1) + '%' : '—'}</b></span>
+      <span style="font-size:11px;color:var(--muted)">投入 <b>${(p.amount / 10000).toFixed(1)}万</b> → 现值 <b>${(p.finalValue / 10000).toFixed(1)}万</b></span>
+      ${wPct != null ? `<span style="font-size:11px;color:var(--muted)" title="截至 ${lastDate}">市值占比 <b style="color:var(--gold,#d9a441)">${wPct.toFixed(1)}%</b></span>` : ''}
+      <span style="margin-left:auto;font-size:10px;color:var(--muted)">👆 点击面板任意处收起</span>
+    </div>`;
+    /* 年表 8 列：年份/年初市值/年末市值/当年追加/当年分红/当年收益/年末占比/占比变化 */
+    const lastWPrev = (res.weightEvol && res.weightEvol.length > 1) ? res.weightEvol[res.weightEvol.length - 2] : null;
+    const wPctPrev = lastWPrev ? (lastWPrev.weights[p.code] || 0) : null;
+    const rows = yl.map((y, i) => {
+      const prev = i > 0 ? yl[i - 1] : null;
+      const begVal = prev ? prev.value : 0;
+      const wNow = lastW ? (lastW.weights[p.code] || 0) : null;
+      const wPrevY = (res.weightEvol || []).find(w => w.y === y.y);
+      const wY = wPrevY ? (wPrevY.weights[p.code] || 0) : null;
+      const wDiff = wY != null && wPrevY ? 0 : null; /* 占比变化=本年 vs 去年末 */
+      const wYPrev = i > 0 ? (res.weightEvol || []).find(w => w.y === yl[i - 1].y) : null;
+      const wDiffTxt = (wY != null && wYPrev) ? ((wY - (wYPrev.weights[p.code] || 0)) >= 0 ? '+' : '') + (wY - (wYPrev.weights[p.code] || 0)).toFixed(1) + 'pp' : '—';
+      const gainTxt = y.gain >= 0 ? `<span style="color:#e05a5a;font-weight:600">+${(y.gain / 10000).toFixed(1)}万</span>` : `<span style="color:#4caf7d">${(y.gain / 10000).toFixed(1)}万</span>`;
+      const divTxt = y.div > 0 ? `<span style="color:#d9a441">${(y.div / 10000).toFixed(2)}万</span>` : '<span style="color:var(--muted)">—</span>';
+      return `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 6px;text-align:left;font-weight:600">${y.y}</td>
+        <td style="padding:3px 6px;text-align:right">${begVal > 0 ? (begVal / 10000).toFixed(1) + '万' : '<span style="color:var(--muted)">起投</span>'}</td>
+        <td style="padding:3px 6px;text-align:right">${(y.value / 10000).toFixed(1)}万</td>
+        <td style="padding:3px 6px;text-align:right">${y.added > 0 ? (y.added / 10000).toFixed(2) + '万' : '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="padding:3px 6px;text-align:right">${divTxt}</td>
+        <td style="padding:3px 6px;text-align:right">${gainTxt}</td>
+        <td style="padding:3px 6px;text-align:right">${wY != null ? wY.toFixed(1) + '%' : '—'}</td>
+        <td style="padding:3px 6px;text-align:right">${wDiffTxt}</td></tr>`;
+    }).join('');
+    const table = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px">
+      <thead><tr style="color:var(--muted)"><th style="text-align:left;padding:3px 6px">年份</th><th style="text-align:right;padding:3px 6px">年初市值</th><th style="text-align:right;padding:3px 6px">年末市值</th><th style="text-align:right;padding:3px 6px">当年追加</th><th style="text-align:right;padding:3px 6px">当年分红</th><th style="text-align:right;padding:3px 6px">当年收益</th><th style="text-align:right;padding:3px 6px">年末占比</th><th style="text-align:right;padding:3px 6px">占比变化</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+    return sum + table + `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div id="sdDivBar_${p.code}" style="flex:1;min-width:260px;height:150px;background:var(--card2);border-radius:8px;border:1px solid var(--line)"></div>
+        <div id="sdGainBar_${p.code}" style="flex:1;min-width:260px;height:150px;background:var(--card2);border-radius:8px;border:1px solid var(--line)"></div>
+      </div>
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--muted)">📈 市值曲线（金额轴，叠累计投入）</span><button type="button" class="chip" id="sdDailyBtn_${p.code}" style="font-size:10px;padding:1px 8px">🔍 日粒度</button><span style="font-size:10px;color:var(--muted)" id="sdDailyHint_${p.code}"></span></div>
+      <div id="sdCurve_${p.code}" style="width:100%;height:170px;background:var(--card2);border-radius:8px;border:1px solid var(--line);margin-bottom:8px"></div>
+      <div style="margin-bottom:4px"><span style="font-size:10px;color:var(--muted)">🧭 占比演化：市值占比（实线）vs 投入占比（虚线）——偏离=跑赢/跑输组合</span></div>
+      <div id="sdWeight_${p.code}" style="width:100%;height:150px;background:var(--card2);border-radius:8px;border:1px solid var(--line)"></div>
+    `;
+  }
+
+  /* v3.5 个股详情图表初始化（双柱图/曲线/占比演化） */
+  function initStockDetailCharts(res, p, det) {
+    if (typeof echarts === 'undefined') return;
+    const yl = p.yearly || [];
+    const ys = yl.map(y => y.y);
+    /* 双柱图 1：分红（金） */
+    const dbEl = document.getElementById('sdDivBar_' + p.code);
+    if (dbEl && yl.length) {
+      const ch = echarts.init(dbEl);
+      ch.setOption({
+        title: { text: '📊 当年分红', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { const y = ps[0].axisValue; const row = yl.find(x => x.y === y); return row ? `<b>${y}</b><br/>分红 <b style="color:#d9a441">${(row.div / 10000).toFixed(2)}万</b>（占年初市值 ${row.value > 0 ? (row.div / (yl[ys.indexOf(y)] && yl[ys.indexOf(y)].value || 1) * 100).toFixed(1) : 0}%）` : ''; } },
+        grid: { left: 50, right: 12, top: 24, bottom: 20 },
+        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 9 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v / 10000 + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [{ type: 'bar', data: yl.map(y => +y.div.toFixed(2)), itemStyle: { color: '#d9a441', borderRadius: [2, 2, 0, 0] }, barMaxWidth: 14 }],
+      });
+    }
+    /* 双柱图 2：当年收益（红涨绿跌，tooltip 拆两段：分红贡献 + 净值增长） */
+    const gbEl = document.getElementById('sdGainBar_' + p.code);
+    if (gbEl && yl.length) {
+      const ch = echarts.init(gbEl);
+      ch.setOption({
+        title: { text: '📈 当年收益（红涨绿跌）', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { const y = ps[0].axisValue; const row = yl.find(x => x.y === y); if (!row) return ''; const navGain = row.gain - row.div; return `<b>${y}</b><br/>当年收益 <b>${(row.gain / 10000).toFixed(1)}万</b><br/>· 分红贡献 <b style="color:#d9a441">+${(row.div / 10000).toFixed(2)}万</b><br/>· 净值增长（含再投效应）<b style="color:${navGain >= 0 ? '#e05a5a' : '#4caf7d'}">${(navGain / 10000).toFixed(1)}万</b>`; } },
+        grid: { left: 50, right: 12, top: 24, bottom: 20 },
+        xAxis: { type: 'category', data: ys, axisLabel: { color: '#8fa69c', fontSize: 9 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v / 10000 + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [{ type: 'bar', data: yl.map(y => +y.gain.toFixed(2)), itemStyle: { color: p => p.value >= 0 ? '#e05a5a' : '#4caf7d', borderRadius: [2, 2, 0, 0] }, barMaxWidth: 14 }],
+      });
+    }
+    /* 市值曲线（月粒度默认，日粒度按钮切换——simOne 重算降采样，AC-D4） */
+    const cvEl = document.getElementById('sdCurve_' + p.code);
+    if (cvEl) {
+      const ch = echarts.init(cvEl);
+      const byMonth = {};
+      const t = res.totalAsset || [];
+      /* 该股月粒度：从 totalAsset 提取需要 perStock daily，此处用 navSeries 反推不可靠——改用 pool 缓存重算 */
+      const draw = (granularity) => {
+        let seriesData = [], investData = [];
+        const pool2 = _cockpitPool || {};
+        const src = pool2[p.code];
+        if (src && src.kline) {
+          const sim = window.simOneCore ? window.simOneCore(p.amount, p.monthly || 0, src.kline, src.divs || [], true, 0) : null;
+          if (sim) {
+            const daily = sim.daily;
+            if (granularity === 'month') {
+              const bm = {};
+              daily.forEach(dd => { bm[dd.date.slice(0, 7)] = dd; });
+              const mks = Object.keys(bm).sort();
+              seriesData = mks.map(m => [m + '-01', +(bm[m].value / 10000).toFixed(2)]);
+              investData = mks.map(m => [m + '-01', +(bm[m].invested / 10000).toFixed(2)]);
+            } else {
+              seriesData = daily.map(dd => [dd.date, +(dd.value / 10000).toFixed(2)]);
+              investData = daily.map(dd => [dd.date, +(dd.invested / 10000).toFixed(2)]);
+            }
+          }
+        }
+        ch.setOption({
+          tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { if (!ps.length) return ''; const d = ps[0].axisValue; return `<b>${d}</b><br/>市值 <b>${ps[0].value}万</b> · 累计投入 ${ps[1] ? ps[1].value + '万' : '—'}`; } },
+          legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 } },
+          grid: { left: 50, right: 12, top: 26, bottom: 22 },
+          xAxis: { type: 'time', axisLabel: { color: '#8fa69c', fontSize: 9 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
+          yAxis: { type: 'value', name: '金额(万)', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, scale: true },
+          series: [
+            { name: '市值', type: 'line', data: seriesData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.2)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
+            { name: '累计投入', type: 'line', data: investData, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.2, type: 'dashed' } },
+          ],
+        });
+      };
+      draw('month');
+      const btn = document.getElementById('sdDailyBtn_' + p.code);
+      const hint = document.getElementById('sdDailyHint_' + p.code);
+      let isDaily = false;
+      if (btn && hint) {
+        btn.onclick = () => {
+          isDaily = !isDaily;
+          draw(isDaily ? 'day' : 'month');
+          btn.textContent = isDaily ? '📅 月粒度' : '🔍 日粒度';
+          hint.textContent = isDaily ? '· 已切换日粒度（simOne 重算）' : '';
+        };
+      }
+    }
+    /* 占比演化：市值占比（实线）vs 投入占比（虚线） */
+    const wEl = document.getElementById('sdWeight_' + p.code);
+    if (wEl && res.weightEvol && res.weightEvol.length) {
+      const ch = echarts.init(wEl);
+      const we = res.weightEvol;
+      const totalInv = res.invested || 1;
+      const mktLine = we.map(w => +((w.weights[p.code] || 0)).toFixed(1));
+      const invLine = we.map(w => {
+        const yEnd = w.y;
+        const row = (p.yearly || []).find(x => x.y === yEnd);
+        return row ? +((row.extInvested || 0) / totalInv * 100).toFixed(1) : 0;
+      });
+      ch.setOption({
+        title: { text: '占比演化：市值 vs 投入（偏离=跑赢/跑输）', left: 'center', top: 2, textStyle: { fontSize: 11, color: '#8fa69c' } },
+        tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 10 }, formatter: ps => { if (!ps.length) return ''; const y = ps[0].axisValue; const m = mktLine[we.findIndex(w => w.y === y)]; const iv = invLine[we.findIndex(w => w.y === y)]; return `<b>${y}</b><br/>市值占比 <b>${m.toFixed(1)}%</b><br/>投入占比 <b>${iv.toFixed(1)}%</b><br/>偏离 <b style="color:${m - iv >= 0 ? '#e05a5a' : '#4caf7d'}">${(m - iv >= 0 ? '+' : '') + (m - iv).toFixed(1)}pp</b>`; } },
+        legend: { top: 14, textStyle: { color: '#8fa69c', fontSize: 10 } },
+        grid: { left: 42, right: 12, top: 38, bottom: 22 },
+        xAxis: { type: 'category', data: we.map(w => w.y), axisLabel: { color: '#8fa69c', fontSize: 9 } },
+        yAxis: { type: 'value', axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v + '%' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } } },
+        series: [
+          { name: '市值占比', type: 'line', data: mktLine, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.9)', width: 2 } },
+          { name: '投入占比', type: 'line', data: invLine, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.5, type: 'dashed' } },
+        ],
+      });
+    }
+  }
+
+  /* v3.5 N6：数据完整性动态清单（从 res 实际字段遍历生成——有=✅ 无=❌灰，防手写清单随版本腐化） */
+  function renderDataCompleteness(res) {
+    const has = (v) => v != null && v !== 0 && v !== '' && v !== false;
+    const items = [
+      ['总共赚了（hero）', has(res.last) && has(res.last.value) && has(res.last.invested), 'last.value/invested'],
+      ['累计分红率', has(res.divRatio), 'res.divRatio'],
+      ['年分红（最近完整年）', has(res.yearDiv), 'res.yearDiv'],
+      ['期末总资产', has(res.last) && has(res.last.value), 'res.last.value'],
+      ['回本年限', has(res.yearDiv) && has(res.invested), 'res.invested/res.yearDiv'],
+      ['年度战绩表（7列）', has(res.totalAsset) && res.totalAsset.length > 0, 'buildYearTable'],
+      ['市值曲线（金额轴）', has(res.totalAsset) && res.totalAsset.length > 1, 'res.totalAsset[].value'],
+      ['累计投入线', has(res.totalAsset) && res.totalAsset.some(x => has(x.invested)), 'res.totalAsset[].invested'],
+      ['分红日标记点', has(res.totalAsset) && res.totalAsset.some(x => has(x.cumDiv)), 'res.totalAsset[].cumDiv'],
+      ['回撤副图', has(res.totalAsset) && res.totalAsset.length > 1, '峰值回撤计算'],
+      ['分红节奏（日/月/年）', has(res.divByYear) && Object.keys(res.divByYear).length > 0, 'res.divByYear'],
+      ['权重演化（逐年）', has(res.weightEvol) && res.weightEvol.length > 0, 'res.weightEvol'],
+      ['收益贡献图', has(res.perStock) && res.perStock.length > 0, 'res.perStock[].cumDiv/finalValue'],
+      ['组合股息日历', has(res.perStock), 'pool.divs 未来12月'],
+      ['快照对比 A/B', true, '同组合不同配置重跑'],
+      ['分析工具（再平衡/敏感度/压力/倒推）', true, '按需计算'],
+      ['个股卡片（总数据+三口径+占比）', has(res.perStock) && res.perStock.some(p => has(p.yearly)), 'perStock[].yearly/extInvested'],
+      ['个股逐年详情（8列+图）', has(res.perStock) && res.perStock.some(p => has(p.yearly) && p.yearly.length > 0), 'perStock[].yearly'],
+      ['占比三口径（市值/投入/贡献）', has(res.weightEvol) && has(res.invested), 'weightEvol + invested'],
+      ['数据完整性清单（本项）', true, '动态遍历'],
+    ];
+    const rows = items.map(([name, ok, src]) => `<tr style="border-top:1px solid var(--line)">
+      <td style="padding:2px 6px;text-align:left">${ok ? '<span style="color:#4caf7d">✅</span>' : '<span style="color:#2a3d36">❌</span>'} ${name}</td>
+      <td style="padding:2px 6px;text-align:left;color:var(--muted)">${src}</td>
+    </tr>`).join('');
+    return `<details class="v3-fold" style="margin-top:6px"><summary>📋 数据完整性清单（${items.filter(x => x[1]).length}/${items.length} 项就绪 · 动态生成）</summary>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">从回测结果实际字段遍历，缺项标 ❌——版本升级后自动更新，不会腐化</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:4px"><thead><tr style="color:var(--muted)"><th style="text-align:left;padding:2px 6px">数据项</th><th style="text-align:left;padding:2px 6px">来源字段</th></tr></thead><tbody>${rows}</tbody></table>
+    </details>`;
   }
 
   /* v3.4 AC-38：年度表行点击 → 弹该年月度明细（hover 只高亮不弹，点击才弹；点明细任意处收起） */
@@ -3737,10 +3981,11 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div style="font-size:11px;color:var(--muted);margin-top:2px">${sub}</div>
     </div>`;
     /* v3.4 总卡：3 核心数字 + 流水线 + 迷你曲线(分红日标记点) + 回本环 + 点击展开（P26-P30） */
-    const hero = last.invested > 0 ? ((last.value / last.invested - 1) * 100) : null;
+    /* v3.5 AC-F3 口径一致性：hero 主口径改为 C 全收益（现值+分红到手−累计投入）÷累计投入——与卡片大字同口径，防同屏两数打架（R7 P1-2） */
+    const cumDivTotal2 = (res.perStock || []).reduce((s, p) => s + (p.cumDiv || 0), 0);
+    const hero = (last.invested > 0 && cumDivTotal2 > 0) ? ((last.value + cumDivTotal2 - last.invested) / last.invested * 100) : (last.invested > 0 ? ((last.value / last.invested - 1) * 100) : null);
     const heroTxt = hero == null ? '—' : (hero >= 0 ? '+' : '') + hero.toFixed(1) + '%';
     const heroC = hero == null ? 'var(--muted)' : hero >= 4 ? 'var(--green,#4caf7d)' : hero >= 0 ? 'var(--gold,#d9a441)' : 'var(--red,#e05a5a)';
-    const cumDivTotal2 = (res.perStock || []).reduce((s, p) => s + (p.cumDiv || 0), 0);
     const priceTotal2 = (res.perStock || []).reduce((s, p) => s + ((p.finalValue || 0) - (p.invested || 0)), 0);
     const monthlySpend = yearDiv / 12;
     const summaryHtml = `<div class="v3-summary" id="pfbtSummary" onclick="document.getElementById('pfbtAnchor') && document.getElementById('pfbtAnchor').scrollIntoView({behavior:'smooth'})">
@@ -3783,6 +4028,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     else html += `<div class="hint" style="color:var(--sub)">✅ 数据可信度：${res.rows}/${combo.items.length} 只数据完整（本地缓存/实时行情）</div>`;
     /* 主图（金额轴 + 双基准 + 下挂回撤副图——v3.2 S5/D3 + v3.4 主人令） */
     html += `<div id="cockpitMain" style="width:100%;height:320px;margin-top:4px"></div>`;
+    /* v3.5 N6：数据完整性动态清单（从 res 实际字段遍历，有=✅ 无=❌灰——防手写清单随版本腐化） */
+    html += renderDataCompleteness(res);
     /* v3.4 P9：16 图平铺→折叠面板——辅助图区分组折叠，默认开 ①体检三件套 ②分红节奏；其余点开才显（长页不吓人） */
     html += `<details class="v3-fold" open><summary>📊 体检三件套（覆盖率 / 分红质量 / 健康雷达）</summary>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
@@ -4195,6 +4442,9 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const drawDivBar = (g) => {
         const seq = buildDivSeq(g);
         const vals = seq.map(s => s.div);
+        /* v3.5 P1-3 ③：累计分红曲线数据（逐段累加） */
+        let cum = 0;
+        const cumVals = seq.map(s => { cum += s.div; return +cum.toFixed(2); });
         const colors = seq.map((s, i) => {
           if (s.div <= 0) return '#2a3d36'; /* 断档灰 */
           if (i === 0 || seq[i - 1].div <= 0) return '#5b8db8'; /* 首段/断档后首段：中性蓝 */
@@ -4231,7 +4481,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         const yoyShow = yoyData.map(v => v == null ? null : (v > 300 || v < -100 ? '*' : v));
         inst.setOption({
           tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 },
-            formatter: ps => { let h = ''; ps.forEach(p => { const s = seq[p.dataIndex]; const nm = p.seriesName === '分红' ? '分红' : 'YoY'; const vv = p.seriesName === '分红' ? (s.div / 10000).toFixed(2) + ' 万' : (s.yoy != null ? (s.yoy >= 0 ? '+' : '') + s.yoy.toFixed(1) + '%' : '—'); h += `${p.marker}${s.key} · ${nm}: <b>${vv}</b><br/>`; }); return h; } },
+            formatter: ps => { let h = ''; ps.forEach(p => { const s = seq[p.dataIndex]; const nm = p.seriesName === '分红' ? '分红' : p.seriesName === 'YoY' ? 'YoY' : '累计分红'; const vv = p.seriesName === '分红' ? (s.div / 10000).toFixed(2) + ' 万' : p.seriesName === 'YoY' ? (s.yoy != null ? (s.yoy >= 0 ? '+' : '') + s.yoy.toFixed(1) + '%' : '—') : (cumVals[p.dataIndex] / 10000).toFixed(2) + ' 万'; h += `${p.marker}${s.key} · ${nm}: <b>${vv}</b><br/>`; }); return h; } },
+          legend: { top: 4, textStyle: { color: '#8fa69c', fontSize: 10 }, data: ['分红', 'YoY', '累计分红'] },
           grid: { left: 56, right: 46, top: 28, bottom: 24 },
           xAxis: { type: 'category', data: seq.map(s => s.key), axisLabel: { color: '#8fa69c', fontSize: 10, interval: g === 'day' ? Math.ceil(seq.length / 8) : (g === 'month' ? 'auto' : 0), rotate: g === 'day' ? 45 : 0 } },
           yAxis: [
@@ -4242,6 +4493,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             { name: '分红', type: 'bar', data: vals, barMaxWidth: g === 'quarter' ? 14 : 30, itemStyle: { color: p => colors[p.dataIndex], borderRadius: [3, 3, 0, 0] },
               label: { show: true, position: 'top', fontSize: 10, color: '#8fa69c', formatter: p => { const s = seq[p.dataIndex]; if (s.div <= 0) return '—'; const n = seq.length; const mark = p.dataIndex === 0 || p.dataIndex === n - 1 || vals[p.dataIndex] === Math.max.apply(null, vals) ? (s.div / 10000).toFixed(1) + '万' : ''; return mark; } } },
             { name: 'YoY', type: 'line', yAxisIndex: 1, data: yoyShow, connectNulls: false, symbolSize: 5, lineStyle: { color: '#d9a441', width: 1.5 }, itemStyle: { color: '#d9a441' }, label: { show: true, position: 'top', fontSize: 10, color: '#d9a441', formatter: p => yoyData[p.dataIndex] != null ? (p.value === '*' ? (yoyData[p.dataIndex] > 0 ? '+' : '') + yoyData[p.dataIndex].toFixed(0) + '%*' : p.value + '%') : '' } },
+            /* v3.5 P1-3 ③：累计分红曲线（金色实线，右轴）——补组合页缺项 */
+            { name: '累计分红', type: 'line', data: cumVals, symbolSize: 3, lineStyle: { color: '#e8b84b', width: 1.8 }, itemStyle: { color: '#e8b84b' }, yAxisIndex: 0, label: { show: false } },
           ],
           animationDuration: 600,
         });
@@ -4332,6 +4585,54 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (anStress && !anStress.dataset.bound) { anStress.dataset.bound = '1'; anStress.onclick = () => { const a = document.getElementById('anResult'); if (!a) return; let monthlyExp = 0; try { monthlyExp = parseFloat(localStorage.getItem('divtool_monthly_exp') || '0') || 0; } catch (e) {} const stressDiv = res.yearDiv * 0.5; const cov = monthlyExp > 0 ? (stressDiv / 12 / monthlyExp * 100).toFixed(0) + '%' : '（未填月支出）'; a.innerHTML = `🌪 压力测试（分红腰斩+价格 -50% 极端年）：<br>· 年分红腰斩 → ${(stressDiv / 10000).toFixed(2)} 万/年<br>· 覆盖月支出 → ${cov}<br>· 期末资产约 ${(res.last.value * 0.5 / 10000).toFixed(0)} 万（价格 -50%）<br>· 判断：极端年您的生活费仍能覆盖 ${cov}`; }; }
     const anTarget = document.getElementById('anTarget');
     if (anTarget && !anTarget.dataset.bound) { anTarget.dataset.bound = '1'; anTarget.onclick = () => { const a = document.getElementById('anResult'); if (!a) return; const tgt = prompt('目标：10 年后年分红（万元）？', '20'); const tv = parseFloat(tgt); if (!tv || tv <= 0) { a.innerHTML = '已取消'; return; } const cur = res.yearDiv / 10000; const need = tv / Math.max(0.01, cur) * res.invested; a.innerHTML = `🎯 目标 10 年后年分红 ${tv} 万：<br>· 当前年分红 ${cur.toFixed(2)} 万，投入 ${(res.invested / 10000).toFixed(0)} 万<br>· 需总投入约 <b>${(need / 10000).toFixed(0)} 万</b>（线性估算，未含复投增长）<br>· 差额 ${(Math.max(0, need - res.invested) / 10000).toFixed(0)} 万 → 月追加 ${(Math.max(0, need - res.invested) / 120 / 10000).toFixed(1)} 万/月（10 年）`; }; }
+    /* v3.5 AC-U2/U3：个股卡片点击 → 逐年详情弹层（手风琴互斥 + 同卡 toggle；默认展开贡献最大那只） */
+    try {
+      const grid = document.getElementById('stockCardsGrid');
+      if (grid) {
+        grid.querySelectorAll('.v3-stock-card').forEach(card => {
+          const code = card.dataset.code;
+          card.onclick = () => {
+            const cur = document.getElementById('stockDetail_' + code);
+            /* 手风琴：关掉其它已开的 */
+            grid.querySelectorAll('.v3-stock-detail').forEach(d => { if (d.id !== 'stockDetail_' + code) d.remove(); });
+            if (cur) { cur.remove(); return; } /* 同卡 toggle 关闭 */
+            const p = (res.perStock || []).find(x => x.code === code);
+            if (!p) return;
+            const det = document.createElement('div');
+            det.id = 'stockDetail_' + code;
+            det.className = 'v3-stock-detail';
+            det.style.cssText = 'grid-column:1/-1;margin-top:2px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:10px;font-size:11px';
+            det.innerHTML = renderStockDetail(res, p);
+            card.after(det);
+            try { initStockDetailCharts(res, p, det); } catch (e) { console.warn('stock detail chart fail', e); }
+            /* 面板内点击任意处收起（与 bindYearRowClick 先例一致） */
+            det.onclick = () => { det.remove(); };
+            det.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          };
+        });
+      }
+    } catch (e) { }
+    /* v3.5 AC-U5：排序切换器（市值占比默认） */
+    try {
+      const sel = document.getElementById('stockSortSel');
+      if (sel && !sel.dataset.bound) {
+        sel.dataset.bound = '1';
+        sel.onchange = () => {
+          _stockSortKey = sel.value;
+          const grid2 = document.getElementById('stockCardsGrid');
+          if (grid2) {
+            const container = grid2.closest('#pfbtResult');
+            if (container) {
+              const snap = document.createElement('div'); snap.style.display = 'none'; snap.innerHTML = renderStockCards(res, _cockpitPool || {});
+              const ng = snap.querySelector('#stockCardsGrid');
+              if (ng) grid2.innerHTML = ng.innerHTML;
+              /* 重新绑定点击 */
+              try { bindCockpitEvents(res); } catch (e) { }
+            }
+          }
+        };
+      }
+    } catch (e) { }
   }
 
   /* 驾驶舱主流程：拉组合数据 → calcComboBacktest → renderCockpit */
