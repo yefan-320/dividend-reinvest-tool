@@ -48,6 +48,8 @@ async function waitFor(expr, timeout = 10000) {
 }
 
 async function main() {
+  /* v3.8.0 watchdog（接手 AI）：5 分钟总超时，防 Chrome 挂起卡死 release */
+  setTimeout(() => { try { console.error('⏱ watchdog 5min 超时，强制退出'); } catch (e) {} process.exit(2); }, 300000);
   /* v3.7.0（接手 AI）：启动前清理残留实例（release 连续跑 CDP 测试时旧 Chrome 占端口→连旧页面→Page.enable 超时/状态污染）
    * 加 --no-sandbox（沙箱环境）+ --remote-allow-origins（Chrome 111+ WS Origin 校验） */
   try { require('child_process').execSync('lsof -tiTCP:' + CDP_PORT + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}

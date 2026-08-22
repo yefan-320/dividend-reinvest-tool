@@ -39,6 +39,8 @@ async function evalJS(expr) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
+  /* v3.8.0 watchdog（接手 AI）：5 分钟总超时，防 Chrome 挂起卡死 release */
+  setTimeout(() => { try { console.error('⏱ watchdog 5min 超时，强制退出'); } catch (e) {} process.exit(2); }, 300000);
   /* v3.7.0（接手 AI）：启动前清理残留实例（release 连续跑 CDP 测试时旧 Chrome 占端口→连旧页面→超时） */
   try { require('child_process').execSync('lsof -tiTCP:' + ' + CDP_PORT + ' + ' -sTCP:LISTEN | xargs kill -9 2>/dev/null; sleep 1', { timeout: 8000, stdio: 'ignore' }); } catch (e) {}
   const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [

@@ -186,6 +186,8 @@ const todayMinus = n => { const d = new Date(); d.setFullYear(d.getFullYear() - 
 
 /* ==================== 主流程 ==================== */
 async function main() {
+  /* v3.8.0 watchdog（接手 AI）：5 分钟总超时，防 Chrome 挂起卡死 release */
+  setTimeout(() => { try { console.error('⏱ watchdog 5min 超时，强制退出'); } catch (e) {} process.exit(2); }, 300000);
   await ensureServer();
   await launchChrome();
   let cdp;

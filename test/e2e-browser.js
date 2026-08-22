@@ -123,6 +123,8 @@ async function evalIn(cdp, expr) {
 }
 
 async function main() {
+  /* v3.8.0 watchdog（接手 AI）：5 分钟总超时，防 Chrome 挂起卡死 release */
+  setTimeout(() => { try { console.error('⏱ watchdog 5min 超时，强制退出'); } catch (e) {} process.exit(2); }, 300000);
   // 0. 版本基线（R1）
   let gitVer;
   try { gitVer = execSync('git describe --tags --abbrev=0 2>/dev/null || git log -1 --format=%h', { cwd: REPO }).toString().trim(); } catch (e) { gitVer = 'unknown'; }
