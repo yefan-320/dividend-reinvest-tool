@@ -2563,3 +2563,7 @@ table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}th,td{pa
     };
     switchTab('home');
   });
+
+// v1.8.13 BUG-3：views.js 就绪标志（index.html 自动运行等此标志）
+window.__viewsReady = true;
+(window.__viewsReadyCallbacks || []).forEach(function (f) { try { f(); } catch (e) { } });
