@@ -4,7 +4,7 @@
  * 同时检查除息锁定/5日均线平滑的影响
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const STOCKS = [

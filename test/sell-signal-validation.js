@@ -12,7 +12,7 @@
  *  S6 ROE连续下滑≥3年 → 黄灯
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

@@ -4,7 +4,7 @@
  * 口径：375 窗口分位，买入持有（价格+分红），与策略对比表同口径
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 
@@ -166,7 +166,7 @@ async function main() {
         ? [mean(sub3) != null ? Math.round(mean(sub3) * 10) / 10 : null, winRate(sub3) != null ? Math.round(winRate(sub3)) : null, sub3.length]
         : [null, null, a.length];
     }
-    fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/rule-stats.json', JSON.stringify(out, null, 2) + '\n', 'utf8');
+    fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/test/rule-stats.json', JSON.stringify(out, null, 2) + '\n', 'utf8');
     console.log('\nJSON 已写入 test/rule-stats.json：' + JSON.stringify(out));
   }
   lines.push('', '等待档数值 = 等1年再买 vs 立即买的 3 年收益差（正=等待有价值）', '口径：分位375窗口TTM·价格+分红·不含交易成本·历史不代表未来');

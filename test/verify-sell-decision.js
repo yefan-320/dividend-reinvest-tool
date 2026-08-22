@@ -4,7 +4,7 @@
  * 输出：现网逻辑（sellSignalQuick 原样） vs 修复逻辑（年报优先+无年报财年跳过）对比
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const HOLDINGS = [

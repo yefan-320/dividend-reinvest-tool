@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* v1 组合现金仓位单测（验收 24 条：现金 1.5% 数值断言） */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 let pass = 0, fail = 0;

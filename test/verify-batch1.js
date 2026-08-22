@@ -2,7 +2,7 @@
 /* 第一批：A2 TTM / A3 锁定TTM / A4 年化股息率 / A5 三档 / A7 覆盖率 / A17 财年归组
  * 方法：真实数据（东财分红+腾讯现价）→ 工具函数 → 回源锚点核对 */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const HOLDINGS = [

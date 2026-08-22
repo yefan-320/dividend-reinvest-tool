@@ -7,7 +7,7 @@
  * 成本：纯脚本查免费接口，0 LLM；变化才由上层（cron agentTurn）生成报告
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const path = require('path');

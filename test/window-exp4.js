@@ -3,7 +3,7 @@
  * 用工具真实分红逻辑（东财 RPT_SHAREBONUS_DET，fetchDividendsOne 同源接口）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const STOCKS = [

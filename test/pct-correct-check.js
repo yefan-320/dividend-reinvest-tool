@@ -6,7 +6,7 @@
  * 结论：① 工具现状偏差多大？② 前复权输入是不是反而错？
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const STOCKS = [

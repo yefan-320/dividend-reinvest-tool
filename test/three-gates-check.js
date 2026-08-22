@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* R5 三道闸：① calcLockedTTM 锁定验证 ② 股息率分位 W250 vs W500 差异分布 ③ 250 的 10 年样本时段分布 */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const STOCKS = [
   { code: '600036', name: '招商银行', tx: 'sh600036' }, { code: '601398', name: '工商银行', tx: 'sh601398' },

@@ -6,7 +6,7 @@
  * 输出：卖出 vs 持有 1/2 年差值（正=卖出更好=信号有效）；分行业
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* v2.0 新功能单测（批次1-5）：数据层纯函数——决策语言/无风险对比/退休模拟/反向本金/清洗留标记/口径自检/异常分级 */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 let pass = 0, fail = 0;

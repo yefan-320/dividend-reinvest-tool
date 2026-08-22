@@ -9,7 +9,7 @@
  * 运行：node test/trap-replay.js   （首次自动拉 40 只 F10 到 /tmp/f10-annuals.json，之后复用）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 

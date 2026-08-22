@@ -6,10 +6,10 @@
  * 口径：与 signal-effectiveness.js 同源（TTM财年归组+除息锁定+分红复投），含交易费用（万2.5+印花税0.05%）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
-const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data/rule-tree-cache.json', 'utf8'));
 
 const HOLDINGS = ['600036', '601398', '600887', '600941', '000333', '601318', '600066'];
 const FEE_BUY = 0.00025, FEE_SELL = 0.00025 + 0.0005;  // 万2.5 + 印花税0.05%
@@ -118,7 +118,7 @@ ${all.map(a => `- **${a.era}**：持有 ${(a.hold * 100).toFixed(0)}% / 策略 $
 - 四指标：红利占优期超额 ${eraR ? (eraR.ex * 100).toFixed(1) : '—'}pp（目标≥2pp）
 - 与 P1 修正版（招行 2021 顶 -10% vs +4%）一致：**工具价值=择时防套牢，不是跑赢持有**
 `;
-  fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/reports/P1-era.md', out);
+  fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/test/reports/P1-era.md', out);
   console.log('\n报告: test/reports/P1-era.md');
   process.exit(0);
 })();

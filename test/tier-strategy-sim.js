@@ -12,7 +12,7 @@
  * 输出：终端汇总表 + /tmp/tier-strategy-result.md（结论+数字+建议方向）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 

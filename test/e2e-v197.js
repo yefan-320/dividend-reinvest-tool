@@ -3,7 +3,7 @@
  * 核心：P95 首触→L3（非 L5）降档验证 + 双背书放行 L4/L5 + 卖出等级 + 财报否决 + 冷却/趋势闸
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const ts = DL.tradingSignal;
 

@@ -4,7 +4,7 @@
  *         ③聚合分母=有数据事件数 ④加"至今收益"列 ⑤5年无数据标注
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 
@@ -183,7 +183,7 @@ function baseline(kline, dates, divs, nSamples) {
     }
     lines.push(`\n---`);
   }
-  fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/docs/持仓买入点完整研究-20260818.md', lines.join('\n'));
+  fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/docs/持仓买入点完整研究-20260818.md', lines.join('\n'));
   console.log('已生成 docs/持仓买入点完整研究-20260818.md，行数:', lines.length);
   process.exit(0);
 })();

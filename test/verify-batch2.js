@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* 第二批：A6 滚动分位 / A8 规则树 / A9 CAGR / A10 分红趋势 / A11 未来现金流 / A13 组合回测 / A14 报告卡 / A16 生态分类 */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 
 const HOLDINGS = [

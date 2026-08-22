@@ -4,7 +4,7 @@
  * A5：滚动近3年 P85/P90 分位线 vs 行业线，触发事件 → 3/5年含分红胜率对照（40只池）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

@@ -3,7 +3,7 @@
  * 每只：近3年 dy 分布 P75/P90/P95 + 分红CAGR(3y) + 支付率(近2财年) + 增速质量 + 红线检测
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

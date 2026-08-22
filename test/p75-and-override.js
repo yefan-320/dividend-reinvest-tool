@@ -3,7 +3,7 @@
  * P75 胜率回测（40只池·3/5年含分红，滚动近3年无未来函数）+ 当前近3年 P75/P90/P95 线表
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

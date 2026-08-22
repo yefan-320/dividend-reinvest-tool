@@ -2,7 +2,7 @@
 /* 分红口径最终验证：股息率分位事件 × 价格+分红收益（主人视角）
  * 窗口对比（15 只 × 2010-2026，工具真实 calcRollingPercentile） */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const STOCKS = [
   { code: '600036', name: '招商银行', tx: 'sh600036' }, { code: '601398', name: '工商银行', tx: 'sh601398' },

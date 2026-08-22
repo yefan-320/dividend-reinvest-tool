@@ -3,7 +3,7 @@
  * ① 十年期国债历史环境 ② 6只持仓风险溢价/增长修正总回报 ③ 窗口敏感性（近1/3/5/全历史 P90）④ 季度 P90 波动（大师漂移阈值）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

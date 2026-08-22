@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* R13 补验：① 阈值敏感性（15/18/20/22/25 五档类别成员变化）② 陷阱标的触发时点分布（下跌中 vs 反弹中） */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const STOCKS = [
   { code: '600036', name: '招商银行', tx: 'sh600036' }, { code: '601398', name: '工商银行', tx: 'sh601398' },

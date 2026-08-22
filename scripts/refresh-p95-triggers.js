@@ -6,11 +6,11 @@
  * 用法：node scripts/refresh-p95-triggers.js [--apply]
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 
-const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data/rule-tree-cache.json', 'utf8'));
 const TARGETS = Object.keys(DL.BUY_CFG || {}).filter(c => cache[c + ':k'] && cache[c + ':k'].length > 100);
 
 function loadStock(code) {
@@ -46,11 +46,11 @@ function zoneEvents(series, line) {
     console.log(`${code} | ${heavy.toFixed(2)}% | ${evs.length} | ${last || '—'} | ${evs.length >= 1 ? '有背书' : '首触(0次)'}`);
   }
   if (process.argv.includes('--apply')) {
-    const src = fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js', 'utf8');
+    const src = fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data-layer.js', 'utf8');
     const lines = Object.entries(out).map(([c, n]) => `'${c}': ${n}`).join(', ');
     const re = /const P95_TRIGGERS = \{[\s\S]*?\n\};/;
     const neu = `const P95_TRIGGERS = {  // 个股 P95 线历史触发次数（脚本 scripts/refresh-p95-triggers.js 自动刷新；口径=TIER_LINE.p95+TREASURY_NOW 绝对线，zoneEvents 连续段首日）\n  ${lines},\n};`;
-    fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js', src.replace(re, neu));
+    fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/data-layer.js', src.replace(re, neu));
     console.log('\n✅ 已写入 data-layer.js（请 git diff 复核后提交）');
   }
   process.exit(0);

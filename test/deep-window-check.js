@@ -3,7 +3,7 @@
  * ① 40 只高股息股票（大幅扩样本） ② 事件重合度 ③ 买入价对比 ④ 同一年份子样本对比 ⑤ 时段分布
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const STOCKS = [
   // 银行 8

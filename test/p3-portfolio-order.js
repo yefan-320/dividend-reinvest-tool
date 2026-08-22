@@ -8,7 +8,7 @@
  * 用真实触发场景演示排序结果，输出排序规则建议。
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const ts = DL.tradingSignal;
 const fs = require('fs');
@@ -65,6 +65,6 @@ ${rows.map(r => `| ${r.name} | ${r.level || '—'} | ${r.strength} | ${r.score} 
 3. **组合约束过滤优先**：行业超限（≥3只）先降级再排（v7 规则）
 4. 股息率仅作展示不作排序（价格分位已含股息率信息，重复排序无增益）
 `;
-fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/reports/P3-portfolio-order.md', out);
+fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/test/reports/P3-portfolio-order.md', out);
 console.log('\n报告: test/reports/P3-portfolio-order.md');
 process.exit(0);

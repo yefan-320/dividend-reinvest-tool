@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* 完整对比：① 40只 × 5窗口完整表 ② 档位对比（375窗口下 80/85/90/95 触发）——验证"窗口是二阶、档位是一阶" */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const STOCKS = [
   { code: '600036', name: '招商银行', tx: 'sh600036' }, { code: '601398', name: '工商银行', tx: 'sh601398' },

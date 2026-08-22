@@ -5,7 +5,7 @@
  * 验证：40只行业聚合 P75/P90/P95 触发频率 + 1/3/5/10年收益
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));
 const IND = {

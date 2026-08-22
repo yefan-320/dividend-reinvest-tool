@@ -3,7 +3,7 @@
  * 输出：差值（等-立即）分位数（10/25/50/75/90）——用实际分布不做合成曲线（大师三审：别把回测外推成确定性）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

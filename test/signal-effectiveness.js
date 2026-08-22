@@ -6,7 +6,7 @@
  * 口径：买入 1 股；1 年=250 交易日；分红 = 持有期内全部除息日 dps 之和
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 

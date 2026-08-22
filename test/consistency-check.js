@@ -8,7 +8,7 @@
  * 5. finConfirm/assessIndustrySignals 无死代码（行业包全覆盖）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 
@@ -22,7 +22,7 @@ function chk(name, cond, detail) {
   // 0. 缓存加载（顶层供后续检查复用）
   let cache = null;
   try {
-    cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+    cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data/rule-tree-cache.json', 'utf8'));
     chk('缓存版本号存在(_version)', cache._version != null, '未找到 _version');
   } catch (e) { chk('缓存可读', false, e.message); }
 

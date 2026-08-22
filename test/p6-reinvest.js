@@ -4,10 +4,10 @@
  * 结论回答：分红到手是立即再投（复利）还是攒现金等便宜买点（择时）更优？
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
-const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data/rule-tree-cache.json', 'utf8'));
 const HOLDINGS = ['600036', '601398', '600887', '600941', '000333', '601318', '600066'];
 
 function loadStock(code) {
@@ -86,7 +86,7 @@ ${rows.map(r => `| ${r.code} | ${r.valRe.toFixed(0)} | ${r.valCash.toFixed(0)} |
 - 攒现金等触发点的问题：P90 触发稀少（价格长期不达），现金长期闲置=机会成本
 - **与主人"长期持有吃分红"策略一致：分红到手立即再投（复利），不赌择时**
 `;
-  fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/reports/P6-reinvest.md', out);
+  fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/test/reports/P6-reinvest.md', out);
   console.log('\n报告: test/reports/P6-reinvest.md');
   process.exit(0);
 })();

@@ -1,5 +1,5 @@
 // test-layout.js — v1.8.4 图例布局修复验收断言（大师修订 7 项中可自动化的 1/2/3/7）
-// 基座：~/Documents/dividend-tool/repo（正式仓库，git rev-parse HEAD 锁定）
+// 基座：~/Documents/deepseek/repo（正式仓库，git rev-parse HEAD 锁定）
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..');

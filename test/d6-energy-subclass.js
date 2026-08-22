@@ -4,10 +4,10 @@
  * 目的：石化（价值毁灭型）拖累 energy 均值 → 拆开后煤炭/石化各自胜率，支持子类化标注
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
-const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/dividend-tool/repo/data/rule-tree-cache.json', 'utf8'));
+const cache = JSON.parse(fs.readFileSync('/Users/macbookpro/Documents/deepseek/repo/data/rule-tree-cache.json', 'utf8'));
 
 const ENERGY = {
   coal:   ['601088', '600188', '601225'],   // 神华/兖矿/陕煤
@@ -98,7 +98,7 @@ ${Object.entries(ENERGY).map(([sub, codes]) => {
 - 煤炭 vs 石化 胜率差异显著 → 行业标注需子类化（石化=价值毁灭型 trap，煤炭=低估修复型）
 - SIG_STATS.energy 已标"石化拖累"（原表），拆开后可用于子类 note
 `;
-  fs.writeFileSync('/Users/macbookpro/Documents/dividend-tool/repo/test/reports/D6-energy-subclass.md', out);
+  fs.writeFileSync('/Users/macbookpro/Documents/deepseek/repo/test/reports/D6-energy-subclass.md', out);
   console.log('\n报告: test/reports/D6-energy-subclass.md');
   process.exit(0);
 })();

@@ -10,7 +10,7 @@ if (!isSeason && !isMonWedFri) {
   json({ fire: false, state: { last: Date.now(), skipped: true, season: false } });
   return;
 }
-const res = await tools.call('exec', { command: 'cd ~/Documents/dividend-tool/repo && node watch.js 2>/dev/null' });
+const res = await tools.call('exec', { command: 'cd ~/Documents/deepseek/repo && node watch.js 2>/dev/null' });
 const out = String(res?.result?.details?.aggregated ?? res?.result?.details?.stdout ?? '').trim();
 let changes = [];
 try { changes = JSON.parse(out); } catch (e) {}

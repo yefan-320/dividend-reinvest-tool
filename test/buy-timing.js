@@ -5,7 +5,7 @@
  * 输出：各臂 1 年收益均值/胜率 vs 触发日（差异<1pp=时机不重要，回测价值=证明问题不重要）
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));

@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/update-etf-dividends.sh — 本机定时更新 ETF 分红数据并推送（cron 用）
-cd ~/Documents/dividend-tool/repo || exit 1
+cd ~/Documents/deepseek/repo || exit 1
 node scripts/fetch-etf-dividends.js || exit 1
 if git diff --quiet data/etf-dividends.json; then
   echo "$(date '+%Y-%m-%d %H:%M') 无变更"

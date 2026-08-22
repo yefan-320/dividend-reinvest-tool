@@ -4,7 +4,7 @@
  * 关键验证：窗口内国债在变（2.6→1.55）→ 溢价序列≠dy平移 → 分位真实改变
  */
 global.window = global;
-require('/Users/macbookpro/Documents/dividend-tool/repo/data-layer.js');
+require('/Users/macbookpro/Documents/deepseek/repo/data-layer.js');
 const DL = global.window.DL;
 const fs = require('fs');
 const cache = JSON.parse(fs.readFileSync('/tmp/rule-tree-cache.json', 'utf8'));
