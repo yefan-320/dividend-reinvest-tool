@@ -3539,7 +3539,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   /* v3.2 S6/S7：个股卡片区（4 层架构 L1-L4）——SVG 迷你图不卡平板；栅格断点 1280/768；贡献拆解分列
    * L1 名称/代码/行业徽章/数据源点 · L2 股息率+分位徽章 · L3 六格指标+贡献%进度条 · L4 SVG迷你线+分红小柱
    * 迷你图统一中性绿（语义只走徽章，防一屏霓虹灯） */
-  function renderStockCards(res) {
+  function renderStockCards(res, pool) {
     const ps = res.perStock || [];
     if (!ps.length) return '';
     const totalGain = ps.reduce((s, p) => s + (p.finalValue - p.invested) + p.cumDiv, 0); /* 价格盈亏+分红 */
@@ -3573,9 +3573,28 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       const cagr = p.ret != null && p.ret > -1 ? (Math.pow(1 + p.ret, 1 / Math.max(1, (res.span || 10))) - 1) * 100 : null;
       const dy = p.cumDiv > 0 && p.amount > 0 ? p.cumDiv / p.amount * 100 : null;
       const badge = dy == null ? '<span style="font-size:10px;color:var(--muted)">—</span>' : dy >= 6 ? '<span style="font-size:10px;background:rgba(76,175,125,.2);color:#4caf7d;border-radius:4px;padding:1px 5px">高息</span>' : dy >= 4 ? '<span style="font-size:10px;background:rgba(217,164,65,.18);color:#d9a441;border-radius:4px;padding:1px 5px">中息</span>' : '<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">低息</span>';
+      /* v3.4 S1：行业徽章（industryForSync 同步缓存，查不到显示"行业待确认"） */
+      let indTxt = null;
+      try { indTxt = industryForSync(p.code, p.name); } catch (e) {}
+      const indBadge = `<span style="font-size:10px;background:rgba(90,169,230,.14);color:#5aa9e6;border-radius:4px;padding:1px 5px">${indTxt || '行业待确认'}</span>`;
+      /* v3.4 S2：分位徽章（pool series 末点 pct——低估绿/高估红/中性灰）+ AC-19 贵/便宜区间轨（0-100 游标，低区绿高区红） */
+      let pct = null;
+      try { const s = pool && pool[p.code] && pool[p.code].series; if (s && s.length) { const last = s[s.length - 1]; if (last && last.pct != null) pct = last.pct; } } catch (e) {}
+      const pctBadge = pct == null ? '' : (pct <= 30 ? '<span style="font-size:10px;background:rgba(76,175,125,.2);color:#4caf7d;border-radius:4px;padding:1px 5px">便宜</span>' : pct >= 70 ? '<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">贵</span>' : '<span style="font-size:10px;background:rgba(143,166,156,.15);color:var(--muted);border-radius:4px;padding:1px 5px">中性</span>');
+      const pctTrack = pct == null ? '' : `<div style="display:flex;align-items:center;gap:5px;margin-top:2px"><span style="font-size:10px;color:var(--muted);flex:none">贵/便宜</span><div class="v3-track" style="flex:1;height:5px"><div class="v3-fill" style="width:${Math.min(100, Math.max(0, pct))}%;background:${pct <= 30 ? 'var(--green)' : pct >= 70 ? 'var(--red)' : 'var(--gold)'}"></div></div><span style="font-size:10px;font-weight:700;color:${pct <= 30 ? '#4caf7d' : pct >= 70 ? '#e05a5a' : 'var(--muted)'};flex:none">${pct.toFixed(0)}分位</span></div>`;
+      /* v3.4 S7：分红缩水预警——个股年度分红同比 -20% 标红（沿用 YoY 预警逻辑） */
+      let shrinkWarn = '';
+      try {
+        const yd = p.yearlyDivs || {};
+        const ys = Object.keys(yd).sort();
+        if (ys.length >= 2) {
+          const ly = ys[ys.length - 1], py = ys[ys.length - 2];
+          if (yd[py] > 0 && yd[ly] > 0 && (yd[ly] - yd[py]) / yd[py] <= -0.2) shrinkWarn = `<span style="font-size:10px;background:rgba(224,90,90,.15);color:#e05a5a;border-radius:4px;padding:1px 5px">⚠️ 分红缩水 ${((yd[ly] - yd[py]) / yd[py] * 100).toFixed(0)}%</span>`;
+        }
+      } catch (e) {}
       const contribPct = contrib >= 0 ? `<div style="display:flex;align-items:center;gap:4px"><div class="v3-track" style="flex:1"><div class="v3-fill" style="width:${Math.min(100, contrib)}%"></div></div><span style="font-size:10px;color:var(--gold,#d9a441);font-weight:700">${contrib >= 0 ? '+' : ''}${contrib.toFixed(0)}%</span></div>` : '<span style="font-size:10px;color:#e05a5a">' + contrib.toFixed(0) + '%</span>';
       return `<div class="v3-stock-card" style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px"><b style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</b><span style="font-size:10px;color:var(--muted)">${esc(p.code || '')}</span><span style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:${p.cumDiv > 0 ? '#4caf7d' : '#d9a441'}" title="分红数据：${p.cumDiv > 0 ? '有' : '缓存'}"></span></div>
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap"><b style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</b><span style="font-size:10px;color:var(--muted)">${esc(p.code || '')}</span>${indBadge}${pctBadge}${shrinkWarn}<span style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:${p.cumDiv > 0 ? '#4caf7d' : '#d9a441'}" title="分红数据：${p.cumDiv > 0 ? '有' : '缓存'}"></span></div>
         <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:18px;font-weight:700">${dy != null ? dy.toFixed(1) + '%' : '—'}</span>${badge}<span style="font-size:10px;color:var(--muted)">累计分红率</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;color:var(--muted)">
           <span>投入 <b style="color:var(--fg,#e8efe9)">${(p.amount / 10000).toFixed(1)}万</b></span><span>现值 <b style="color:var(--fg,#e8efe9)">${(p.finalValue / 10000).toFixed(1)}万</b></span>
@@ -3583,6 +3602,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           <span>年化 <b style="color:var(--fg,#e8efe9)">${cagr != null ? (cagr >= 0 ? '+' : '') + cagr.toFixed(1) + '%' : '—'}</b></span><span>贡献占比</span>
         </div>
         ${contribPct}
+        ${pctTrack}
         ${svgSpark(p.navSeries)}
         ${divSpark(p.yearlyDivs)}
       </div>`;
@@ -3591,6 +3611,44 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="font-size:12px;font-weight:700">🧩 每只股票</span><span style="font-size:10px;color:var(--muted)">按贡献降序 · 迷你图统一净值口径 · 点卡片展开诊断</span></div>
       <div class="v3-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">${cards.join('')}</div>
     </div>`;
+  }
+
+  /* v3.4 AC-38：年度表行点击 → 弹该年月度明细（hover 只高亮不弹，点击才弹；点明细任意处收起） */
+  function bindYearRowClick(res, yt) {
+    try {
+      const t = res.totalAsset || [];
+      const divByDay = {};
+      let prevCum = 0;
+      t.forEach(x => { const d = x.cumDiv - prevCum; if (d > 0.005) divByDay[x.d] = d; prevCum = x.cumDiv; });
+      const monthRows = {};
+      t.forEach(x => {
+        const m = x.d.slice(0, 7);
+        if (!monthRows[m] || x.d > monthRows[m].d) monthRows[m] = { d: x.d, value: x.value, invested: x.invested, div: (divByDay[x.d] || 0) };
+      });
+      yt.querySelectorAll('tbody tr').forEach(tr => {
+        tr.style.cursor = 'pointer';
+        tr.title = '点击查看该年月度明细';
+        tr.onclick = () => {
+          const y = (tr.querySelector('td') || {}).textContent || '';
+          const ms = Object.keys(monthRows).filter(m => m.startsWith(y)).sort();
+          const cur = document.getElementById('yearMonthDetail');
+          if (cur) cur.remove();
+          if (!ms.length) return;
+          const rows = ms.map(m => {
+            const r = monthRows[m];
+            const mm = Number(m.slice(5)) + '月';
+            return `<tr style="border-top:1px solid var(--line)"><td style="padding:3px 8px">${y}年${mm}</td><td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums">${(r.value / 10000).toFixed(2)}万</td><td style="padding:3px 8px;text-align:right;font-variant-numeric:tabular-nums">${(r.invested / 10000).toFixed(2)}万</td><td style="padding:3px 8px;text-align:right">${r.div > 0 ? `<span style="color:#d9a441">+${(r.div / 10000).toFixed(2)}万</span>` : '<span style="color:var(--muted)">—</span>'}</td></tr>`;
+          }).join('');
+          const det = document.createElement('div');
+          det.id = 'yearMonthDetail';
+          det.style.cssText = 'margin-top:4px;padding:6px 8px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:11px';
+          det.innerHTML = `<div style="color:var(--muted);margin-bottom:2px">📅 ${y}年 月度明细（月末值 · 点击任意处收起）</div>
+            <table style="width:100%;border-collapse:collapse;font-size:10px"><thead><tr style="color:var(--muted)"><th style="text-align:left;padding:3px 8px">月</th><th style="text-align:right;padding:3px 8px">月末市值</th><th style="text-align:right;padding:3px 8px">累计投入</th><th style="text-align:right;padding:3px 8px">当月分红</th></tr></thead><tbody>${rows}</tbody></table>`;
+          det.onclick = () => det.remove();
+          tr.after(det);
+        };
+      });
+    } catch (e) { }
   }
 
   /* v3.2 S12：组合级 XIRR（现金流：初始投入负流 + 月追加负流 + 期末市值正流） */
@@ -3788,7 +3846,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
       <div id="cockpitDivBar" style="width:100%;height:170px;margin-top:4px"></div>
     </div>`;
     /* v3.2 S6/S7：个股卡片区（分红柱之下） */
-    html += renderStockCards(res);
+    html += renderStockCards(res, pool);
     /* 每只贡献 + 权重演化（折叠） */
     html += `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer;color:var(--sub)">📋 每只贡献 + 权重演化（点开）</summary>
       <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px"><tr style="color:var(--muted)"><th style="text-align:left;padding:3px">标的</th><th>初始</th><th>月追加</th><th>期末市值</th><th>累计分红</th><th>分红率</th></tr>
@@ -3816,17 +3874,21 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     /* v3.4 N3：结果渲染后显示锚点导航 */
     try { const anc = document.getElementById('pfbtAnchor'); if (anc) anc.style.display = 'flex'; } catch (e) { }
     _cockpitRes = res; _cockpitPool = pool; _cockpitCombo = combo;
-    /* v3.2 S3：年度表表头排序（事件委托） */
+    /* v3.2 S3：年度表表头排序（事件委托）——v3.4 AC-38：行点击弹月度明细 */
     try {
       const yt = document.getElementById(yearTableId);
-      if (yt) yt.querySelectorAll('th[data-skey]').forEach(th => {
-        th.onclick = () => {
-          const k = th.dataset.skey;
-          if (sortKey === k) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
-          else { sortKey = k; sortDir = 'desc'; }
-          yt.innerHTML = renderYearTable(res, sortKey, sortDir);
-        };
-      });
+      if (yt) {
+        yt.querySelectorAll('th[data-skey]').forEach(th => {
+          th.onclick = () => {
+            const k = th.dataset.skey;
+            if (sortKey === k) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+            else { sortKey = k; sortDir = 'desc'; }
+            yt.innerHTML = renderYearTable(res, sortKey, sortDir);
+            bindYearRowClick(res, yt);
+          };
+        });
+        bindYearRowClick(res, yt);
+      }
     } catch (e) { }
     /* v3.0 动效：三问卡数字滚动 + 卡片进场 */
     try {
@@ -3880,39 +3942,39 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     if (mainEl && typeof echarts !== 'undefined') {
       if (_cockpitChart) { _cockpitChart.dispose(); _cockpitChart = null; }
       const ch = _cockpitChart = echarts.init(mainEl);
-      const baseVal = t[0] && t[0].value > 0 ? t[0].value : 1; /* 净值从 1 起（雪球口径） */
+      /* v3.4 主人令（13:20）：「不要净值要具体的钱」——主图改金额轴（万元），基准换算同本金投入金额 */
+      const baseInvest = t[0] && t[0].invested > 0 ? t[0].invested : 1; /* 初始投入（基准换算同本金） */
       /* 回撤副图数据（灰蓝，非红——主人点名"回测搞成红色太难看"） */
       const ddData = []; let peak = -Infinity;
       t.forEach(x => { if (x.value > peak) peak = x.value; ddData.push(+( (x.value - peak) / peak * 100).toFixed(2)); });
-      const navData = t.map(x => [x.d, +(x.value / baseVal).toFixed(4)]);
-      const investNav = t.map(x => [x.d, +(x.invested / baseVal).toFixed(4)]);
+      const navData = t.map(x => [x.d, +(x.value / 10000).toFixed(2)]);        /* 金额（万元） */
+      const investNav = t.map(x => [x.d, +(x.invested / 10000).toFixed(2)]);  /* 金额（万元） */
       ch.setOption({
         tooltip: { trigger: 'axis', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, axisPointer: { snap: true, lineStyle: { color: 'rgba(157,180,171,.6)', type: 'dashed' } },
-          /* v3.4 D5：日粒度 hover——显示"X月X日：值多少/分红多少"（分红=当日 cumDiv 增量） */
+          /* v3.4 D5 + 主人令：日粒度 hover 显示具体钱（修复：time 轴 axisValue 是时间戳，用 data[0] 取原始日期） */
           formatter: (ps) => {
             if (!ps || !ps.length) return '';
-            const d = ps[0].axisValue;
+            const d = ps[0].data ? ps[0].data[0] : (typeof ps[0].axisValue === 'string' ? ps[0].axisValue : '');
             const day = t.find(x => x.d === d);
             if (!day) return d;
             const dv = divByDay[d];
-            const dd = d.slice(5).replace('-', '月') + '日';
-            let s = `<b>${d.slice(0, 4)}年${dd}</b><br/>`;
-            s += `净值 ${(day.value / (baseVal || 1)).toFixed(3)} · 市值 <b>${(day.value / 10000).toFixed(2)}万</b><br/>`;
-            s += `累计投入 ${(day.invested / 10000).toFixed(2)}万`;
-            if (dv) s += `<br/><b style="color:#d9a441">● ${Number(d.slice(0, 4))}年${dd} 分红到账 ${(dv / 10000).toFixed(2)}万</b>`;
+            const mm = d.slice(5).replace('-', '月') + '日';
+            let s = `<b>${d.slice(0, 4)}年${mm}</b><br/>`;
+            s += `市值 <b>${(day.value / 10000).toFixed(2)}万</b> · 累计投入 ${(day.invested / 10000).toFixed(2)}万`;
+            if (dv) s += `<br/><b style="color:#d9a441">● 分红到账 ${(dv / 10000).toFixed(2)}万</b>`;
             return s;
           } },
         legend: { top: 2, textStyle: { color: '#8fa69c', fontSize: 10 }, selected: { '沪深300': true, '红利低波': true } },
         grid: [
-          { left: 56, right: 14, top: 28, height: '62%' },
-          { left: 56, right: 14, top: '74%', height: '20%' },
+          { left: 62, right: 14, top: 28, height: '62%' },
+          { left: 62, right: 14, top: '74%', height: '20%' },
         ],
         xAxis: [
           { type: 'time', gridIndex: 0, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#2a3d36' } } },
           { type: 'time', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a3d36' } } },
         ],
         yAxis: [
-          { type: 'value', gridIndex: 0, name: '净值', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v.toFixed(1) }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, scale: true },
+          { type: 'value', gridIndex: 0, name: '金额(万)', nameTextStyle: { color: '#8fa69c', fontSize: 10 }, axisLabel: { color: '#8fa69c', fontSize: 10, formatter: v => v + '万' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, scale: true },
           { type: 'value', gridIndex: 1, axisLabel: { color: '#8fa69c', fontSize: 9, formatter: v => v + '%' }, splitLine: { show: false }, min: 'dataMin' },
         ],
         dataZoom: [
@@ -3920,17 +3982,17 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
           { type: 'slider', xAxisIndex: [0, 1], bottom: 2, height: 14, borderColor: '#2a3d36', backgroundColor: '#16211d', fillerColor: 'rgba(217,164,65,.12)', textStyle: { color: '#8fa69c', fontSize: 9 } },
         ],
         series: [
-          { name: '组合净值', type: 'line', data: navData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.25)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
+          { name: '组合市值', type: 'line', data: navData, smooth: true, showSymbol: false, lineStyle: { color: 'rgba(60,150,110,.85)', width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,150,110,.25)' }, { offset: 1, color: 'rgba(60,150,110,.02)' }] } } },
           { name: '累计投入', type: 'line', data: investNav, smooth: true, showSymbol: false, lineStyle: { color: '#d9a441', width: 1.5, type: 'dashed' } },
           { name: '沪深300', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#8fa69c', width: 1.25 } },
           { name: '红利低波', type: 'line', data: [], smooth: true, showSymbol: false, lineStyle: { color: '#5b8db8', width: 1.25 } },
           { name: '回撤', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: t.map((x, i) => [x.d, ddData[i]]), smooth: true, showSymbol: false, lineStyle: { color: 'rgba(100,130,160,.6)', width: 1 }, areaStyle: { color: 'rgba(100,130,160,.15)' } },
-          /* v3.4 D2：分红日标记点（金色小圆点，hover 显示"X月X日分红到账 X万"） */
-          { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / baseVal).toFixed(4)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
+          /* v3.4 D2：分红日标记点（金色小圆点，hover 显示"X月X日分红到账 X万"）——金额轴同尺 */
+          { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / 10000).toFixed(2)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
         ],
         animationDuration: 800,
       });
-      /* v3.2 S5：基准对比异步拉取（沪深300+红利低波，同起点归一为 1；失败静默——基准是参考非阻塞） */
+      /* v3.2 S5：基准对比异步拉取（沪深300+红利低波，同本金换算为金额——主人令"不要净值要具体的钱"） */
       (async () => {
         try {
           const from = t[0] ? t[0].d : (() => { const x = new Date(); x.setDate(x.getDate() - (res.span || 10) * 366); return x.toISOString().slice(0, 10); })();
@@ -3939,12 +4001,13 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             DL.getIndexKline('000300', from, to).catch(() => null),
             DL.getIndexKline('000922', from, to).catch(() => null),
           ]);
-          const norm = k => { if (!k || !Object.keys(k).length) return []; const ks = Object.keys(k).sort(); const b = k[ks[0]]; if (!(b > 0)) return []; return ks.map(d => [d, +(k[d] / b).toFixed(4)]); };
+          /* 基准=同本金投入金额：指数倍数 × 初始投入（万元），与组合市值同轴可比 */
+          const normMoney = k => { if (!k || !Object.keys(k).length) return []; const ks = Object.keys(k).sort(); const b = k[ks[0]]; if (!(b > 0)) return []; return ks.map(d => [d, +(k[d] / b * baseInvest / 10000).toFixed(2)]); };
           ch.setOption({ series: [
-            { name: '组合净值', data: navData }, { name: '累计投入', data: investNav },
-            { name: '沪深300', data: norm(k300) }, { name: '红利低波', data: norm(khv) },
+            { name: '组合市值', data: navData }, { name: '累计投入', data: investNav },
+            { name: '沪深300', data: normMoney(k300) }, { name: '红利低波', data: normMoney(khv) },
             { name: '回撤', data: t.map((x, i) => [x.d, ddData[i]]) },
-            { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / baseVal).toFixed(4)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
+            { name: '分红日', type: 'scatter', data: Object.keys(divByDay).map(d => [d, +(t.find(x => x.d === d).value / 10000).toFixed(2)]), symbol: 'circle', symbolSize: 7, itemStyle: { color: '#d9a441', borderColor: '#16211d', borderWidth: 1.5 }, z: 5, tooltip: { trigger: 'item', formatter: p => { const d = p.data[0]; const mm = d.slice(5).replace('-', '月') + '日'; return `<b>${Number(d.slice(0, 4))}年${mm}</b><br/><span style="color:#d9a441">● 分红到账 ${(divByDay[d] / 10000).toFixed(2)}万</span>`; } } },
           ] });
         } catch (e) { /* 基准失败不影响主图 */ }
       })();
@@ -4133,7 +4196,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
             <svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7"/><circle cx="32" cy="32" r="26" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(r / 100 * 163.4).toFixed(1)} 163.4" transform="rotate(-90 32 32)"/></svg>
             <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${color}">${r.toFixed(0)}%</div>
           </div>
-          <div style="font-size:9px;color:var(--muted);margin-top:2px">${label}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${label}</div>
         </div>`;
       };
       let html = `<div style="font-size:10px;color:#8fa69c;padding:0 2px">🔁 回本进度（累计分红÷投入）：</div>`;
@@ -4796,17 +4859,17 @@ async function comboLoadCardData() {
             const col = p < 30 ? '#4caf7d' : p < 70 ? '#5aa9e6' : '#e05a5a';
             const el2 = document.querySelector(`[data-dy="${i}"]`);
             if (el2) {
-              el2.innerHTML += ` <span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:9px;cursor:help" title="估值分位 ${p.toFixed(0)}%（近5年股息率滚动分位）">${tag}</span>`;
+              el2.innerHTML += ` <span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:10px;cursor:help" title="估值分位 ${p.toFixed(0)}%（近5年股息率滚动分位）">${tag}</span>`;
             }
           }
         } catch (e) {}
       } else {
         const sp = document.querySelector(`[data-spark="${i}"]`);
-        if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:9px">—</span>';
+        if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:10px">—</span>';
       }
     } catch (e) {
       const sp = document.querySelector(`[data-spark="${i}"]`);
-      if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:9px">—</span>';
+      if (sp) sp.innerHTML = '<span style="color:var(--muted);font-size:10px">—</span>';
     }
     /* 股息率档徽章 + 分红贡献占比（环形图分红视图数据） */
     try {
@@ -4823,7 +4886,7 @@ async function comboLoadCardData() {
           const tag = dy >= 5 ? '高息' : dy >= 3 ? '中息' : '低息';
           const col = dy >= 5 ? '#d9a441' : dy >= 3 ? '#5aa9e6' : 'var(--muted)';
           const el2 = document.querySelector(`[data-dy="${i}"]`);
-          if (el2) el2.innerHTML = `<span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:9px">${tag} ${dy.toFixed(1)}%</span>`;
+          if (el2) el2.innerHTML = `<span style="color:${col};border:1px solid ${col};border-radius:4px;padding:0 4px;font-size:10px">${tag} ${dy.toFixed(1)}%</span>`;
         }
       }
     } catch (e) {}
