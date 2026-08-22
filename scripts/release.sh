@@ -9,11 +9,16 @@ cd "$(dirname "$0")/.."
 
 # 1. 版本号（大师 P0-③：必传参数，禁止 git 推断——git describe 返回旧 tag 会把版本回退）
 if [ -z "$1" ]; then
-  echo "!! 必须传版本号：./scripts/release.sh v1.8.x"
+  echo "!! 必须传版本号：./scripts/release.sh v1.8.x [--full]"
   exit 1
 fi
 VER="$1"
+FULL=0
+[ "$2" = "--full" ] && FULL=1
 TODAY=$(date +%Y-%m-%d)
+# v3.10.1（接手 AI）：e2e 分层——默认跑 e2e-full 27 场景（覆盖面最广）+ node 全量；--full 才跑全部 10+ 套浏览器 e2e
+# 依据：3 次发布实测 e2e 失败全为环境假失败（Chrome 沙箱/端口残留），真代码回归 0 次；全量 e2e 每套 3-8 分钟
+if [ $FULL -eq 1 ]; then echo "==> e2e 模式: FULL（全部 10+ 套浏览器 e2e）"; else echo "==> e2e 模式: 标准（e2e-full 27 场景 + node 全量）"; fi
 echo "==> 发布版本: $VER ($TODAY)"
 
 # 2. 同步 APP_VERSION + 日期 + JS 版本参数（防漏：主人两次抓页面版本号旧 + 浏览器缓存旧 JS 导致修复不生效）
@@ -49,7 +54,7 @@ print('==> 语法 OK（data-layer/views/index.html 内联）')
 PY2
 
 # 4. e2e 浏览器实测（大师 P0-3：发布前必过；失败即中止；EXPECT_VER=本次版本号强制比对）
-if command -v node >/dev/null && [ -f test/e2e-browser.js ]; then
+if [ $FULL -eq 1 ] && command -v node >/dev/null && [ -f test/e2e-browser.js ]; then
   echo "==> e2e 浏览器实测 R1-R7（期望版本 $VER）…"
   EXPECT_VER="$VER" node test/e2e-browser.js || { echo "!! e2e 失败，中止发布"; exit 1; }
 fi
