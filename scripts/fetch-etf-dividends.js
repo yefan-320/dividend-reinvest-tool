@@ -57,8 +57,9 @@ async function main() {
   const out = { generatedAt: new Date().toISOString(), data: {} };
   for (const code of CODES) {
     const divs = await fetchEtfDivs(code);
-    if (divs && divs.length) out.data[code] = divs;
-    console.log(code, ':', divs ? divs.length + ' 条' : '失败');
+    if (divs && divs.length) { out.data[code] = divs; console.log(code, ':', divs.length + ' 条'); }
+    else if (divs) { out.data[code] = []; console.log(code, ': 0 条（确认无分红公告，写入空数组供前端区分"无分红"vs"数据暂缺"）'); }
+    else console.log(code, ': 请求失败（不写入，前端走实时兜底）');
   }
   const file = path.join(__dirname, '..', 'data', 'etf-dividends.json');
   // 2026-08-17 防缩水保护：WAF 拦截导致单只条数少于现有文件时，保留旧数据（宁可旧不可残）
@@ -66,6 +67,7 @@ async function main() {
   if (old && old.data) {
     for (const code of Object.keys(old.data)) {
       const fresh = out.data[code];
+      if (!old.data[code].length) continue;   // 旧条目为空数组（确认无分红），跳过防缩水
       if (!fresh || fresh.length < old.data[code].length * 0.8) {
         console.log('⚠️', code, '新数据', fresh ? fresh.length : 0, '条 < 现有', old.data[code].length, '条——保留旧数据（防 WAF 缩水）');
         out.data[code] = old.data[code];
@@ -79,7 +81,7 @@ async function main() {
   const PRESET_ETF = ['512890', '515080', '510300', '510500', '588000', '159915'];
   const missing = PRESET_ETF.filter(c => !(out.data[c] && out.data[c].length));
   if (missing.length) {
-    console.log('⚠️ 预设 ETF 缺码（东财 FHGG 数据源无分红记录，前端将显示"数据暂缺"而非 0）: ' + missing.join(', '));
+    console.log('⚠️ 预设 ETF 缺码（请求失败，前端走实时兜底）: ' + missing.join(', '));
   } else {
     console.log('✅ 预设 6 只 ETF 全覆盖');
   }
