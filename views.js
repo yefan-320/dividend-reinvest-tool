@@ -5227,30 +5227,6 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
 
   /* 驾驶舱主流程：拉组合数据 → calcComboBacktest → renderCockpit */
   async function runPortfolioBacktest() {
-    /* v3.9.0 空态即示例（接手 AI E1）：无组合时自动创建示例组合（招行/工行/长电），复用正常流程渲染完整驾驶舱 */
-    const _demoSel = document.getElementById('pfbtComboSel');
-    if (_demoSel && !_demoSel.value && (!window.__demoComboRan || window.__demoComboRan === false)) {
-      try {
-        window.__demoComboRan = true;
-        const c2 = DL.loadCombos();
-        const did = 'c' + Date.now();
-        c2.combos.push({ id: did, name: '示例组合（招行/工行/长电）', items: [
-          { code: '600036', name: '招商银行', amount: 500000, monthly: 3000 },
-          { code: '601398', name: '工商银行', amount: 300000, monthly: 2000 },
-          { code: '600900', name: '长江电力', amount: 200000, monthly: 1000 },
-        ], savedAt: Date.now() });
-        c2.activeId = did;
-        DL.saveCombos(c2);
-        const sel2 = $('#pfbtComboSel');
-        if (sel2) {
-          sel2.innerHTML = '';
-          c2.combos.forEach(cm => { const o = document.createElement('option'); o.value = cm.id; o.textContent = cm.name + '（' + cm.items.length + '只）'; sel2.appendChild(o); });
-          sel2.value = did;
-        }
-        const rEl = document.getElementById('pfbtResult');
-        if (rEl) rEl.innerHTML = '<div class="hint">🎯 无已存组合，已自动用<b>示例组合</b>（招行/工行/长电）演示——想用自己的？去决策台「🧮 我的组合」建</div>';
-      } catch (e) { try { console.warn('示例组合创建失败', e); } catch (e2) {} }
-    }
     const el = $('#pfbtResult');
     if (!el || _pfbtRunning) return;
     const c = DL.loadCombos();
