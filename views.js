@@ -156,6 +156,88 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
   /* ---------- 决策台 ---------- */
   let homeState = { watchlist: [], snap: null, divs: null, dividendMap: null };
 
+  /* ===== v3.9.0 U8 自选机会地图（接手 AI）：X=估值分位（右=便宜）、Y=股息率（上=高）、气泡=市值、颜色=结论档 =====
+   * 所有自选一张图定位"便宜的好货（左上）"与"贵的差货（右下）"；点气泡进诊断 */
+  /* ===== v3.9.0 今日简报（接手 AI）：打开就知道今天要关注什么——买点区/高息榜/决策待办 ===== */
+  function renderTodayBrief(rows) {
+    const el = document.getElementById('todayBrief');
+    if (!el || !rows || !rows.length) return;
+    const inZone = rows.filter(r => r.pct != null && r.pct >= 80).sort((a, b) => (b.pct || 0) - (a.pct || 0));
+    const topDy = rows.filter(r => r.dy != null).sort((a, b) => (b.dy || 0) - (a.dy || 0)).slice(0, 3);
+    const parts = [];
+    if (inZone.length) {
+      parts.push(`<span style="color:#4caf7d">📡 <b>${inZone.length}</b> 只在买点区：${inZone.slice(0, 3).map(r => `<a href="javascript:void(0)" data-map="${r.code}" style="color:#4caf7d;text-decoration:underline">${r.name} ${r.pct.toFixed(0)}%</a>`).join('、')}${inZone.length > 3 ? '…' : ''}</span>`);
+    } else {
+      parts.push('<span style="color:var(--sub)">📡 暂无自选在买点区</span>');
+    }
+    if (topDy.length) {
+      parts.push(`<span style="color:#d9a441">💰 高息榜：${topDy.map(r => `<a href="javascript:void(0)" data-map="${r.code}" style="color:#d9a441;text-decoration:underline">${r.name} ${r.dy.toFixed(1)}%</a>`).join('、')}</span>`);
+    }
+    try {
+      const today = DL.todayStr();
+      const todayDec = decLog().filter(x => (x.ts || '').toString().length === 13 ? new Date(x.ts).toISOString().slice(0, 10) === today : false).length;
+      if (todayDec > 0) parts.push(`<span style="color:#5aa9e6">📒 今日已记 ${todayDec} 条决策</span>`);
+    } catch (e) {}
+    el.style.display = 'block';
+    el.innerHTML = `<div style="padding:8px 12px;border:1px solid rgba(90,169,230,.35);border-radius:10px;background:rgba(90,169,230,.07);font-size:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="font-weight:700;color:#5aa9e6">☀️ 今日简报</span>${parts.join('<span style="color:var(--line)">|</span>')}<span style="font-size:10px;color:var(--muted);margin-left:auto">点名称进诊断 · 完整机会地图见下方自选卡</span></div>`;
+    el.querySelectorAll('[data-map]').forEach(a => a.onclick = () => { try { openDiagnose(a.dataset.map); } catch (e) {} });
+  }
+
+  async function renderOpportunityMap(wl) {
+    const el = document.getElementById('oppMap');
+    if (!el) return;
+    if (!wl || !wl.length) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = '<div class="hint">⏳ 生成机会地图…</div>';
+    const rows = [];
+    for (const w of wl) {
+      try {
+        const [kline, divs] = await Promise.all([
+          DL.getKline(w.code, DL.daysAgo(400), DL.todayStr()),
+          DL.fetchDividendsOne(w.code),
+        ]);
+        if (!kline || !Object.keys(kline).length) continue;
+        const series = DL.calcRollingPercentile(kline, divs, window.G_WINDOW || DL.DEFAULT_WINDOW_DAYS);
+        const last = series.filter(x => x.pct != null).pop();
+        const price = Object.values(kline).pop();
+        rows.push({
+          code: w.code, name: w.name || w.code,
+          pct: last ? last.pct : null, dy: last ? last.dy : null, price: price || 0,
+        });
+      } catch (e) {}
+    }
+    if (!rows.length) { el.innerHTML = '<div class="hint">数据不足，无法生成地图</div>'; return; }
+    const valid = rows.filter(r => r.pct != null && r.dy != null);
+    window.__oppMapRows = valid;   /* v3.9.0：供今日简报聚合 */
+    if (!valid.length) { el.innerHTML = '<div class="hint">分位数据不足（K线样本<250天）</div>'; return; }
+    try { renderTodayBrief(valid); } catch (e) {}
+    const data = valid.map(r => [+(r.pct).toFixed(1), +(r.dy).toFixed(2), r.price, r.code, r.name]);
+    /* 结论档颜色：分位≥95 深度低估=深绿 / ≥90 低估二档=绿 / ≥75 低估一档=浅绿 / 其余=灰 */
+    const colorOf = p => p >= 95 ? '#2e9e63' : p >= 90 ? '#4caf7d' : p >= 75 ? '#8bc34a' : '#8fa69c';
+    el.innerHTML = `<div style="background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px">
+      <div style="font-size:11px;color:var(--gold);font-weight:600;margin-bottom:2px">🗺️ 机会地图（自选全景：越左上=又便宜又高息）</div>
+      <div id="oppMapChart" style="height:${Math.min(320, Math.max(200, valid.length * 42))}px"></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">X=估值分位（右=历史便宜）· Y=股息率（报告期口径，上=高）· 颜色=结论档（深绿=深度低估…灰=等待）· 点气泡进诊断</div>
+    </div>`;
+    try {
+      if (typeof echarts === 'undefined') return;
+      const ch = echarts.init(document.getElementById('oppMapChart'));
+      ch.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'item', backgroundColor: '#1b2a25', borderColor: '#2a3d36', textStyle: { color: '#e8efe9', fontSize: 11 }, formatter: p => `<b>${p.data[4]}</b>（${p.data[3]}）<br/>分位 ${p.data[0]}% · 股息率 ${p.data[1]}% · 现价 ${p.data[2] != null ? p.data[2].toFixed(2) : '—'} 元` },
+        grid: { left: 44, right: 30, top: 14, bottom: 28 },
+        xAxis: { type: 'value', name: '分位→', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, min: 0, max: 100, axisLabel: { color: '#8fa69c', fontSize: 9 }, splitLine: { lineStyle: { color: '#22322c' } } },
+        yAxis: { type: 'value', name: '股息率%', nameTextStyle: { color: '#8fa69c', fontSize: 9 }, axisLabel: { color: '#8fa69c', fontSize: 9 }, splitLine: { lineStyle: { color: '#22322c' } } },
+        series: [{
+          type: 'scatter', symbolSize: 26, data: data.map(d => ({ value: d, itemStyle: { color: colorOf(d[0]) } })),
+          label: { show: true, formatter: p => p.data[4].slice(0, 4), position: 'top', color: '#e8efe9', fontSize: 9 },
+          markLine: { silent: true, symbol: 'none', lineStyle: { color: 'rgba(217,164,65,.5)', type: 'dashed' }, data: [{ xAxis: 80 }, { xAxis: 90 }, { xAxis: 95 }] },
+        }],
+      });
+      ch.on('click', p => { if (p.data && p.data[3]) { try { openDiagnose(p.data[3]); } catch (e) {} } });
+    } catch (e) { try { console.warn('机会地图失败', e); } catch (e2) {} }
+  }
+
   async function renderHome() {
     renderOnboard();   // X11/P45：三步引导状态机（无自选→搜代码；有自选→看诊断记决策；有持仓→消失）
     renderDailyBar();  // B4/K8（2026-08-21）：今日变化条（快照对比，首日明日起可见）
@@ -175,6 +257,8 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
     }
     renderOpportunities();
     renderWatchlist();
+    /* v3.9.0 U8 机会地图（不 await，与后续渲染并行） */
+    renderOpportunityMap(wl).catch(() => {});
     renderDivCalendar();
     // v1.9.1 P2：组合建仓总览（默认折叠）
     renderPortfolio(wl);
@@ -2705,7 +2789,7 @@ window.fitLegendTop = function fitLegendTop(chart, el, gridTop) {
         }
         return `<div style="display:flex;align-items:center;margin:2px 0"><span style="width:42px;font-size:10px;color:var(--sub);flex-shrink:0">${y}年</span><div style="display:flex;flex:1">${cells.join('')}</div></div>`;
       }).join('');
-      el.innerHTML = `<div style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px">${grid}<div style="font-size:9px;color:var(--muted);margin-top:2px;text-align:right">■ 派息月（一年几派、几月派，一眼看规律）</div></div>`;
+      el.innerHTML = `<div class="rhythm-heat" style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px">${grid}<div style="font-size:9px;color:var(--muted);margin-top:2px;text-align:right">■ 派息月（一年几派、几月派，一眼看规律）</div></div>`;
     } else {
       el.innerHTML = '<div class="hint">暂无分红记录</div>';
     }

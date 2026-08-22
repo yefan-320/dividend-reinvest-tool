@@ -344,7 +344,7 @@ async function main() {
     assert(chart >= 2, '股息率带状图未渲染(series=' + chart + ')');
     const note = await evalIn(cdp, `document.getElementById('diagYieldNote').innerText`);
     assert(note.length > 0, '分位注释为空');
-    const rhythm = await evalIn(cdp, `document.querySelectorAll('.rhythm-row').length`);
+    const rhythm = await evalIn(cdp, `document.querySelectorAll('.rhythm-heat, .rhythm-row').length`);
     if (rhythm < 1) {
       // v1.9.18 抗抖动：东财分红接口偶发限流/超时 → divs 拉取失败（诊断页显示"暂无分红记录"）
       // 此时 diagStats 关键字断言仍能过（"—"也含关键字）→ rhythm 为 0 是数据源抖动不是回归。
@@ -354,7 +354,7 @@ async function main() {
       await evalIn(cdp, `(() => { const i = document.getElementById('homeSearch'); i.value='600036'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
       await waitFor(cdp, `document.getElementById('diagTitle').innerText.includes('招商银行')`, 30000, '重试进诊断');
       await waitFor(cdp, `(document.getElementById('diagStats').innerText||'').includes('当前股息率') && !(document.getElementById('diagStats').innerText||'').includes('加载中')`, 60000, '重试诊断统计');
-      const rhythm2 = await evalIn(cdp, `document.querySelectorAll('.rhythm-row').length`);
+      const rhythm2 = await evalIn(cdp, `document.querySelectorAll('.rhythm-heat, .rhythm-row').length`);
       assert(rhythm2 >= 1, '分红节奏为空（重试后仍空，可能数据源持续不可用）');
     }
     ok('诊断6格+带状图+分位注释+分红节奏全部就位');
